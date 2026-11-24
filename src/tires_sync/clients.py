@@ -331,13 +331,18 @@ def _query_sql(conn, query: str, fold: bool) -> tuple:
     if fold:
         conn.create_function("fold", 1, lambda text: (text or "").casefold())
     name, car = ("fold(c.name)", "fold(c.car_brand || ' ' || c.car_model)") if fold else ("c.name", "(c.car_brand || ' ' || c.car_model)")
-    text = "%" + (query.casefold() if fold else query) + "%"
-    sql = "(%s LIKE ? OR %s LIKE ? OR c.car_year = ?" % (name, car)
+    text = "%" + _like(query.casefold() if fold else query) + "%"
+    sql = "(%s LIKE ? ESCAPE '\\' OR %s LIKE ? ESCAPE '\\' OR c.car_year = ?" % (name, car)
     args = [text, text, int(query) if re.fullmatch(r"\d{4}", query) else None]
     for needle in _phone_needles(query):
-        sql += " OR c.id IN (SELECT client_id FROM client_phone WHERE phone LIKE ?)"
-        args.append("%" + needle + "%")
+        sql += " OR c.id IN (SELECT client_id FROM client_phone WHERE phone LIKE ? ESCAPE '\\')"
+        args.append("%" + _like(needle) + "%")
     return sql + ")", args
+
+
+def _like(text: str) -> str:
+    """The text as itself in a LIKE … ESCAPE '\\': «%» and «_» of a query are letters, not «anything» (the review of ТЗ №79)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _tag_sql(tag: str) -> tuple:
@@ -367,13 +372,14 @@ def _describe(conn, ids: List[int]) -> List[dict]:
     tags, the last touch."""
     if not ids:
         return []
-    rows = conn.execute("SELECT c.id, c.name, (SELECT COUNT(*) FROM client_order o JOIN order_card k ON k.id = o.order_id WHERE o.client_id = c.id), "
+    rows = conn.execute("SELECT c.id, c.name, %s, "              # «Заказов»: as the filter counts them, the cancelled left out (the review of ТЗ №79)
                         "(SELECT COUNT(*) FROM client_chat h JOIN avito_chat a ON a.id = h.chat_row WHERE h.client_id = c.id), (SELECT MIN(phone) FROM client_phone p WHERE p.client_id = c.id), "
                         "(SELECT COUNT(*) FROM client_call l WHERE l.client_id = c.id), c.car_brand, c.car_model, c.car_year, %s, "
                         "MAX(COALESCE((SELECT MAX(k.call_at) FROM client_call l JOIN avito_call k ON k.id = l.call_row WHERE l.client_id = c.id), ''), "
                         "COALESCE((SELECT MAX(a.last_at) FROM client_chat h JOIN avito_chat a ON a.id = h.chat_row WHERE h.client_id = c.id), ''), "
                         "COALESCE((SELECT MAX(k.created_at) FROM client_order o JOIN order_card k ON k.id = o.order_id WHERE o.client_id = c.id), '')) "
-                        "FROM client c WHERE c.id IN (%s)" % (_HANDED_SQL.format(c="c.id"), ",".join("?" * len(ids))), list(ids))
+                        "FROM client c WHERE c.id IN (%s)" % (_LIVE_ORDERS.format(what="COUNT(*)"), _HANDED_SQL.format(c="c.id"),
+                                                             ",".join("?" * len(ids))), list(ids))
     by_id = {r[0]: r for r in rows}
     found = [dict(zip(("id", "name", "orders", "chats", "phone", "calls", "car_brand", "car_model", "car_year", "handed", "last"), by_id[i]))
              for i in ids if i in by_id]

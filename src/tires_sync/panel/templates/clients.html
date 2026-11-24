@@ -9,7 +9,7 @@
 {% with o2 = False %}{% include "_clients_filters.html" %}{% endwith %}{% endif %}
 <button class="btn btn--primary">Найти</button>{% if not narrow and f.active %}<a class="small" href="/clients">Сбросить</a>{% endif %}</form>
 {% if not narrow %}<p class="muted small">Найдено: {{ total }}</p>{% endif %}
-<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>№</th><th>Имя</th>{% if not narrow %}<th>Обращение</th><th>Теги</th>{% endif %}<th>Телефон</th>{% if not narrow %}<th>Автомобиль</th>{% endif %}<th>Заказов</th><th>Чатов</th><th>Звонков</th><th>Последняя активность</th></tr></thead><tbody>
+<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>№</th><th>Имя</th>{% if not narrow %}<th>Обращение</th><th>Теги</th>{% endif %}<th>Телефон</th>{% if not narrow %}<th>Автомобиль</th>{% endif %}<th>Заказов{% if not narrow %} (без отмен){% endif %}</th><th>Чатов</th><th>Звонков</th><th>Последняя активность</th></tr></thead><tbody>
 {% for r in rows %}<tr><td><a href="/clients/{{ r.id }}">№{{ r.id }}</a></td><td><a href="/clients/{{ r.id }}">{{ r.name or "без имени" }}</a></td>
 {% if not narrow %}<td>{% with inquiry_client_id = r.id, inquiry_place = "list" %}{% include "_client_inquiry.html" ignore missing %}{% endwith %}</td>
 <td>{% for t in r.tags %}<span class="badge {{ 'badge--err' if t == PRAGMATIC else ('badge--warn' if t == HANDED else 'badge--neutral') }}">{{ t }}</span> {% endfor %}</td>{% endif %}

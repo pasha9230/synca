@@ -139,6 +139,20 @@ def test_the_chat_search_looks_in_the_last_messages_only(conn, monkeypatch):
     assert ids(conn, q="hakkapeliitta") == [w["tanya"]]                                                  # read whatever its age
 
 
+def test_the_column_counts_the_orders_as_the_filter_and_like_signs_are_letters(conn):
+    """The review: «Заказов» of a row is the filter's count (the cancelled left out), in the list and in the top search (list_clients);
+    «%» and «_» of a query are themselves, never «anything»."""
+    w = _world(conn)
+    rows = {r["id"]: r["orders"] for r in clients.list_page(conn, clients.list_filter({}))["rows"]}
+    assert rows == {w["ivan"]: 1, w["nameless"]: 2, w["tanya"]: 0, w["caller"]: 0}
+    assert [r["orders"] for r in clients.list_clients(conn, "+79005556677", fold=True)] == [2]
+    for query in ("_", "%", "%%", "_ван", "Ив%"):
+        assert ids(conn, q=query) == [], query
+    clients.save(conn, w["ivan"], "Иван_100%", "", NOW, "owner")
+    conn.commit()
+    assert ids(conn, q="_100%") == [w["ivan"]] and ids(conn, q="н_1") == [w["ivan"]] and ids(conn, q="н 1") == []
+
+
 def test_the_parameters_are_checked_and_kept_in_the_address():
     f = clients.list_filter({"q": " Иван ", "src": "a12", "nm": "no", "ord": "2", "dk": "last", "df": "2026-11-30", "dt": "2026-11-01", "p": "3"})
     assert (f.query, f.origin, f.named, f.orders, f.date_kind, f.date_from, f.date_to, f.page) == \

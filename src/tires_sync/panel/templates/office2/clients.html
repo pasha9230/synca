@@ -18,7 +18,7 @@
 <p class="muted small">Найдено: {{ total }}</p>
 {# the owner 2026-11-08: the status right of the name; no «Автомобиль» and «Последняя активность»; the orders, the chats and the calls in
    columns of their own #}
-<section class="card o2-crm-list"><div class="table-wrap"><table class="table o2-crm-grid"><thead><tr><th>№</th><th>Клиент</th><th>Телефон</th><th class="t-c">Заказы</th><th class="t-c">Чаты</th><th class="t-c">Звонки</th></tr></thead><tbody>
+<section class="card o2-crm-list"><div class="table-wrap"><table class="table o2-crm-grid"><thead><tr><th>№</th><th>Клиент</th><th>Телефон</th><th class="t-c" title="Без отменённых">Заказы</th><th class="t-c">Чаты</th><th class="t-c">Звонки</th></tr></thead><tbody>
 {% for r in rows %}<tr class="is-link" data-href="/clients/{{ r.id }}"><td class="nowrap"><a href="/clients/{{ r.id }}">№{{ r.id }}</a></td>
 <td><div class="o2-crm-nm"><a class="o2-crm-name" href="/clients/{{ r.id }}">{% if r.name %}{{ r.name }}{% else %}<span class="muted">без имени</span>{% endif %}</a>
 {% with inquiry_client_id = r.id, inquiry_place = "list" %}{% include "_client_inquiry.html" ignore missing %}{% endwith %}{% for t in r.tags %}<span class="badge {{ 'badge--err' if t == PRAGMATIC else ('badge--warn' if t == HANDED else 'badge--neutral') }}">{{ t }}</span>{% endfor %}</div></td>
