@@ -108,7 +108,9 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
     fee = handed_fee(conn, a)
     old_name, old_phone = card["client_name"], card["client_phone"]
     orders.update_card(conn, a, {"client_name": name, "client_phone": phone, "avito_chat": ""}, now, author, commit=False, link_client=False)
-    who = "№%d (%s)" % (old_client, ", ".join(v for v in (old_name, old_phone) if v) or "без имени") if old_client else \
+    # the point's VK messages of the old client stay as they were (vk_point_fix): the new client's own message is kept when it goes
+    conn.execute("DELETE FROM vk_point_message WHERE order_id = ?", (a,))
+    who ="№%d (%s)" % (old_client, ", ".join(v for v in (old_name, old_phone) if v) or "без имени") if old_client else \
         "без карточки клиента (%s)" % (", ".join(v for v in (old_name, old_phone) if v) or "без имени")
     orders.add_event(conn, a, now, author, "field", "Клиент сменён: %s → %s" % (who, ", ".join(v for v in (name, phone) if v)))
     if fee:
