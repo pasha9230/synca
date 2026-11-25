@@ -82,7 +82,8 @@ def _find(parsed, names: dict, query: str, every: bool = False) -> list:
         score = _score(offer, names.get(offer.brand_key, ""), words)
         if score:
             found.append((score, score == 3 * len(words), offer))
-    found.sort(key=lambda p: (-p[0], -p[2].stock, p[2].name_orig or p[2].name))
+    # with a stock first, then without one (and the base, every=True): a limit of the list never drops one with a stock; inside, the best match
+    found.sort(key=lambda p: (p[2].stock <= 0, -p[0], -p[2].stock, p[2].name_orig or p[2].name))
     return found
 
 
