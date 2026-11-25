@@ -536,6 +536,21 @@ def register(app) -> None:
         _conn, settings, parsed, ref = context(app)
         return order_offers.item_args(conn, settings, parsed, ref, goods_id, local_now().date().isoformat(), account_id)
 
+    def catalog_row(conn, goods_id):
+        """A row of a new window for a position the office orders though it is not on sale (ТЗ 94, «Заказ» of the catalog): of today's
+        unload or of the permanent base of positions, with the panel's price when it has one, else an empty price to type. None: no such position."""
+        _conn, settings, parsed, ref = context(app)
+        try:
+            found = order_search.locate(conn, parsed, goods_id)
+        except order_search.NotLocated:
+            return None
+        name = found.offer.name_orig or found.offer.name
+        try:
+            shown = _price_text(order_search.located_args(conn, settings, parsed, ref, found, local_now().date().isoformat(), manual_sale="")["sale_unit"])
+        except orders.OrderError:
+            shown = ""
+        return {"goods_id": found.offer.goods_id, "query": name, "name": name, "qty": "1", "sale_unit": shown, "sale_auto": shown}
+
     def typed_goods(conn, code, text, stock=False):
         """(order_search.Located, name when found by the text): the position the manager chose in the list (by its code, else by the supplier's exact
         name the list filled in: the code moves when the supplier rewrites a name), or the one the text names exactly, else the one position of the
@@ -574,8 +589,9 @@ def register(app) -> None:
             return order_offers.point_item_args(conn, text, sale_unit), "", [], ""
         found, by_text = typed_goods(conn, code, text, stock)
         _conn, settings, parsed, ref = context(app)
+        manual = str(sale_unit or "") if own_point() is None else None      # ТЗ 94: the office may type the price the panel has not; never a point
         try:
-            args = order_search.located_args(conn, settings, parsed, ref, found, local_now().date().isoformat(), account_id)
+            args = order_search.located_args(conn, settings, parsed, ref, found, local_now().date().isoformat(), account_id, manual_sale=manual)
         except order_search.NotLocated as err:
             raise orders.OrderError(order_search.first_line(err))
         if str(sale_unit or "").strip() and str(sale_unit).strip() != str(sale_auto or "").strip():
@@ -611,8 +627,10 @@ def register(app) -> None:
         _conn, settings, parsed, ref = context(app)
         query = request.args.get("q", "").strip()
         account = window_account(conn, request.args) if len(query) >= 2 else None
-        items = order_search.suggestions(conn, settings, parsed, ref, query, local_now().date().isoformat(), account_id=account) if len(query) >= 2 else []
-        if items and own_point() is None:                                      # the tyres lying on «На ОТХ» (oth_sale): «на ОТХ: Бета 2 шт»
+        office = own_point() is None                                           # ТЗ 94: the office finds every position of the base, marked
+        items = order_search.suggestions(conn, settings, parsed, ref, query, local_now().date().isoformat(), account_id=account,
+                                         every=office) if len(query) >= 2 else []
+        if items and office:                                                   # the tyres lying on «На ОТХ» (oth_sale): «на ОТХ: Бета 2 шт»
             marks = oth_sale.find_hint(conn, [it["goods_id"] for it in items])
             items = [dict(it, oth=marks[str(it["goods_id"])]) if str(it["goods_id"]) in marks else it for it in items]
         if len(query) >= 2 and request.args.get("deal") == "stock":           # a deal of the point's stock: its tyre may be one the unload has not
@@ -966,7 +984,17 @@ def register(app) -> None:
                 shown = _price_text(args["sale_unit"])                     # the main account's: priced again by the window's account if kept
                 rows.append({"goods_id": args["goods_id"], "query": args["name"], "name": args["name"], "qty": "1", "sale_unit": shown, "sale_auto": shown})
             except orders.OrderError as err:
-                flash(str(err), "error")
+                row = catalog_row(conn, goods_id) if own_point() is None else None
+                if row is None:
+                    flash(str(err), "error")
+                else:                                                     # ТЗ 94: out of the feed, without a price or the unload has it no more
+                    rows.append(row)
+                    if row["sale_unit"]:                                  # the base has its price: only its stock is to check
+                        flash("Позиции «%s» нет в выгрузке поставщика сегодня: заказ оформить можно, цена из базы позиций, "
+                              "проверьте наличие у поставщика." % row["name"][:120], "warning")
+                    else:
+                        flash("Позиция «%s» не в продаже (вне фида, без цены или нет в выгрузке): заказ оформить можно, впишите цену за шт. "
+                              "и проверьте наличие у поставщика." % row["name"][:120], "warning")
         return new_page(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, rows)
 
     @app.route("/orders/new", methods=["POST"])
@@ -1559,6 +1587,8 @@ def register(app) -> None:
                 raise orders.OrderError("На этом этапе нельзя загрузить позиции без цены продажи.")
             for line in lines:
                 orders.add_item(conn, card_id, now=stamp, author=who, commit=False, awaiting_sale_price=awaiting_prices, **line)
+            from .. import order_webmim
+            order_webmim.snapshot(conn, card_id, stamp, fresh=True)
             orders.add_event(conn, card_id, stamp, who, "webmim", "Позиции загружены из заказа WebMIM.")
             conn.commit()
             flash("Позиции загружены из WebMIM. Укажите цены продажи вручную." if awaiting_prices
