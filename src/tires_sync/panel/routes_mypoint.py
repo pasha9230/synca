@@ -343,6 +343,26 @@ def point_lines(card: dict) -> list:
     return lines
 
 
+def point_comment(conn, card: dict) -> str:
+    """«Комментарий» of the order's window as the point reads it in the card (the owner 2026-11-25): the person's text only — not the
+    automatic part a new order gets from its ad or call (order_notes.person_text), never an Avito account's name; empty: no line."""
+    from .. import order_notes
+    return orders.without_account_names(conn, order_notes.person_text(card.get("comment") or "")).strip()
+
+
+def point_rev(conn, point_id) -> str:
+    """A print of what «Рабочее место» shows of the point's orders (its cards on the way, at the point, on «На ОТХ» and «На возврат»): the
+    office changes the positions, the client, the dates, the numbers, the comment or moves an order — the print is new and the open page reloads
+    itself (notify.js, the owner 2026-11-25). Read from the orders themselves, the one source; no money of the office in it."""
+    import hashlib
+    parts = []
+    for card in sorted(_cards(conn, point_id) + _oth_cards(conn, point_id), key=lambda c: c["id"]):
+        parts.append([card["id"], card["stage_id"], card["entered_at"], card["client_name"], card["client_phone"],
+                      card["delivery_date"], card["delivery_time"], card["reserve_until"], card["transfer_number"], card["webmim_number"],
+                      point_comment(conn, card), [[i["id"], i["name"], i.get("code"), i["goods_id"], i["qty"], i["sale_unit"]] for i in card["items"]]])
+    return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:16]
+
+
 def _issued(conn, point_id, today: str) -> list:
     """«Выдано» (the owner 2026-11-09): the orders of the point closed by a hand-out in the last ISSUED_DAYS, newest first — on
     «Выполнено», come there from «На точке» (or from the way: «Выдал» skips «Товар на точке», order_manager.ISSUE_FROM) by the point's
@@ -612,6 +632,7 @@ def register(app) -> None:
                           "labels": order_intercity.labels(conn, card["id"]) if order_intercity.on(card) else [],
                           # «Итого» (the owner 2026-11-07): the order window's own sum of the positions already read; «На ОТХ»: no client, no sum
                           "sale": orders.totals(card["items"])["sale"] if card["items"] and code not in order_oth.RETURNING else None,
+                          "comment": point_comment(conn, card),     # «Комментарий» of the order's window, only when typed (2026-11-25)
                           "issue_lines": issue_lines(card), "undo": point_log.undoable(conn, card, point_id)})     # «Отменить» in the card (2026-11-09)
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
@@ -679,7 +700,8 @@ def register(app) -> None:
                                returns=returns, return_groups=groups,
                                return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK, not_taken_next=oth_point_return.NOT_TAKEN_NEXT,
                                buyer_ask=oth_point_return.BUYER_ASK, comment_max=oth_point_return.COMMENT_MAX,
-                               undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL)
+                               undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL,
+                               rev=point_rev(conn, point_id) if own_point() is not None and point_id is not None else "")    # the feed's own point only
 
     def _undo(card_id):
         """«Отменить» a press that moved the order (point_log.undo; the address /my-point/<order>/undo, the endpoint of the presses): the
@@ -1000,4 +1022,7 @@ def register(app) -> None:
         if own_point() is not None:                                             # the bell of the manager of the point: only theirs (routes_alerts)
             items += [{"key": "alert-%s-%s" % (r["id"], r["more"]), "title": "Чат без заказа" if r.get("chat_row") else "Заказ №%d" % r["order_id"],
                        "text": (r["text"] or "")[:200], "href": href(r)} for r in with_orders(conn, grouped(conn, who))]
-        return jsonify({"who": who, "items": items + calls})
+        answer = {"who": who, "items": items + calls}
+        if own_point() is not None:                                             # the page of the point's own person reloads on a change (point_rev)
+            answer["rev"] = point_rev(conn, point_id)
+        return jsonify(answer)

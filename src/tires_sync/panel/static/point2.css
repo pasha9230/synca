@@ -282,3 +282,6 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .mp-act-mark--4{--act:#953800;--act-bg:#FFF1E5;--act-border:#FFB77C}
 /* «Сегодня есть возвраты» (2026-11-21) */
 .p2-mx3>.mp-today-acts{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;min-width:0}.mp-today-acts>*{flex:1 1 160px;min-width:0}
+/* «Комментарий» of the order's window in the card (the owner 2026-11-25): as typed, its lines kept */
+.p2w .mp-comment{white-space:pre-line;overflow-wrap:anywhere;color:var(--p2-text-2);font-size:13px;margin-top:4px}
+.p2w .mp-comment-l{display:block;color:var(--p2-text-3);font-weight:600}

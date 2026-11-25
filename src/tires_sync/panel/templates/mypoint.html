@@ -49,7 +49,7 @@
 {# the tyres first, then the client (the owner 2026-10-30); «На ОТХ»: the client is gone, the tyres only; the phone is in «Подробнее».
    «На ОТХ» (the owner 2026-11-09): a block of each position — the supplier's name, «Кол-во: N шт.», «Цена:» the order's price × the pieces #}
 <div class="mp-client">{% if row.oth %}<span class="mp-tyres" data-tyres>{% for i in row.lines %}<span class="mp-oth-item" data-oth-item><span class="mp-oth-name">{{ i.name }}</span><span class="mp-sub">Кол-во: {{ i.qty }} шт.</span>{% if i.sum is not none %}<span class="mp-sub" data-oth-price>Цена: {{ i.sum|money }}</span>{% endif %}</span>{% else %}шины не указаны{% endfor %}</span>
-{% else %}<span class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}шины не указаны{% endfor %}</span>{% endif %}{% if not row.oth %}<span class="mp-name">{{ c.client_name or "Без имени" }}</span>{% endif %}{% if row.sale is not none %}<span class="mp-sub mp-sum" data-point-sum>Итого <b>{{ row.sale|money }}</b></span>{% endif %}</div>
+{% else %}<span class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}шины не указаны{% endfor %}</span>{% endif %}{% if not row.oth %}<span class="mp-name">{{ c.client_name or "Без имени" }}</span>{% endif %}{% if row.comment %}<span class="mp-comment" data-point-comment><span class="mp-comment-l">Комментарий</span>{{ row.comment }}</span>{% endif %}{% if row.sale is not none %}<span class="mp-sub mp-sum" data-point-sum>Итого <b>{{ row.sale|money }}</b></span>{% endif %}</div>
 {% if hints and not row.intercity %}{% set hint = 'ask' if row.asked else ('returning' if row.ret_state == 'agree' else ('return' if row.ret_state == 'agreed' else ('signed' if row.ret_state == 'signed' else ('oth' if row.oth else ('here' if row.here else 'going'))))) %}<p class="mp-now mp-hint" data-point-hint="{{ hint }}">{{ point_hint(hint) }}</p>{% endif %}
 {% if row.intercity %}<div class="mp-ask" role="note" data-intercity="{{ c.id }}"><b>{{ intercity_hint }}</b><span class="mp-sub">{% if c.intercity.city %}{{ c.intercity.city }}{% endif %}{% if c.intercity.carrier %} · ТК {{ c.intercity.carrier }}{% endif %}{% if c.intercity.track %} · трек {{ c.intercity.track }}{% endif %}</span>
 {% for f in row.labels %}<a class="btn btn--secondary mp-btn" href="/orders/{{ c.id }}/labels/{{ f.id }}" data-label-file>Скачать этикетки{% if row.labels|length > 1 %} ({{ loop.index }}){% endif %}</a>{% else %}<span class="mp-sub">Этикеток пока нет: их загрузит офис.</span>{% endfor %}</div>{% endif %}
@@ -76,7 +76,7 @@
 {% if row.undo %}<div class="mp-actions">{{ undo_btn(c, row.undo, row.label) }}</div>{% endif %}
 </article>{% endmacro %}
 {% set pq = ("&p=%d"|format(point.id)) if choose and point else "" %}
-<div class="pt mp-wrap">
+<div class="pt mp-wrap"{% if rev %} data-point-rev="{{ rev }}"{% endif %}>
 <header class="pt-top mp-head">
 <div class="mp-title"><h1>Рабочее место{% if point %} · {{ point.name }}{% endif %}</h1>{% if point %}<span class="mp-sub" data-tab-title>{{ tabs[tab] }}</span>{% endif %}</div>
 <div class="pt-top-actions">
