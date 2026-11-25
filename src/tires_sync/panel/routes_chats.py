@@ -449,6 +449,8 @@ def register(app) -> None:
                 order_search.write_notes(conn, chat["order_id"], order_search.notes(found, "item"), stamp, author())
                 conn.commit()
             flash("В заказ №%d добавлено: %s." % (chat["order_id"], args.get("name") or goods_id), "ok")
+            if found is not None and found.how == "base":           # the office's page: the stock of the supplier is to check
+                flash("Позиции «%s» нет в выгрузке поставщика сегодня: проверьте наличие у поставщика перед заказом." % args["name"][:120], "error")
             if found is not None and found.warning():
                 flash(found.warning(), "error")
         except orders.OrderError as err:

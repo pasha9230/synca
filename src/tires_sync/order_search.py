@@ -289,7 +289,7 @@ def located_args(conn, settings, parsed, ref, found: Located, day: str, account_
         args = order_offers.offer_args(conn, settings, parsed, ref, found.offer, day, account_id, ad_goods_id=ad_goods_id, manual_sale=manual_sale)
         if ad_goods_id and found.how != "id" and not order_offers.ad_prices(conn, account_id, [ad_goods_id]).get(str(ad_goods_id)):
             found.price_note = "Цена продажи расчётная, не из объявления: объявления с кодом %s в последнем фиде аккаунта нет." % ad_goods_id
-        found.manual_price = manual_sale is not None and args["sale_unit"] is manual_sale     # the panel had none: the typed one was taken
+        found.manual_price = bool(args.pop(order_offers.MANUAL_PRICE, False))                # the panel had none: the typed one was taken
         return args
     except orders.OrderError as err:
         if found.how != "base" or manual_sale is not None:

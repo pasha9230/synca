@@ -955,8 +955,12 @@ def register(app) -> None:
                     flash(str(err), "error")
                 else:                                                     # ТЗ 94: out of the feed, without a price or the unload has it no more
                     rows.append(row)
-                    flash("Позиция «%s» не в продаже (вне фида, без цены или нет в выгрузке): заказ оформить можно, впишите цену за шт. "
-                          "и проверьте наличие у поставщика." % row["name"][:120], "warning")
+                    if row["sale_unit"]:                                  # the base has its price: only its stock is to check
+                        flash("Позиции «%s» нет в выгрузке поставщика сегодня: заказ оформить можно, цена из базы позиций, "
+                              "проверьте наличие у поставщика." % row["name"][:120], "warning")
+                    else:
+                        flash("Позиция «%s» не в продаже (вне фида, без цены или нет в выгрузке): заказ оформить можно, впишите цену за шт. "
+                              "и проверьте наличие у поставщика." % row["name"][:120], "warning")
         return new_page(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, rows)
 
     @app.route("/orders/new", methods=["POST"])
