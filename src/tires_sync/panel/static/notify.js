@@ -133,11 +133,16 @@
     return el.matches("textarea, select, [contenteditable=''], [contenteditable='true'], input:not([type=button]):not([type=submit]):not([type=reset]):not([type=hidden])");
   }
   function edited() {                                     // a field typed in and left (the search, «Другой»): a reload would wipe the text
-    var fields = document.querySelectorAll("input:not([type=hidden]), textarea");
-    for (var i = 0; i < fields.length; i++) {
-      var f = fields[i];
-      if (f.type === "checkbox" || f.type === "radio" ? f.checked !== f.defaultChecked : f.value !== f.defaultValue) return true;
-    }
+    try {
+      if (typeof document.querySelectorAll !== "function") return false;     // no such API: nothing to keep
+      var fields = document.querySelectorAll("input:not([type=hidden]), textarea") || [];
+      for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        if (!f) continue;
+        var box = f.type === "checkbox" || f.type === "radio";
+        if (box ? ("defaultChecked" in f && f.checked !== f.defaultChecked) : ("defaultValue" in f && f.value !== f.defaultValue)) return true;
+      }
+    } catch (e) { /* an odd field: never blocks the refresh for good */ }
     return false;
   }
   function idle() {                                       // the point does nothing: no press, key or scroll lately, no window, no field, no form going
