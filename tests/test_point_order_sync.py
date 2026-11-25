@@ -11,6 +11,7 @@ from test_mypoint import manager
 from test_point_new_view import flag
 from test_vk_commands import NOW, _card, ready
 from tires_sync import connections, order_points as points, orders
+from tires_sync.panel import routes_mypoint
 
 LATER = "2026-10-14T10:00:00"
 
@@ -110,3 +111,30 @@ def test_the_owner_looking_at_a_point_gets_no_print(tmp_path, view):
     conn.commit()
     assert "data-point-rev" not in owner.get("/my-point?p=%d" % pid).get_data(as_text=True)     # its feed is another point's: no reload loop
     assert "rev" not in owner.get("/my-point/feed").get_json()
+
+
+def test_the_reload_waits_while_a_field_holds_typed_text():
+    """notify.js: a field typed in and left (the search, «Другой» of «ОТКАЗ») keeps the page busy, the reload never wipes the text."""
+    from pathlib import Path
+    script = (Path(routes_mypoint.__file__).parent / "static" / "notify.js").read_text(encoding="utf-8")
+    edited = re.search(r"function edited\(\) \{.*?\n  \}", script, re.S).group(0)
+    assert 'input:not([type=hidden]), textarea' in edited and "f.value !== f.defaultValue" in edited and "f.checked !== f.defaultChecked" in edited
+    assert "|| edited()) return false" in re.search(r"function idle\(\) \{.*?\n  \}", script, re.S).group(0)
+
+
+def test_the_feed_reads_the_cards_and_the_account_names_once(tmp_path, monkeypatch):
+    app, conn, pid, card, mine = _setup(tmp_path, "old")
+    orders.update_card(conn, card, dict(comment="Позвонить заранее"), LATER, "o")
+    calls = {"cards": 0, "oth": 0, "names": 0}
+    real_cards, real_oth, real_names = routes_mypoint._cards, routes_mypoint._oth_cards, orders.account_names
+
+    def count(key, real):
+        def wrapped(*args, **kw):
+            calls[key] += 1
+            return real(*args, **kw)
+        return wrapped
+    monkeypatch.setattr(routes_mypoint, "_cards", count("cards", real_cards))
+    monkeypatch.setattr(routes_mypoint, "_oth_cards", count("oth", real_oth))
+    monkeypatch.setattr(orders, "account_names", count("names", real_names))
+    assert mine.get("/my-point/feed").get_json()["rev"]
+    assert calls == {"cards": 1, "oth": 1, "names": 1}
