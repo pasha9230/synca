@@ -18,6 +18,7 @@
       <span class="mp-sub">Кол-во: {{ item.qty }} шт.</span></div>
     {% else %}шины не указаны{% endfor %}
   </div>
+  {% if r.comment %}<div class="mp-comment" data-point-comment><span class="mp-comment-l">Комментарий</span>{{ r.comment }}</div>{% endif %}
   {% if r.act_order %} · Шины с ОТХ: акт, скорее всего, по исходному заказу №{{ r.act_order }}.{% endif %}
   {% if hints and loop.first %}<p class="mp-hint" data-point-hint="return">{{ point_hint("return") }}</p>{% endif %}</div>
   {% if r.asked %}

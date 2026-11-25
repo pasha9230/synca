@@ -83,7 +83,7 @@
 <div class="p2-no"><span class="mp-no" data-no>№ {{ c.webmim_number or "панель %d"|format(c.id) }}</span><span class="mp-date" data-issued-at>выдан {{ row.at|short_dt }}</span></div>
 <div class="p2-tags"><span class="p2-tag p2-tag--ok">выдан</span></div>
 <div class="p2-info"><div class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}<div class="p2-g">{{ i.name }}<span class="p2-q">{{ i.qty }} шт.</span></div>{% else %}<div class="p2-g">шины не указаны</div>{% endfor %}</div>
-<div class="p2-who mp-name">{{ c.client_name or "Без имени" }}</div><div class="p2-sub" data-issued-by>Отметил: {{ row.who or "—" }}</div></div>
+<div class="p2-who mp-name">{{ c.client_name or "Без имени" }}</div>{% if row.comment %}<div class="mp-comment" data-point-comment><span class="mp-comment-l">Комментарий</span>{{ row.comment }}</div>{% endif %}<div class="p2-sub" data-issued-by>Отметил: {{ row.who or "—" }}</div></div>
 <div class="p2-acts mp-actions">{{ undo_btn(c, row.undo, row.label) }}</div>
 </div></article>{% endmacro %}
 <div class="p2w" data-p2{% if rev %} data-point-rev="{{ rev }}"{% endif %}>
