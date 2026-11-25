@@ -23,7 +23,7 @@
 {% if h.cancellable %}<form method="post" action="/my-point/handoff/{{ h.id }}/cancel" class="inline" data-once data-confirm-title="Отменить передачу клиента?" data-confirm="Заказ № {{ h.label }} уйдёт в «Отмена», менеджеру придёт сообщение. Клиенту ничего не отправится." data-confirm-ok="Отменить передачу"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="p2-quiet" data-handoff-cancel="{{ h.id }}">Отменить передачу</button></form>{% endif %}</div>
 <span class="p2-tag {{ {'': 'p2-tag--grey', 'taken': 'p2-tag--warn', 'placed': 'p2-tag--warn', 'done': 'p2-tag--ok', 'refused': 'p2-tag--err', 'cancelled': 'p2-tag--grey'}[h.status] }}" data-status="{{ h.status or 'new' }}">{{ h.status_name }}</span></li>{% endfor %}</ul>
 {% else %}<p class="p2-sub">За две недели никого не передавали.</p>{% endif %}
-{% if bonus %}<p class="p2-sub">За выданный заказ переданного клиента точке +{{ bonus|money }} сверх обычной выплаты.</p>{% endif %}</div></section>
+{% if bonus %}<p class="p2-sub">За каждую шину выданного заказа переданного клиента точке +{{ bonus|money }} (комплект из 4 шин — +{{ (bonus * 4)|money }}) сверх обычной выплаты.</p>{% endif %}</div></section>
 <section class="p2-box mp-handoff" id="handoff" aria-labelledby="mp-handoff-h">
 <form method="post" action="/my-point/handed" class="mp-handoff-form" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ handoff_token }}">{{ pin }}
 <h2 id="mp-handoff-h">Передать клиента</h2>

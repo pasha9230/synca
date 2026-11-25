@@ -2131,7 +2131,17 @@ def point_handoffs(conn, point_id, since: str, limit: int = 50) -> List[dict]:
         found.append({"id": order_id, "label": label(orders.get_card(conn, order_id)) + (" → №%s" % label(card) if into else ""), "phone": phone, "client": card["client_name"], "need": need, "at": created,
                       "source": SOURCE_NAMES.get(kind, ""), "status": status, "status_name": POINT_STATUS[status],
                       "cancellable": not status and cancellable(conn, order_id, point_id)})
-    return found
+    seen = {h["id"] for h in found}
+    for order_id, at in conn.execute("SELECT s.order_id, s.at FROM order_source_point s JOIN order_card c ON c.id = s.order_id "
+                                     "WHERE s.point_id = ? AND s.at >= ? ORDER BY s.at DESC LIMIT ?", (point_id, since, limit)).fetchall():
+        if order_id in seen:                                      # «Откуда клиент» = this point (ТЗ 92): a client it gave by phone
+            continue
+        card = orders.get_card(conn, order_id)
+        status = _status_of(card, placed, True)
+        found.append({"id": order_id, "label": label(card), "phone": card["client_phone"], "client": card["client_name"], "need": "", "at": at,
+                      "source": "указано офисом", "status": status, "status_name": POINT_STATUS[status], "cancellable": False})
+    found.sort(key=lambda h: (h["at"], h["id"]), reverse=True)
+    return found[:limit]
 
 
 def staff_card(conn, card: dict) -> dict:

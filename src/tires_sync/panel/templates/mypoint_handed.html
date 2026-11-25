@@ -23,7 +23,7 @@
 <span class="badge {{ {'': 'badge--neutral', 'taken': 'badge--warn', 'placed': 'badge--warn', 'done': 'badge--ok', 'refused': 'badge--err', 'cancelled': 'badge--neutral'}[h.status] }}" data-status="{{ h.status or 'new' }}">{{ h.status_name }}</span>
 {% if h.cancellable %}<form method="post" action="/my-point/handoff/{{ h.id }}/cancel" class="inline" data-once data-confirm-title="Отменить передачу клиента?" data-confirm="Заказ № {{ h.label }} уйдёт в «Отмена», менеджеру придёт сообщение. Клиенту ничего не отправится." data-confirm-ok="Отменить передачу"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="btn btn--danger-outline btn--sm" data-handoff-cancel="{{ h.id }}">Отменить передачу</button></form>{% endif %}</li>{% endfor %}</ul>
 {% else %}<p class="mp-empty">За две недели никого не передавали.</p>{% endif %}
-{% if bonus %}<p class="mp-hint">За выданный заказ переданного клиента точке +{{ bonus|money }} сверх обычной выплаты.</p>{% endif %}</section>
+{% if bonus %}<p class="mp-hint">За каждую шину выданного заказа переданного клиента точке +{{ bonus|money }} (комплект из 4 шин — +{{ (bonus * 4)|money }}) сверх обычной выплаты.</p>{% endif %}</section>
 <section class="mp-handoff" aria-labelledby="mp-handoff-h"><h2 id="mp-handoff-h">Передать клиента</h2>
 <form method="post" action="/my-point/handed" class="mp-handoff-form" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ handoff_token }}">{{ pin }}
 <p class="mp-hint">Клиент пришёл, а нужных шин нет? Передайте его менеджеру — он подберёт и оформит заказ. Передать можно и из «Звонков».</p>

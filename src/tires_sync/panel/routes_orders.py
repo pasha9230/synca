@@ -18,7 +18,7 @@ from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
 from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_chain, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_log, user_prefs
-from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_point_fix, vk_send, webmim_cabinet, webmim_create, webmim_match
+from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, point_payouts, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_point_fix, vk_send, webmim_cabinet, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
 from .routes_design import office_new, office_page
@@ -849,6 +849,16 @@ def register(app) -> None:
             start, end = today.replace(day=1).isoformat(), today.isoformat()
         return start, end, request.args.get("pt", "").strip()[:80]
 
+    def _handed_args():
+        """The slice «Все / Только переданные точкой / Без переданных точкой» and the point that handed them over (ТЗ 95)."""
+        hs = request.args.get("hs", "")
+        hs = hs if hs in order_report.HANDED_SLICES else ""
+        hp = request.args.get("hp", "").strip()
+        hp = int(hp) if hp.isdigit() else None
+        if hp is not None and hs != "none":
+            hs = "only"                                                     # a chosen point: its handed clients
+        return hs, (hp if hs == "only" else None)
+
     @app.route("/orders/report")
     @login_required
     def orders_report():
@@ -857,13 +867,15 @@ def register(app) -> None:
         start, end, point = _report_args()
         names = [r[0] for r in conn.execute("SELECT DISTINCT %s FROM sale s LEFT JOIN point p ON p.id = s.point_id WHERE s.source = 'order'"
                                             " AND %s != ''" % (sales_store.POINT_NAME, sales_store.POINT_NAME))]        # the point's name now
-        report = order_report.build(conn, start, end, point)
-        every = order_report.build(conn, start, end) if point else report               # a point paid only for the clients it handed over
+        hs, hp = _handed_args()
+        report = order_report.build(conn, start, end, point, hs, hp)
+        every = order_report.build(conn, start, end) if point or hs else report         # a point paid only for the clients it handed over
         names = sorted(set(names) | {r["point"] for r in every["handoff"]["lines"] if r["point"] != order_report.NO_POINT})   # is chosen too (З8)
         rates, today = order_report.list_rates(conn), local_now().date().isoformat()
         return render_template("orders_report.html", report=report, start=start, end=end, point=point, point_names=names,
                                fee=order_report.rate_on(rates, "point_fee", today), owner_share=order_report.rate_on(rates, "owner_share", today),
-                               labels=order_report.share_labels(conn))
+                               labels=order_report.share_labels(conn), handed_slices=order_report.HANDED_SLICES, hs=hs, hp=hp,
+                               all_points=points.list_points(conn))
 
     @app.route("/orders/settings/money")
     @login_required
@@ -877,6 +889,11 @@ def register(app) -> None:
                                handoff_fee=order_report.rate_on(rates, "handoff_fee", today), labels=order_report.share_labels(conn),
                                oth_sale_fee=order_report.rate_on(rates, "oth_sale_fee", today), income_shown=order_report.income_shown(conn),
                                income_switch=current_user()["role"] == "owner",
+                               kpi={name: order_report.rate_on(rates, name, today) for name in ("kpi_orders", "kpi_tyres", "kpi_bonus")},
+                               kpi_from=order_report.KPI_FROM, per_tyre_from=order_report.HANDOFF_PER_TYRE_FROM,
+                               issue_per_tyre_from=order_report.POINT_FEE_PER_TYRE_FROM,
+                               point_rates=order_report.list_point_rates(conn), point_rate_names=order_report.POINT_RATES,
+                               points=points.list_points(conn),
                                saved_labels=order_report.saved_share_labels(conn), label_defaults=order_report.SHARE_LABELS,
                                label_max=order_report.SHARE_LABEL_MAX)
 
@@ -902,14 +919,31 @@ def register(app) -> None:
             if order_report.set_income_shown(conn, on, now_iso(), author()):
                 flash("Точки видят страницу «Доход»." if on else "Страница «Доход» скрыта от точек.")
             return redirect(MONEY_PAGE)
+        if request.form.get("what") == "point_rates":                   # «Индивидуальные настройки» of a point (ТЗ 95): from a date, as «Ставки»
+            try:
+                point_id = int(request.form.get("point_id", ""))
+                if request.form.get("reset") == "1":                       # every own rate back to the general one from the date
+                    values = {name: None for name in order_report.POINT_RATES}
+                else:
+                    values = {name: parse_amount(request.form[name]) for name in order_report.POINT_RATES if request.form.get(name, "").strip()}
+                if not values:
+                    raise ValueError("Впишите хотя бы одну ставку точки.")
+                changed = order_report.set_point_rates(conn, point_id, request.form.get("valid_from", "").strip()[:10], local_now().date().isoformat(),
+                                                       local_iso(), author(), values)
+            except ValueError as err:
+                flash(str(err) if str(err) not in ("not a number", "") and not str(err).startswith("invalid literal") else "Ставка: нужно число.")
+                return redirect(MONEY_PAGE)
+            flash("Ставки точки сохранены." if changed else "Ничего не записано: такие ставки уже действуют с этой даты.")
+            return redirect(MONEY_PAGE)
         def typed(name):                     # a field left as the form filled it is not sent: it would undo a rate already saved for a later date
             text = request.form.get(name, "").strip()
             return None if text == request.form.get(name + "_was", "").strip() else parse_amount(text)
         try:
             fee, pct, handoff, oth = typed("point_fee"), typed("owner_pct"), typed("handoff_fee"), typed("oth_sale_fee")
+            kpi = {name: typed(name) for name in ("kpi_orders", "kpi_tyres", "kpi_bonus")}       # absent from an old form: None, not touched
             share = None if pct is None else pct / 100
             changed = order_report.set_rates(conn, request.form.get("valid_from", "").strip()[:10], local_now().date().isoformat(), local_iso(), author(),
-                                             point_fee=fee, owner_share=share, handoff_fee=handoff, oth_sale_fee=oth)
+                                             point_fee=fee, owner_share=share, handoff_fee=handoff, oth_sale_fee=oth, **kpi)
         except ValueError as err:
             flash(str(err) if str(err) != "not a number" else "Ставка: нужно число.")
             return redirect(MONEY_PAGE)
@@ -922,7 +956,8 @@ def register(app) -> None:
     def orders_report_export():
         start, end, point = _report_args()
         conn = get_conn()
-        resp = app.response_class(order_report.export_csv(order_report.build(conn, start, end, point), order_report.share_labels(conn)),
+        hs, hp = _handed_args()
+        resp = app.response_class(order_report.export_csv(order_report.build(conn, start, end, point, hs, hp), order_report.share_labels(conn)),
                                   mimetype="text/csv")
         resp.headers["Content-Disposition"] = 'attachment; filename="orders-report-%s_%s.csv"' % (start, end)
         resp.headers["Cache-Control"] = "no-store"
@@ -1595,6 +1630,12 @@ def register(app) -> None:
             if "stage_id" in request.form or request.form.get("tab") != "money":
                 return card_page(conn, card, dict(changes, **typed_row))  # the window comes back with what was typed: nothing saved, nothing moved
             return back(card_id, "money")
+        if own_point() is None and has_right("money") and "source_point" in request.form:   # «Откуда клиент» = a point (ТЗ 92): money
+            try:
+                point_payouts.set_source_point(conn, card_id, request.form.get("source_point", ""), request.form.get("source_point_was", ""),
+                                               local_iso(), author())
+            except point_payouts.PayoutError as err:
+                flash(str(err), "error")
         if can("chats", "edit"):                                          # the chat of the order: unlink, move here, bind the offered or the typed one;
             # before the row: the row is priced by the account of the chats the order has after this press (order_offers.account_for)
             unlink, moved, offered = (_int(request.form.get(k)) for k in ("chat_unlink", "chat_move", "chat_bind"))

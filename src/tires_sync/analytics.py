@@ -228,12 +228,48 @@ def money(conn, start: str, end: str) -> dict:
             "profit": total["margin"], "point_fees": total["fee"], "net": total["net"], "owner": total["owner"], "partner": total["partner"],
             "issue_fees": report["fees"]["issue"], "bonus_fees": report["fees"]["bonus"],       # the fees: for the issued orders and the bonuses (ТЗ 80)
             "handoff_fees": report["handoff"]["fee"], "oth_fees": report["oth"]["fee"], "oth_pieces": report["oth"]["pieces"],
+            "kpi_fees": report["fees"]["kpi"],                                                  # the KPI premiums (ТЗ 95), a part of the bonuses
             "by_point": [{"point": r["point"], "orders": r["orders"], "revenue": r["sale"], "profit": r["margin"], "point_fee": r["fee"],
                           "issue_fee": f["issue"], "bonus_fee": f["bonus"], "net": r["net"]} for r, f in zip(report["lines"], report["fees"]["lines"])],
             "manual": {"sales": manual["sales"], "pieces": manual["pieces"], "revenue": manual["sale"], "cost": manual["cost"],
                        "profit": manual["margin"]},
             "rates_used": report["rates_used"],
             "webmim": {"count": report["webmim"]["count"], "of": report["webmim"]["positions"]}}          # the positions whose purchase is WebMIM's (order_report)
+
+
+def handed_funnel(conn, start: str, end: str) -> dict:
+    """«Переданные точкой» (ТЗ 95): the clients each point handed over in the period (its handoffs and «Откуда клиент» = the point, by the
+    day of the handoff) and what became of them now — Передан → В работе → Выполнен / Не состоялось — with the tyres of the done ones."""
+    start, end = _period(start, end)
+    names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
+    handed: Dict[int, tuple] = {}
+    for order_id, point_id, at in conn.execute("SELECT order_id, point_id, created_at FROM order_handoff WHERE point_id IS NOT NULL"):
+        handed[order_id] = (point_id, at)
+    for order_id, point_id, at in conn.execute("SELECT order_id, point_id, at FROM order_source_point"):
+        handed.setdefault(order_id, (point_id, at))
+    kinds = {r[0]: r[1] for r in conn.execute("SELECT c.id, g.kind FROM order_card c JOIN order_stage g ON g.id = c.stage_id")}
+    tyres: Dict[int, int] = {}
+    for note, pieces in conn.execute("SELECT note, pieces FROM sale WHERE source = 'order' AND reversed_at IS NULL"):
+        order_id = order_report._order_id(note)
+        if order_id in handed:
+            tyres[order_id] = tyres.get(order_id, 0) + pieces
+    rows: Dict[int, dict] = {}
+    for order_id, (point_id, at) in handed.items():
+        if point_id not in names or order_id not in kinds or not _in(str(at)[:10], start, end):
+            continue
+        row = rows.setdefault(point_id, {"point_id": point_id, "point": names[point_id], "handed": 0, "work": 0, "done": 0, "lost": 0, "tyres": 0})
+        row["handed"] += 1
+        kind = kinds[order_id]
+        status = "done" if kind == "won" else "lost" if kind == "lost" else "work"
+        row[status] += 1
+        if status == "done":
+            row["tyres"] += tyres.get(order_id, 0)
+    out = sorted(rows.values(), key=lambda r: r["point"])
+    for r in out:
+        r["rate"] = r["done"] / r["handed"] if r["handed"] else None
+    total = {k: sum(r[k] for r in out) for k in ("handed", "work", "done", "lost", "tyres")}
+    total["rate"] = total["done"] / total["handed"] if total["handed"] else None
+    return {"rows": out, "total": total}
 
 
 def working_minutes(since: datetime, until: datetime, hours) -> int:

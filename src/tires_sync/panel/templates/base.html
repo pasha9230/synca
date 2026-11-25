@@ -60,7 +60,8 @@
 <a class="sb-link{% if path.startswith('/analytics') %} is-active{% endif %}" href="/analytics">{{ icon("arrow-up") }}Продажи и воронка</a>
 {% if can("analytics") and has_right("money") %}<a class="sb-link{% if path.startswith('/economics') and not path.startswith('/economics/ads') %} is-active{% endif %}" href="/economics">{{ icon("chart") }}Юнит-экономика</a>
 <a class="sb-link{% if path.startswith('/economics/ads') %} is-active{% endif %}" href="/economics/ads">{{ icon("chart") }}Аналитика рекламы</a>
-<a class="sb-link{% if path.startswith('/orders/report') %} is-active{% endif %}" href="/orders/report">{{ icon("report") }}Отчёт по заказам</a>{% endif %}
+<a class="sb-link{% if path.startswith('/orders/report') %} is-active{% endif %}" href="/orders/report">{{ icon("report") }}Отчёт по заказам</a>
+<a class="sb-link{% if path.startswith('/points/payouts') %} is-active{% endif %}" href="/points/payouts">{{ icon("layers") }}Пункты выдачи</a>{% endif %}
 {% endcall %}{% endif %}
 {% if can("setup") or can("users") %}{% call sb_section("setup", "Настройка") %}
 {% if can("setup") %}<a class="sb-link{% if path.startswith('/connections') or path.startswith('/accounts') %} is-active{% endif %}" href="/connections">{{ icon("plug") }}Подключения</a>

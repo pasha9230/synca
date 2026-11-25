@@ -310,7 +310,7 @@ for _section, _endpoints in {
              "tour_done", "tour_again",                 # «Обзор» (panel/tour.py): one's own mark «пройден», every role
              "whatsnew_page",                           # «Что нового» (routes_whatsnew): every role, its own items
              "tasks_feed"),                             # the sound of one's own tasks «Позвонить…» (order_call.sounds): read-only
-    "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_income","mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
+    "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_income", "mypoint_income_request", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                 "mypoint_not_taken",                    # «Водитель не забрал» of «Сегодня возврат!» (oth_point_return, 2026-11-12)
                 "mypoint_oth_sale"),                    # the window of «Продать» of a record on «На ОТХ» (oth_point_sale, ТЗ part D)
     "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
@@ -351,6 +351,10 @@ NEEDS.update(order_autosend_add="send", order_autosend_update="send", order_auto
 NEEDS.update(order_receipt_send="send", order_receipt_file="money", orders_receipt_settings_save="money")   # «Товарный чек»
 # «Собрать фид сейчас» (feed_now, 2026-11-03): the owner and the partner (the lead's task) — exactly those who have «orders» to change and
 # the right «supplier»; the partner has no «publish» and only looks at the catalog
+# «Пункты выдачи» (ТЗ 95, routes_point_payouts): the ledger is the money's (analytics); «Рассчитан» writes: «orders» with the money right
+SECTION_OF.update(points_payouts_page="analytics", points_payouts_settle="orders", points_payouts_unsettle="orders", points_payouts_adjust="orders",
+                  points_payouts_request_close="orders")
+NEEDS.update(points_payouts_settle="money", points_payouts_unsettle="money", points_payouts_adjust="money", points_payouts_request_close="money")
 SECTION_OF.update(feed_update_now="orders")
 NEEDS.update(feed_update_now="supplier")
 # «На возврат» of a position on the page «На ОТХ» (the owner 2026-11-07): the owner and the partner, as «Согласовано с поставщиком»; the page itself
@@ -391,6 +395,7 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "mypoint_not_taken",                          # «Водитель не забрал» of its own «Сегодня возврат!» (2026-11-12)
                          "mypoint_oth_sale",                           # the window of «Продать» of its own record on «На ОТХ» (ТЗ part D)
                          "mypoint_income",                             # «Доход»: its own sums, while the owner's switch is on (ТЗ 80)
+                         "mypoint_income_request",                     # «Вычли с кассы и получили бонусы»: a request to the office (ТЗ 95)
                          "order_label_file",                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
                          "whatsnew_page"}                              # «Что нового»: the point's items
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)

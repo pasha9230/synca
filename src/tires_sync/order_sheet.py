@@ -278,12 +278,16 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
         return {}
     counted = {r["id"]: r for r in order_report._counted(conn, [rows[i] for i in ids])}
     rates, day = order_report.list_rates(conn), min(r["day"] for r in counted.values())
-    fee = order_report.rate_on(rates, "point_fee", day)
-    from . import oth_swap
-    if oth_swap.handed_fee(conn, card["id"]):                                     # never for a client who left (oth_swap)
-        fee += order_report.rate_on(rates, "handoff_fee", day)
+    by_point = order_report._by_point(order_report.list_point_rates(conn))           # a point's own rates (ТЗ 95), as the report
+    issued = next((r["point_id"] for r in counted.values() if r.get("point_id") is not None), None)
+    pieces = sum(r["pieces"] for r in counted.values())
+    fee = order_report.issue_fee(rates, by_point, ("id", issued), day, pieces)[0]    # per tyre from POINT_FEE_PER_TYRE_FROM, as the report
+    handed, _names = order_report.handed_points(conn)                             # «чей клиент»: the report's one rule (a handoff, «Откуда
+    if card["id"] in handed:                                                      # клиент», the merge, the swap on «На ОТХ»)
+        to = order_report.bonus_point(("id", issued), handed[card["id"]])
+        fee += order_report.handoff_fee(rates, by_point, to, day, pieces)[0]      # per tyre from HANDOFF_PER_TYRE_FROM, as the report
     if order_report.oth_sold_orders(conn, [card["id"]]):                          # the point sold them from «На ОТХ»: its bonus per tyre
-        fee += round(order_report.rate_on(rates, "oth_sale_fee", day) * sum(r["pieces"] for r in counted.values()), 2)    # as the report
+        fee += round(order_report.rate_for(rates, by_point, issued, "oth_sale_fee", day) * pieces, 2)    # as the report
     total = sum(r["sale_total"] for r in counted.values())
     pairs = _pair(card["items"], [counted[i] for i in ids])
     out = {}
