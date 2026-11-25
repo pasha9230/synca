@@ -163,7 +163,7 @@ def test_the_chats_are_two_columns_and_keep_the_hooks_of_app_js(w):
     bar = lst.split('class="chats-filter o2-cl-top"', 1)[1].split('<a class="chat-row', 1)[0]
     assert bar.count("ml-auto") == 1 and 'class="ml-auto">Всего: 2' in bar         # «Обновить список» swaps the count by the first .ml-auto
     assert bar.endswith('</span></div>\n</div>\n')                                 # and puts the fresh rows right after the bar
-    assert 'class="o2-chip is-on"' in html and ">Ждут ответа</a>" in html                      # the state as chips
+    assert 'class="o2-chip is-on"' in html and ">Непрочитанные</a>" in html                    # the state as chips (ТЗ №93)
     assert 'class="card-head chat-head o2-cl-head"' in html and 'class="chat-thread o2-cl-msgs"' in html
     assert 'class="chats-deal o2-cl-panel" id="chats-deal"' in html and "data-order-panel" in html     # a panel on the right (the owner 2026-11-04), no folding
     assert 'action="/chats/%d/send"' % w["chat"] in html and "data-photo-form" in html and 'name="reply_token"' in html
