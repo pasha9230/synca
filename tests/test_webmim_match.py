@@ -362,7 +362,9 @@ def test_saving_both_mim_numbers_imports_items_without_moving_the_order(panel):
     assert [(i["goods_id"], i["qty"], i["supplier_price"]) for i in saved["items"]] == [
         ("100", 4, 3281), ("101", 2, 3532),
     ]
-    assert "Позиции и количество совпадают" in client.get("/orders/%d" % mine).get_data(as_text=True)
+    page = client.get("/orders/%d" % mine).get_data(as_text=True)
+    assert "Позиции и количество совпадают" in page
+    assert "Добавленные шины: второй заказ WebMIM" not in page
 
 
 @pytest.mark.parametrize("with_items", [False, True])

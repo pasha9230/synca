@@ -601,6 +601,7 @@ def catalog_groups(conn, settings, parsed, ref, query="", status="all", sort="br
             "problem": gid in ev.problems and ev.problems[gid][0].split(":", 1)[0] != "model_needs_mapping", "published": gid in published_any,
             "pending": base_overrides is not None and manual != base_overrides.get(override_key(gid)), "view_only": gid in view_only or gid in preview_only,
             "own_price": gid in own_any,
+            "outside": gid in preview_only and gid not in view_only,   # a brand out of the working assortment: the office may still order it (ТЗ 94)
             "below_cost": bool(cand and gid in settings.own_prices and offer.base_price > 0 and cand.price < offer.base_price),
             "purchase": ev.held[gid][0] if gid in ev.held else offer.base_price,     # what a percent is counted from: the anchor (price_guard)
             "supplier_mark": supplier_mark(supplier_of(offer), capped_supplier),

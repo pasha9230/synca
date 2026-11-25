@@ -41,7 +41,7 @@ def test_the_menu_and_the_filter_count_the_same_waiting_chats_and_no_time_is_sho
     assert chats.waiting(conn, chats.list_chats(conn)) == {tanya["id"]}
     assert chats.waiting_total(conn) == 1 and chats.waiting_total(conn, account_id=account) == 1
     page = client.get("/chats").get_data(as_text=True)
-    assert _menu_chats(page) == 1 and "Ждут ответа <b>1</b>" in page
+    assert _menu_chats(page) == 1 and "Непрочитанные <b>1</b>" in page
     assert "Всего: 1" in client.get("/chats?f=wait").get_data(as_text=True)
     assert "Не прочитанные" not in page and "o2-cnt" not in page                   # no unread counters (п. 7)
     opened = client.get("/chats/%d" % tanya["id"]).get_data(as_text=True)
@@ -49,7 +49,7 @@ def test_the_menu_and_the_filter_count_the_same_waiting_chats_and_no_time_is_sho
     _say(conn, tanya["id"], "2026-10-13T11:50:00", "out")                         # answered: nobody waits, unread or not
     conn.commit()
     page = client.get("/chats").get_data(as_text=True)
-    assert _menu_chats(page) == 0 and chats.waiting_total(conn) == 0 and "Ждут ответа <b>" not in page
+    assert _menu_chats(page) == 0 and chats.waiting_total(conn) == 0 and "Непрочитанные <b>" not in page
 
 
 def test_closed_and_old_chats_do_not_wait(tmp_path):
@@ -147,10 +147,10 @@ def test_the_menu_counts_the_account_the_chats_open_with(tmp_path):
     conn.commit()
     assert chats.waiting_total(conn) == 2
     page = client.get("/chats").get_data(as_text=True)
-    assert _menu_chats(page) == 2 and "Ждут ответа <b>2</b>" in page              # nobody answers for an account: all of them, both
+    assert _menu_chats(page) == 2 and "Непрочитанные <b>2</b>" in page              # nobody answers for an account: all of them, both
     connections.set_responsible(conn, account, app.config["AUTHOR"], [app.config["AUTHOR"]], "2026-10-13T09:00:00", "o")
     page = client.get("/chats").get_data(as_text=True)
-    assert _menu_chats(page) == 1 and "Ждут ответа <b>1</b>" in page              # the person's account: the same one in both
+    assert _menu_chats(page) == 1 and "Непрочитанные <b>1</b>" in page              # the person's account: the same one in both
 
 
 def test_the_catalog_actions_of_2026_11_09(tmp_path):
