@@ -831,6 +831,16 @@ def register(app) -> None:
             start, end = today.replace(day=1).isoformat(), today.isoformat()
         return start, end, request.args.get("pt", "").strip()[:80]
 
+    def _handed_args():
+        """The slice «Все / Только переданные точкой / Без переданных точкой» and the point that handed them over (ТЗ 95)."""
+        hs = request.args.get("hs", "")
+        hs = hs if hs in order_report.HANDED_SLICES else ""
+        hp = request.args.get("hp", "").strip()
+        hp = int(hp) if hp.isdigit() else None
+        if hp is not None and hs != "none":
+            hs = "only"                                                     # a chosen point: its handed clients
+        return hs, (hp if hs == "only" else None)
+
     @app.route("/orders/report")
     @login_required
     def orders_report():
@@ -839,13 +849,15 @@ def register(app) -> None:
         start, end, point = _report_args()
         names = [r[0] for r in conn.execute("SELECT DISTINCT %s FROM sale s LEFT JOIN point p ON p.id = s.point_id WHERE s.source = 'order'"
                                             " AND %s != ''" % (sales_store.POINT_NAME, sales_store.POINT_NAME))]        # the point's name now
-        report = order_report.build(conn, start, end, point)
-        every = order_report.build(conn, start, end) if point else report               # a point paid only for the clients it handed over
+        hs, hp = _handed_args()
+        report = order_report.build(conn, start, end, point, hs, hp)
+        every = order_report.build(conn, start, end) if point or hs else report         # a point paid only for the clients it handed over
         names = sorted(set(names) | {r["point"] for r in every["handoff"]["lines"] if r["point"] != order_report.NO_POINT})   # is chosen too (З8)
         rates, today = order_report.list_rates(conn), local_now().date().isoformat()
         return render_template("orders_report.html", report=report, start=start, end=end, point=point, point_names=names,
                                fee=order_report.rate_on(rates, "point_fee", today), owner_share=order_report.rate_on(rates, "owner_share", today),
-                               labels=order_report.share_labels(conn))
+                               labels=order_report.share_labels(conn), handed_slices=order_report.HANDED_SLICES, hs=hs, hp=hp,
+                               all_points=points.list_points(conn))
 
     @app.route("/orders/settings/money")
     @login_required
@@ -925,7 +937,8 @@ def register(app) -> None:
     def orders_report_export():
         start, end, point = _report_args()
         conn = get_conn()
-        resp = app.response_class(order_report.export_csv(order_report.build(conn, start, end, point), order_report.share_labels(conn)),
+        hs, hp = _handed_args()
+        resp = app.response_class(order_report.export_csv(order_report.build(conn, start, end, point, hs, hp), order_report.share_labels(conn)),
                                   mimetype="text/csv")
         resp.headers["Content-Disposition"] = 'attachment; filename="orders-report-%s_%s.csv"' % (start, end)
         resp.headers["Cache-Control"] = "no-store"

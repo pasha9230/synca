@@ -211,8 +211,13 @@ def _split(net: float, by_share: Dict[float, float]) -> tuple:
     return owner, round(net - owner, 2)
 
 
-def build(conn, start: str, end: str, point: str = "") -> dict:
-    """Lines per point (most profitable first), the total and the manual sales (not in the total). Reversed sales are not counted."""
+HANDED_SLICES = {"": "Все заказы", "only": "Только переданные точкой", "none": "Без переданных точкой"}     # the slice of the report (ТЗ 95)
+
+
+def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", handed_by: Optional[int] = None) -> dict:
+    """Lines per point (most profitable first), the total and the manual sales (not in the total). Reversed sales are not counted.
+    `handed_slice` (ТЗ 95): "only" — the orders of the clients a point handed over (of the point `handed_by`, if given), with their KPI;
+    "none" — the others, without the handed clients' bonuses and the KPI; "" — all."""
     rates = list_rates(conn)
     by_point = _by_point(list_point_rates(conn))
     month_start = start[:8] + "01" if start else ""
@@ -239,6 +244,13 @@ def build(conn, start: str, end: str, point: str = "") -> dict:
             handed[order_id] = handed[source]
     for order_id in off - set(moved):
         handed.pop(order_id, None)
+    if handed_slice in ("only", "none"):
+        def kept(r) -> bool:
+            by = handed.get(_order_id(r["note"])) if r["source"] == "order" else None
+            if handed_slice == "none":
+                return by is None
+            return by is not None and (handed_by is None or by == ("id", int(handed_by)))
+        rows = [r for r in rows if kept(r)]
     grouped: Dict[tuple, List[dict]] = {}
     for r in rows:
         if r["source"] == "order":
@@ -279,6 +291,10 @@ def build(conn, start: str, end: str, point: str = "") -> dict:
             got["clients"] += 1
             got["fee"] = round(got["fee"] + extra, 2)
     kpi, progress = _kpi(every, handed, rates, by_point, start, end)
+    if handed_slice == "none":
+        kpi = {}
+    elif handed_slice == "only" and handed_by is not None:
+        kpi = {k: v for k, v in kpi.items() if k == ("id", int(handed_by))}
     kpi_lines: Dict[tuple, dict] = {}
     for to, found in kpi.items():
         names.setdefault(to, NO_POINT)

@@ -31,4 +31,5 @@ def register(app) -> None:
                                money=analytics.money(conn, start, end) if has_right("money") else None,
                                labels=order_report.share_labels(conn),
                                funnel=analytics.funnel(conn, start, end, by or None),
+                               handed=analytics.handed_funnel(conn, start, end),
                                times=analytics.stage_times(conn, start, end, local.isoformat(timespec="seconds")))
