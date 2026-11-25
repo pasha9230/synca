@@ -1253,19 +1253,20 @@
     var KEY = "list-place", path = window.location.pathname, armed = false, mark = null;
     try { mark = JSON.parse(sessionStorage.getItem(KEY) || "null"); sessionStorage.removeItem(KEY); } catch (e) { mark = null; }
     if (document.querySelector("[data-keep-place], [data-no-keep-place], .chats-list")) return;
+    if (path === "/my-point") return;                       // «Рабочее место»: its own place across its refresh (notify.js, tires.mypoint.scroll)
     function pageBox() {                                    // the same box as 13c: .main of the panel on a computer, the page on a phone
       var main = document.querySelector(".main");
       if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
       return document.scrollingElement || document.documentElement;
     }
-    function samePage(a) {                                  // a link to this very page: another filter or tab, not another page of the list (nav.pager)
-      if (!a || a.target === "_blank" || a.hasAttribute("download") || a.closest(".pager")) return false;
+    function samePage(a) {                                  // a link to this very page: another filter or tab, not another page of the list (nav.pager),
+      if (!a || a.target === "_blank" || a.hasAttribute("download") || a.closest(".pager, .sidebar, [data-sec]")) return false;   // nor the menu's section
       var to;
       try { to = new URL(a.href, window.location.href); } catch (e) { return false; }
       if (to.origin !== window.location.origin || to.pathname !== path) return false;
       return to.search !== window.location.search || !to.hash;          // only an anchor of this page: no new page at all
     }
-    document.addEventListener("submit", function () { armed = true; }, true);
+    window.addEventListener("submit", function (e) { if (!e.defaultPrevented) armed = true; });     // last of all: a window that asks first (5b) sends again
     document.addEventListener("change", function (e) { if (e.target.closest && e.target.closest("form[data-autosubmit], details.msel-box")) armed = true; }, true);
     document.addEventListener("click", function (e) {
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;        // a link in a new tab leaves this page where it is
@@ -1276,6 +1277,7 @@
     });
     var nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
     var reload = !!nav && nav.type === "reload";
+    if (nav && nav.type !== "navigate" && !reload) return;  // «Назад» / «Вперёд»: the browser's own place
     if (!mark || mark.path !== path || typeof mark.top !== "number" || !(mark.keep || reload)) return;
     if ((window.location.hash && !reload) || document.querySelector("[aria-invalid=true]")) return;     // an anchor or a field's error: there
     var moved = false;
@@ -1283,9 +1285,11 @@
     put();
     ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { moved = true; }, {once: true, passive: true}); });
     window.addEventListener("load", put);                   // photos above push the place down: put it again unless the person scrolled
-    if (!pageToast || pageBox().scrollTop <= 0) return;
-    document.querySelectorAll(".page > .msgs > .flash").forEach(function (note) {   // the answer of the press stays in sight, not only at the top
-      pageToast(note.textContent.trim(), note.classList.contains("flash--err") ? "err" : "ok");
+    var msgs = document.querySelector(".page > .msgs"), boxed = pageBox();
+    var top = boxed === document.scrollingElement || boxed === document.documentElement ? 0 : boxed.getBoundingClientRect().top;
+    if (!pageToast || !msgs || msgs.getBoundingClientRect().bottom > top) return;    // the answer is in sight at the top: nothing more
+    msgs.querySelectorAll(":scope > .flash").forEach(function (note) {   // out of sight: as a toast too; one with a link stays only at the top
+      if (!note.querySelector("a")) pageToast(note.textContent.trim(), note.classList.contains("flash--err") ? "err" : "ok");
     });
   })();
 
