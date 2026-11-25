@@ -132,8 +132,16 @@
     if (!el || !el.matches) return false;
     return el.matches("textarea, select, [contenteditable=''], [contenteditable='true'], input:not([type=button]):not([type=submit]):not([type=reset]):not([type=hidden])");
   }
+  function edited() {                                     // a field typed in and left (the search, «Другой»): a reload would wipe the text
+    var fields = document.querySelectorAll("input:not([type=hidden]), textarea");
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.type === "checkbox" || f.type === "radio" ? f.checked !== f.defaultChecked : f.value !== f.defaultValue) return true;
+    }
+    return false;
+  }
   function idle() {                                       // the point does nothing: no press, key or scroll lately, no window, no field, no form going
-    if (Date.now() - active < IDLE || sending || typing()) return false;
+    if (Date.now() - active < IDLE || sending || typing() || edited()) return false;
     return !document.querySelector(BUSY);
   }
   function soon() {                                       // not more often than once in 30 s, this load and the one before
