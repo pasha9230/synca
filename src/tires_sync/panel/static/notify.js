@@ -96,6 +96,7 @@
       if (!r.ok || r.redirected) throw new Error(r.status);                    // an expired login answers with the login page
       return r.json();
     }).then(function (data) {
+      changed(data.rev);
       var items = once(data.items || []), keys = items.map(function (it) { return it.key; });
       var who = String(data.who || ""), stored = readSeen(who), seen = stored === undefined ? memory : stored;
       memory = keys;
@@ -131,8 +132,21 @@
     if (!el || !el.matches) return false;
     return el.matches("textarea, select, [contenteditable=''], [contenteditable='true'], input:not([type=button]):not([type=submit]):not([type=reset]):not([type=hidden])");
   }
+  function edited() {                                     // a field typed in and left (the search, «Другой»): a reload would wipe the text
+    try {
+      if (typeof document.querySelectorAll !== "function") return false;     // no such API: nothing to keep
+      var fields = document.querySelectorAll("input:not([type=hidden]), textarea") || [];
+      for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        if (!f) continue;
+        var box = f.type === "checkbox" || f.type === "radio";
+        if (box ? ("defaultChecked" in f && f.checked !== f.defaultChecked) : ("defaultValue" in f && f.value !== f.defaultValue)) return true;
+      }
+    } catch (e) { /* an odd field: never blocks the refresh for good */ }
+    return false;
+  }
   function idle() {                                       // the point does nothing: no press, key or scroll lately, no window, no field, no form going
-    if (Date.now() - active < IDLE || sending || typing()) return false;
+    if (Date.now() - active < IDLE || sending || typing() || edited()) return false;
     return !document.querySelector(BUSY);
   }
   function soon() {                                       // not more often than once in 30 s, this load and the one before
@@ -155,6 +169,12 @@
     if (PAGE && !waiting) tryRefresh();
   }
   function moved() { active = Date.now(); }
+  // Офис поменял состав, клиента, даты, комментарий заказа точки (решение владельца 2026-11-25): отпечаток ленты не тот, что у страницы, —
+  // страница обновляется тихо (без звука и уведомления), по тем же правилам простоя.
+  function changed(rev) {
+    var holder = PAGE && document.querySelector("[data-point-rev]");
+    if (holder && rev && holder.getAttribute("data-point-rev") !== String(rev)) refreshSoon();
+  }
 
   if (PAGE) {
     ["click", "keydown", "touchstart", "pointerdown", "wheel", "input", "scroll"].forEach(function (name) {
