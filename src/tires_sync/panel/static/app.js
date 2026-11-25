@@ -3,6 +3,7 @@
   "use strict";
   // Крестик из набора иконок (_ui.html, icon("x", "i-sm")): кнопки «закрыть / убрать», которые строит скрипт
   var X_ICON = '<svg class="i i-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  var pageToast = null;                                               // the toast of 10) for the other blocks (13d)
 
   // 1) Фильтры применяются сразу при выборе
   document.addEventListener("change", function (e) {
@@ -170,6 +171,7 @@
       box.appendChild(t);
       setTimeout(function () { t.remove(); }, kind === "err" ? 12000 : 7000);
     }
+    pageToast = toast;                                                // 13d: the answer of a press, seen where the page stays
     function setPending(n) {
       document.querySelectorAll("[data-pend-count]").forEach(function (el) {
         el.textContent = n;
@@ -1240,6 +1242,50 @@
     document.addEventListener("click", function (e) {                 // the same #part again: no hashchange, the part folded by hand opens
       var a = e.target.closest && e.target.closest('a[href^="#"]');
       if (a && a.getAttribute("href") === location.hash) openPart();
+    });
+  })();
+
+  // 13d) Списки и разделы (ТЗ №90): фильтр, вкладка, кнопка или F5 грузят ту же страницу снова — она остаётся на том же месте прокрутки,
+  //      а не прыгает наверх. Только тот же адрес без учёта параметров (фильтры меняют их) и только после действия на самой странице
+  //      (отправка формы, выбор в фильтре, ссылка на эту же страницу) или F5; вход из другого места — сверху. Другая страница выдачи
+  //      (?page=), якорь в адресе и ошибка у поля — как прежде. Карточка заказа держит место сама (13c), «Чаты» — своё место списка.
+  (function () {
+    var KEY = "list-place", path = window.location.pathname, armed = false, mark = null;
+    try { mark = JSON.parse(sessionStorage.getItem(KEY) || "null"); sessionStorage.removeItem(KEY); } catch (e) { mark = null; }
+    if (document.querySelector("[data-keep-place], [data-no-keep-place], .chats-list")) return;
+    function pageBox() {                                    // the same box as 13c: .main of the panel on a computer, the page on a phone
+      var main = document.querySelector(".main");
+      if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
+      return document.scrollingElement || document.documentElement;
+    }
+    function samePage(a) {                                  // a link to this very page: another filter or tab, not another page of the list (nav.pager)
+      if (!a || a.target === "_blank" || a.hasAttribute("download") || a.closest(".pager")) return false;
+      var to;
+      try { to = new URL(a.href, window.location.href); } catch (e) { return false; }
+      if (to.origin !== window.location.origin || to.pathname !== path) return false;
+      return to.search !== window.location.search || !to.hash;          // only an anchor of this page: no new page at all
+    }
+    document.addEventListener("submit", function () { armed = true; }, true);
+    document.addEventListener("change", function (e) { if (e.target.closest && e.target.closest("form[data-autosubmit], details.msel-box")) armed = true; }, true);
+    document.addEventListener("click", function (e) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;        // a link in a new tab leaves this page where it is
+      if (samePage(e.target.closest && e.target.closest("a[href]"))) armed = true;
+    }, true);
+    window.addEventListener("pagehide", function () {
+      try { sessionStorage.setItem(KEY, JSON.stringify({path: path, top: pageBox().scrollTop, keep: armed})); } catch (e) { /* private mode: the page opens at its top */ }
+    });
+    var nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
+    var reload = !!nav && nav.type === "reload";
+    if (!mark || mark.path !== path || typeof mark.top !== "number" || !(mark.keep || reload)) return;
+    if ((window.location.hash && !reload) || document.querySelector("[aria-invalid=true]")) return;     // an anchor or a field's error: there
+    var moved = false;
+    function put() { if (!moved) pageBox().scrollTop = mark.top; }
+    put();
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { moved = true; }, {once: true, passive: true}); });
+    window.addEventListener("load", put);                   // photos above push the place down: put it again unless the person scrolled
+    if (!pageToast || pageBox().scrollTop <= 0) return;
+    document.querySelectorAll(".page > .msgs > .flash").forEach(function (note) {   // the answer of the press stays in sight, not only at the top
+      pageToast(note.textContent.trim(), note.classList.contains("flash--err") ? "err" : "ok");
     });
   })();
 

@@ -10,6 +10,7 @@ the list, CRM, «На ОТХ», a new order made by hand or «Новый зак�
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,7 @@ from test_order_reserve import stage
 from tires_sync import orders, store
 
 OTH_SPLIT = True
+JS = (Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "static" / "app.js").read_text(encoding="utf-8")
 # what only an order with a chat of Avito has: the column «Чат Авито» and «Позиция из объявления»
 CHAT_BOUND = {"chats-live", "chats-offline", "order-chat", "ow-ad-position"}
 
@@ -83,3 +85,48 @@ def test_the_record_of_storage_shows_in_both_views(tmp_path, view):
     assert "data-oth-storage" in held and "Запись хранения: шины без клиента" in held and 'action="/orders/%d/storage-back"' % x in held
     cancelled = owner.get("/orders/%d" % cid).get_data(as_text=True)
     assert "Заказ отменён: клиент отказался" in cancelled and "Вернуть заказ клиенту" in cancelled
+
+
+# ---- ТЗ №90: the place of a list page -----------------------------------------------------------------------------------------------
+
+def place():
+    return JS[JS.index("13d) Списки и разделы"):JS.index("13b) Новый заказ")]
+
+
+def test_the_place_is_kept_only_on_the_same_page_after_a_press_on_it():
+    keep = place()
+    assert 'path = window.location.pathname' in keep and "mark.path !== path" in keep                        # the address without the filters
+    assert '!(mark.keep || reload)' in keep and 'nav.type === "reload"' in keep                               # a press here or F5, never a visit
+    assert 'addEventListener("submit", function () { armed = true; }, true)' in keep                          # a form, a button
+    assert 'form[data-autosubmit], details.msel-box' in keep                                                  # a filter applied at once (form.submit())
+    assert "samePage(" in keep and 'a.closest(".pager")' in keep                                              # a link here, not another page of the list
+    assert "sessionStorage.removeItem(KEY)" in keep and 'addEventListener("pagehide"' in keep
+
+
+def test_the_card_the_chats_an_anchor_and_a_field_error_keep_their_own_ways():
+    keep = place()
+    assert 'document.querySelector("[data-keep-place], [data-no-keep-place], .chats-list")' in keep           # 13c, «Чаты»: their own place
+    assert '(window.location.hash && !reload) || document.querySelector("[aria-invalid=true]")' in keep       # the anchor, the field (5a)
+    assert keep.count("try {") == 3 and keep.count("catch (e)") == 3                                          # no storage: the page as before
+    assert "scrollIntoView" not in keep and "location.hash =" not in keep and "replaceState" not in keep
+    assert JS.index("13c) Карточка заказа") < JS.index("13d) Списки и разделы")
+    assert JS.index('field.scrollIntoView({block: "center"});') < JS.index("13d) Списки и разделы")         # the field's error is marked first
+
+
+def test_the_answer_of_a_press_is_seen_where_the_page_stays():
+    keep = place()
+    assert '.page > .msgs > .flash' in keep and "pageToast(note.textContent.trim()" in keep          # the toast of 10), not a copy
+    assert "pageToast = toast;" in JS and JS.index("pageToast = toast;") < JS.index("13d) Списки и разделы")
+
+
+@pytest.mark.parametrize("view", ["old", "new"])
+def test_the_list_pages_take_the_common_place(tmp_path, view):
+    app, owner, tok, conn = panel(tmp_path)
+    store.set_state(conn, "ui_new.office", "all" if view == "new" else "off")
+    conn.commit()
+    for url in ("/orders", "/orders?v=list", "/clients", "/oth", "/catalog", "/orders/report"):
+        r = owner.get(url)
+        assert r.status_code == 200, url
+        html = r.get_data(as_text=True)
+        assert "app.js" in html and "data-keep-place" not in html and "data-no-keep-place" not in html, url
+        assert re.search(r'<div class="page[^"]*">\s*<div class="msgs"', html), url                       # where 13d reads the answer
