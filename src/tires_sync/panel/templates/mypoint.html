@@ -72,7 +72,7 @@
 {# «Выдано» (the owner 2026-11-09): the order closed by a hand-out, its moment and who marked it; no money, nothing of WebMIM but its number #}
 {% macro issued_card(row) %}{% set c = row.card %}<article class="mp-card" id="order-{{ c.id }}" data-order="{{ c.id }}" data-issued="{{ c.id }}">
 <div class="mp-card-head"><span class="mp-no" data-no>№ {{ c.webmim_number or "панель %d"|format(c.id) }}</span><span class="mp-date" data-issued-at>выдан {{ row.at|short_dt }}</span><span class="mp-badges"><span class="badge badge--ok">выдан</span></span></div>
-<div class="mp-client"><span class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}шины не указаны{% endfor %}</span><span class="mp-name">{{ c.client_name or "Без имени" }}</span><span class="mp-sub" data-issued-by>Отметил: {{ row.who or "—" }}</span></div>
+<div class="mp-client"><span class="mp-tyres" data-tyres>{% for i in c['items'] if i.qty >= 1 %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}шины не указаны{% endfor %}</span><span class="mp-name">{{ c.client_name or "Без имени" }}</span>{% if row.comment %}<span class="mp-comment" data-point-comment><span class="mp-comment-l">Комментарий</span>{{ row.comment }}</span>{% endif %}<span class="mp-sub" data-issued-by>Отметил: {{ row.who or "—" }}</span></div>
 {% if row.undo %}<div class="mp-actions">{{ undo_btn(c, row.undo, row.label) }}</div>{% endif %}
 </article>{% endmacro %}
 {% set pq = ("&p=%d"|format(point.id)) if choose and point else "" %}

@@ -357,7 +357,17 @@ def point_comment(conn, card: dict) -> str:
     return orders.without_account_names(conn, text, names).strip()
 
 
-def point_rev(conn, cards: list) -> str:
+def _issued_comments(conn, point_id, today: str) -> list:
+    """What «Выдано» shows of the order's window that the cards of the other tabs do not carry: [order, «Комментарий» as the point reads it] of
+    the point's orders on «Выполнено» in the last ISSUED_DAYS (one query; a few more than the tab lists — the point's own sales — only reload
+    the page once more, never show anything)."""
+    since = (date.fromisoformat(today) - timedelta(days=ISSUED_DAYS)).isoformat()
+    rows = conn.execute("SELECT c.id, c.comment FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'done' "
+                        "AND c.entered_at >= ? ORDER BY c.id", (point_id, since)).fetchall()
+    return [[r[0], point_comment(conn, {"comment": r[1]})] for r in rows]
+
+
+def point_rev(conn, cards: list, point_id=None, today: str = "") -> str:
     """A print of what «Рабочее место» shows of the point's orders (`cards`: already read, _cards + _oth_cards — on the way, at the point,
     on «На ОТХ» and «На возврат»): the office changes the positions, the client, the dates, the numbers, the comment or moves an order —
     the print is new and the open page reloads itself (notify.js, the owner 2026-11-25). Read from the orders themselves, the one source;
@@ -368,6 +378,8 @@ def point_rev(conn, cards: list) -> str:
         parts.append([card["id"], card["stage_id"], card["entered_at"], card["client_name"], card["client_phone"],
                       card["delivery_date"], card["delivery_time"], card["reserve_until"], card["transfer_number"], card["webmim_number"],
                       point_comment(conn, card), [[i["id"], i["name"], i.get("code"), i["goods_id"], i["qty"], i["sale_unit"]] for i in card["items"]]])
+    if point_id is not None and today:                                   # the comment of «Выдано» (the closed orders are not in `cards`)
+        parts.append(_issued_comments(conn, point_id, today))
     return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:16]
 
 
@@ -397,7 +409,8 @@ def _issued(conn, point_id, today: str) -> list:
         if came is None or came.group(1) not in sources:
             continue
         found.append({"card": card, "label": mgr.label(card), "at": card["entered_at"], "who": users.person_name(conn, move[0], current_app.config["AUTHOR"]),
-                      "undo": point_log.undoable(conn, card, point_id)})
+                      "undo": point_log.undoable(conn, card, point_id),
+                      "comment": point_comment(conn, card)})          # «Комментарий» of the order's window in «Выдано» too (2026-11-25)
     return found
 
 
@@ -483,7 +496,8 @@ def _returns(conn, point_id) -> list:
              "return_date": r["plan"]["return_date"], "date": _short_date(r["plan"]["return_date"]),
              "return_by": _full_date(r["plan"]["return_date"]),                 # «Вернуть дд.мм.гггг» by the number (the task of 2026-11-12)
              "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12), "act_order": order_oth.act_orders(conn, r["card"]["id"]),
-             "act_file": oth_return_act.find(conn, point_id, r["plan"]["return_date"])}      # «Скачать акт» (the owner 2026-11-12)
+             "act_file": oth_return_act.find(conn, point_id, r["plan"]["return_date"]),      # «Скачать акт» (the owner 2026-11-12)
+             "comment": point_comment(conn, r["card"])}                         # «Комментарий» of the order's window (2026-11-25)
             for r in order_oth.to_return(conn, point_id)]
 
 
@@ -713,7 +727,7 @@ def register(app) -> None:
                                return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK, not_taken_next=oth_point_return.NOT_TAKEN_NEXT,
                                buyer_ask=oth_point_return.BUYER_ASK, comment_max=oth_point_return.COMMENT_MAX,
                                undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL,
-                               rev=point_rev(conn, loaded) if own_point() is not None and point_id is not None else "")    # the feed's own point only
+                               rev=point_rev(conn, loaded, point_id, today) if own_point() is not None and point_id is not None else "")    # the feed's own point only
 
     def _undo(card_id):
         """«Отменить» a press that moved the order (point_log.undo; the address /my-point/<order>/undo, the endpoint of the presses): the
@@ -1036,5 +1050,5 @@ def register(app) -> None:
                        "text": (r["text"] or "")[:200], "href": href(r)} for r in with_orders(conn, grouped(conn, who))]
         answer = {"who": who, "items": items + calls}
         if own_point() is not None:                                             # the page of the point's own person reloads on a change (point_rev)
-            answer["rev"] = point_rev(conn, cards + oth_cards)
+            answer["rev"] = point_rev(conn, cards + oth_cards, point_id, now[:10])
         return jsonify(answer)
