@@ -171,3 +171,15 @@ def test_the_row_of_the_table_takes_the_report_rule_of_the_handed_client(tmp_pat
     report = order_report.build(conn, "2026-12-10", "2026-12-10")
     assert round(sum(r["Прибыль ₽"] for r in rows), 2) == report["total"]["net"]
     assert report["handoff"]["fee"] == 200                                                  # «Откуда клиент» = the point: its bonus
+
+
+def test_whats_new_shows_the_point_its_income_only_while_the_switch_is_on(tmp_path):
+    app, owner, tok, conn, a, b = panel(tmp_path)
+    mine = manager(app, conn, a)
+    page = mine.get("/whats-new").get_data(as_text=True)
+    assert "Чаты: вкладки" in page and "Доход: ваши выплаты" not in page and "Пункты выдачи: расчёты" not in page
+    switch(owner, tok, True)
+    page = mine.get("/whats-new").get_data(as_text=True)
+    assert "Доход: ваши выплаты" in page and "Пункты выдачи: расчёты" not in page
+    office = owner.get("/whats-new").get_data(as_text=True)
+    assert "Пункты выдачи: расчёты с точками" in office and "Доход: ваши выплаты" in office

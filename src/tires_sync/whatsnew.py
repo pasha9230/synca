@@ -7,6 +7,7 @@ are files of the code, data/whatsnew/NNNN.md, and go out with the deploy:
 
     ## Раздел: короткое название изменения
     roles: owner, partner, point
+    when: point_income                       (optional: shown to those roles only while that switch of the panel is on, WHEN)
     **Что сделано:** простыми словами, что изменилось для человека.
 
     **Как работает:**
@@ -35,6 +36,8 @@ DIR = Path(__file__).resolve().parent / "data" / "whatsnew"
 NAME = re.compile(r"^(\d{4})\.md$")
 SEEN_KEY = "whatsnew.seen"
 SEES_ALL = frozenset({"owner", "partner"})
+# the optional «when:» of an item: the switch of the panel it waits for (the owner and the partner see it always)
+WHEN = {"point_income": "«Показывать точкам страницу дохода» включён (order_report.income_shown)"}
 PARTS = ("**Что сделано:**", "**Как работает:**", "**Затрагивает разделы:**")      # every item, in this order (the owner 2026-11-05)
 log = logging.getLogger(__name__)
 
@@ -122,13 +125,18 @@ def parse(text: str, number: int) -> dict:
         if not roles_line.startswith("roles:"):
             raise BadFile("item %r: the line after the title must be «roles: …»" % title)
         roles = [r.strip() for r in roles_line[len("roles:"):].split(",") if r.strip()]
+        when = ""
+        if body and body[0].strip().startswith("when:"):
+            when, body = body[0].strip()[len("when:"):].strip(), body[1:]
+            if when not in WHEN:
+                raise BadFile("item %r: when %r" % (title, when))
         unknown = [r for r in roles if r not in users.ROLES]
         if not roles or unknown:
             raise BadFile("item %r: roles %s" % (title, unknown or "missing"))
         if not any(line.strip() for line in body):
             raise BadFile("item %r: no text" % title)
         _check_parts(title, body)
-        items.append({"title": title, "roles": frozenset(roles), "body": _body(body)})
+        items.append({"title": title, "roles": frozenset(roles), "when": when, "body": _body(body)})
     if not items:
         raise BadFile("no items")
     return {"number": number, "date": fields["date"], "title": fields["title"], "items": items}
@@ -154,20 +162,27 @@ def shipped() -> tuple:
     return tuple(load())
 
 
-def for_role(updates, role: str) -> list:
-    """The updates as `role` sees them: only its items, an update without any left out."""
+def for_role(updates, role: str, flags=frozenset()) -> list:
+    """The updates as `role` sees them: only its items (an item with «when:» while that switch is in `flags`), an update without any left
+    out."""
     out = []
     for update in updates:
-        items = [i for i in update["items"] if role in SEES_ALL or role in i["roles"]]
+        items = [i for i in update["items"] if role in SEES_ALL or (role in i["roles"] and (not i.get("when") or i["when"] in flags))]
         if items:
             out.append(dict(update, items=items))
     return out
 
 
-def latest(updates, role: str) -> int:
+def latest(updates, role: str, flags=frozenset()) -> int:
     """The number of the newest update `role` sees; 0: none."""
-    shown = for_role(updates, role)
+    shown = for_role(updates, role, flags)
     return shown[0]["number"] if shown else 0
+
+
+def flags(conn) -> frozenset:
+    """The switches of WHEN that are on now."""
+    from . import order_report
+    return frozenset({"point_income"} if order_report.income_shown(conn) else ())
 
 
 def _seen(conn, login: str) -> dict:
@@ -175,17 +190,17 @@ def _seen(conn, login: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def has_new(conn, login: str, role: str, updates) -> bool:
+def has_new(conn, login: str, role: str, updates, flags=frozenset()) -> bool:
     """The dot of the menu: an update for `role` newer than the one `login` saw last as that role."""
     if not login or not role:
         return False
     seen = _seen(conn, login).get(role, 0)
-    return latest(updates, role) > (seen if isinstance(seen, int) and not isinstance(seen, bool) else 0)
+    return latest(updates, role, flags) > (seen if isinstance(seen, int) and not isinstance(seen, bool) else 0)
 
 
-def mark_seen(conn, login: str, role: str, updates, now: str) -> None:
+def mark_seen(conn, login: str, role: str, updates, now: str, flags=frozenset()) -> None:
     """The page was opened: everything `role` sees is read for `login`. Writes only when something was new."""
-    if login and has_new(conn, login, role, updates):
+    if login and has_new(conn, login, role, updates, flags):
         seen = _seen(conn, login)
-        seen[role] = latest(updates, role)
+        seen[role] = latest(updates, role, flags)
         user_prefs.put(conn, login, SEEN_KEY, seen, now)

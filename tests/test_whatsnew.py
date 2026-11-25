@@ -62,7 +62,8 @@ def dot_on(client, url):
 # what a section of the panel is called, in the titles of the items: the menus (base.html, _point_nav.html), and the menu itself
 SECTIONS = {"Главная", "Заказы", "Задачи", "Чаты", "Звонки", "CRM", "Уведомления", "Каталог", "Каталог для клиента", "Генерация", "Фиды", "На ОТХ",
             "Подключения", "Настройки заказов", "Шаблоны сообщений", "История", "Новый вид", "Пользователи", "Рабочее место", "Меню",
-            "Сопоставления", "Аналитика рекламы"}             # №5: two more items of the menu (base.html)
+            "Сопоставления", "Аналитика рекламы",             # №5: two more items of the menu (base.html)
+            "Пункты выдачи", "Доход"}                          # №23, №24: the office's ledger of the points, the point's «Доход»
 # never in an item a point or a client reads (the owner 2026-11-05); and in no item at all, the repository is public
 NOT_FOR_POINT = re.compile(r"закуп|наценк|прибыл|маржа|логин|аккаунт", re.IGNORECASE)
 PUBLIC_NEVER = re.compile(r"\+?\d[\d ()-]{9,}\d|https?://|\b[\w-]+\.(?:ru|com|net|org)\b", re.IGNORECASE)
@@ -231,7 +232,8 @@ def test_the_shipped_page_opens_for_a_role_with_its_own_items_only(tmp_path, rol
     html = page(client)
     for _number, item in shipped_items():
         title = str(escape(item["title"]))
-        assert (title in html) == (role in whatsnew.SEES_ALL or role in item["roles"]), (role, item["title"])
+        assert (title in html) == (role in whatsnew.SEES_ALL or (role in item["roles"] and not item["when"])), (role, item["title"])   # «when:»
+        # an item waits for its switch (off in a new panel)
 
 
 @pytest.mark.parametrize("text, why", [
