@@ -122,9 +122,32 @@ class _Pool:
         self.issues = getattr(parsed, "issues", {})
 
 
+_GONE_CACHE: dict = {}                          # {database file: (key, offers)}: the positions taken away, read once per change of the base
+
+
+def _gone_key(conn) -> tuple:
+    """What changes whenever the set of the positions taken away changes (one went, one came back, the cycle wrote the base again): their
+    count, the latest «gone since» and the latest «last seen» of the base. One cheap query, no JSON read."""
+    return tuple(conn.execute("SELECT COUNT(*), MAX(gone_since), (SELECT MAX(last_seen) FROM catalog_item) FROM catalog_item "
+                              "WHERE gone_since != ''").fetchone())
+
+
+def gone_cached(conn) -> list:
+    """catalog_archive.gone_offers (the offers only), kept in memory until _gone_key changes: the list of the window asks it at every typed letter."""
+    row = conn.execute("PRAGMA database_list").fetchone()
+    where = row[2] if row else ""
+    key = _gone_key(conn)
+    held = _GONE_CACHE.get(where)
+    if held is None or held[0] != key or not where:
+        held = (key, [o for o, _info in catalog_archive.gone_offers(conn)])
+        if where:                                                 # a database in memory has no file: never kept
+            _GONE_CACHE[where] = held
+    return held[1]
+
+
 def every_offer(conn, parsed):
     """Every position the panel knows (ТЗ 94): today's unload, with a stock or not, and the permanent base of positions it has no more."""
-    return _Pool(parsed, [o for o, _info in catalog_archive.gone_offers(conn)])
+    return _Pool(parsed, gone_cached(conn))
 
 
 def same_named(parsed, text: str) -> list:
