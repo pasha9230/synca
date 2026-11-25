@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{# «Пункты выдачи» (ТЗ 91, 95; routes_point_payouts): the ledger of the points — the fee of the issued orders, the bonuses and the KPI
+   premiums — and «Рассчитан». Only an account: no money moves from here. #}
+{% block title %}Пункты выдачи · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Пункты выдачи<span class="help-q" tabindex="0" data-tip="Взаиморасчёты с точками: выплаты за выдачу, бонусы (переданные клиенты, продажи с ОТХ) и премии KPI — по тем же ставкам, что «Отчёт по заказам». «Рассчитан» фиксирует, что точке заплатили (например, вычли с кассы): позиция уходит из долга в панели точки и остаётся в отчётах. Учёт ведётся с {{ ledger_from }}.">?</span></h1></div></header>
+<form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap;margin-bottom:var(--s-4)">
+<label class="field"><span class="label">С</span><input class="input" type="date" name="from" value="{{ start }}"></label>
+<label class="field"><span class="label">По</span><input class="input" type="date" name="to" value="{{ end }}"></label>
+<label class="field"><span class="label">Точка</span><select class="select" name="p"><option value="">Все</option>{% for id, name in names.items() %}<option value="{{ id }}"{% if id == point_id %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Выплата</span><select class="select" name="pay"><option value="active"{% if pay == "active" %} selected{% endif %}>Не рассчитан</option><option value="paid"{% if pay == "paid" %} selected{% endif %}>Рассчитан</option><option value="all"{% if pay == "all" %} selected{% endif %}>Все</option></select></label>
+<button class="btn btn--primary">Показать</button></form>
+{% if requests %}<section class="card" style="margin-bottom:var(--s-4)" data-payout-requests><div class="card-body"><h3>Запросы точек</h3>
+{% for pid, r in requests.items() %}<p>Точка «{{ names.get(pid, pid) }}»: «Вычли с кассы и получили бонусы» — {{ r.amount|money }}, {{ r.at|short_dt }}. Проверьте кассу и отметьте «Рассчитан».</p>{% endfor %}</div></section>{% endif %}
+<section class="card" style="margin-bottom:var(--s-4)"><div class="card-head"><h3>Ведомость по точкам</h3><span class="sub">с {{ start|short_dt }} по {{ end|short_dt }}</span></div>
+{% if summary %}<div class="card-body" style="overflow-x:auto"><table class="table" data-payout-summary><thead><tr><th>Точка</th><th>За выдачу</th><th>Бонусы</th><th>KPI</th><th>Всего</th><th>Рассчитано</th><th>К выплате</th><th></th></tr></thead><tbody>
+{% for s in summary %}<tr data-point="{{ s.point_id }}"><td>{{ s.point }}</td><td>{{ s.issue|money }}</td><td>{{ s.bonus|money }}</td><td>{{ s.kpi|money }}</td><td>{{ s.total|money }}</td><td>{{ s.paid|money }}</td><td><b>{{ s.unpaid|money }}</b></td>
+<td>{% if s.unpaid_items and can_post("points_payouts_settle") %}<form method="post" action="/points/payouts/settle" class="inline" data-once data-confirm-title="Рассчитать точку «{{ s.point }}»?" data-confirm="Все {{ s.unpaid_items|length }} поз. за период на {{ s.unpaid|money }} будут отмечены «Рассчитан» и уйдут из долга точки." data-confirm-ok="Рассчитан"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="from" value="{{ start }}"><input type="hidden" name="to" value="{{ end }}"><input type="hidden" name="p" value="{{ point_id or '' }}"><input type="hidden" name="pay" value="{{ pay }}">{% for i in s.unpaid_items %}<input type="hidden" name="item" value="{{ i }}">{% endfor %}<button class="btn btn--secondary btn--sm" data-settle-point="{{ s.point_id }}">Рассчитан (всё)</button></form>{% endif %}</td></tr>{% endfor %}
+<tr class="strong"><td>Итого</td><td>{{ totals.issue|money }}</td><td>{{ totals.bonus|money }}</td><td>{{ totals.kpi|money }}</td><td>{{ totals.total|money }}</td><td>{{ totals.paid|money }}</td><td>{{ totals.unpaid|money }}</td><td></td></tr>
+</tbody></table></div>{% else %}<div class="card-body muted">За период выплат точкам нет.</div>{% endif %}</section>
+<section class="card"><div class="card-head"><h3>По заказам</h3><span class="sub">отметьте и нажмите «Рассчитан»</span></div>
+{% if rows %}<form method="post" action="/points/payouts/settle" class="card-body" style="overflow-x:auto" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="from" value="{{ start }}"><input type="hidden" name="to" value="{{ end }}"><input type="hidden" name="p" value="{{ point_id or '' }}"><input type="hidden" name="pay" value="{{ pay }}">
+<table class="table" data-payout-items><thead><tr><th></th><th>Точка</th><th>Дата</th><th>Заказ</th><th>Клиент</th><th>За выдачу</th><th>Переданный клиент</th><th>С ОТХ</th><th>KPI</th><th>Всего</th><th>Выплата</th></tr></thead><tbody>
+{% for e in rows %}{% set c = cards.get(e.order) %}<tr data-item="{{ e.point_id }}|{{ e.item }}"><td>{% if not e.paid %}<input type="checkbox" name="item" value="{{ e.point_id }}|{{ e.item }}" aria-label="Отметить">{% endif %}</td>
+<td>{{ e.point }}</td><td>{{ e.day|short_dt }}</td><td>{% if e.order %}<a href="/orders/{{ e.order }}">№ {{ c.label if c else e.order }}</a>{% else %}Премия KPI за {{ e.month }}, цикл {{ e.cycle }}{% endif %}</td><td>{{ c.client if c and c.client else "—" }}</td>
+<td>{{ e.issue|money if e.issue else "—" }}</td><td>{% if e.handoff %}{{ e.handoff|money }}{% if e.handoff_pieces %} ({{ e.handoff_pieces }} шт.){% endif %}{% else %}—{% endif %}</td><td>{% if e.oth %}{{ e.oth|money }} ({{ e.oth_pieces }} шт.){% else %}—{% endif %}</td><td>{{ e.kpi|money if e.kpi else "—" }}</td><td>{{ e.total|money }}</td>
+<td>{% if e.paid %}<span class="badge badge--ok">Рассчитан {{ e.paid.paid_at|short_dt }}</span>{% else %}<span class="badge badge--warn">Не рассчитан</span>{% endif %}</td></tr>{% endfor %}
+</tbody></table>
+{% if can_post("points_payouts_settle") %}<button class="btn btn--primary" style="margin-top:var(--s-3)" data-settle>Рассчитан</button>{% endif %}</form>
+{% else %}<div class="card-body muted">Нет позиций по выбранным условиям.</div>{% endif %}</section>
+{% endblock %}

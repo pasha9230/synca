@@ -211,18 +211,23 @@ def test_switched_on_the_point_sees_its_own_sums_only(tmp_path, view):
     assert total.replace("\xa0", " ").startswith("800")
     assert 'data-income="issue">300' in page.replace("\xa0", " ") and 'data-income="bonus">500' in page.replace("\xa0", " ")
     rows = re.findall(r'<tr data-order="(\d+)">', page)
-    assert sorted(map(int, rows)) == [1, 2, 3, 4, 5]
+    assert sorted(map(int, rows)) == [1, 3, 4, 5]                                       # «Доход»: the issued orders; order 2 is a bonus only
+    bonus = mine.get("/my-point/income?tab=bonus").get_data(as_text=True)
+    assert sorted(map(int, re.findall(r'data-bonus-order="(\d+)"', bonus))) == [2, 3, 4]
+    kpi = mine.get("/my-point/income?tab=kpi").get_data(as_text=True)
+    assert "Что такое KPI" in kpi and "6 250 ₽" in kpi and not re.search(r"(?<!\d)50 ₽", kpi.replace("\xa0", " "))   # no «50 ₽» (ТЗ 95)
     for secret in ("Закупка", "Прибыль", "20 000", "4 000"):                       # no purchase, no profit, no prices
-        assert secret not in page, secret
+        for shown in (page, bonus, kpi):
+            assert secret not in shown, secret
     other = mine.get("/my-point/income?p=%d" % b).get_data(as_text=True)          # ?p= is never the point's choice
     assert re.findall(r'<tr data-order="(\d+)">', other) == rows
     theirs = manager(app, conn, b, login_="delta").get("/my-point/income").get_data(as_text=True)
     assert re.findall(r'<tr data-order="(\d+)">', theirs) == ["2"] and "800" not in theirs
     november = mine.get("/my-point/income?m=2026-11").get_data(as_text=True)
-    assert "За этот месяц выплат нет." in november
+    assert "За период выплат нет." in november
     assert mine.get("/my-point/income?m=junk").status_code == 200
-    assert "за каждую шину, проданную с ОТХ, +50" in page.replace("\xa0", " ")
-    october = mine.get("/my-point/income?m=2026-10").get_data(as_text=True)          # before OTH_SALE_FEE_FROM: no «+0 ₽» in the hint
+    assert "за каждую шину, проданную с ОТХ, +50" in bonus.replace("\xa0", " ")
+    october = mine.get("/my-point/income?tab=bonus&m=2026-10").get_data(as_text=True)    # before OTH_SALE_FEE_FROM: no «+0 ₽» in the hint
     assert "проданную с ОТХ" not in october
 
 
