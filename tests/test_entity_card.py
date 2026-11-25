@@ -73,7 +73,7 @@ def test_the_order_card_keeps_its_window_and_actions_in_the_one_head(tmp_path):
     cid = new_order(owner, tok)
     page = owner.get("/orders/%d" % cid).get_data(as_text=True)
     head = page[page.index('class="entity-head owin-top"'):page.index('class="owin-stages"')]
-    assert "Заказ №%d" % cid in head and 'id="ow-title"' in head and ">Иван</h1>" in head
+    assert "№ панели %d" % cid in head and 'id="ow-title"' in head             # the panel's number top left of the dark head (the owner 25.11) and ">Иван</h1>" in head
     assert "entity-actions" in head and "Ещё ⋯" in head and "Перевести в «" in head      # the next stage and the menu stay in the head
     assert 'form id="ow-main"' in page or 'id="ow-main"' in page
     assert '<div class="crumbs"><a href="/orders">Заказы</a>' in page
@@ -83,7 +83,7 @@ def test_the_order_card_keeps_its_window_and_actions_in_the_one_head(tmp_path):
     assert r.status_code == 302 and "позвонить завтра" in owner.get("/orders/%d" % cid).get_data(as_text=True)
     new = owner.get("/orders/new").get_data(as_text=True)
     assert ">Новый заказ</h1>" in new and "entity-head owin-top" in new and "entity-eyebrow" not in new
-    assert 'aria-labelledby="ow-title-kind ow-title"' in page and 'id="ow-title-kind">Заказ №%d<' % cid in page
+    assert 'aria-labelledby="ow-title-kind ow-title"' in page and 'id="ow-title-kind">№ панели %d<' % cid in page
 
 
 def test_the_client_card_has_fields_lists_and_its_events(tmp_path):
