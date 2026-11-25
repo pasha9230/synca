@@ -1578,6 +1578,7 @@ def register(app) -> None:
             changes["codes_written_off_at"] = (card["codes_written_off_at"] or local_now().date().isoformat()) if ticked == "0" else ""
         number_before = card["webmim_number"]
         lacking_before = {t["id"] for t in engine.list_tasks(conn, card_id, ("error",)) if t["kind"] == "message"}
+        vk_before = point_before(conn, card_id)
         if changes.get("responsible") == card["responsible"]:
             changes.pop("responsible")                                       # the form shows who answers now: sending that back names nobody new
         # the row of «Позиции» chosen or typed and not added by «+»: «Сохранить» adds it with the rest (the owner 2026-10-23, order №428).
@@ -1594,7 +1595,6 @@ def register(app) -> None:
             if "stage_id" in request.form or request.form.get("tab") != "money":
                 return card_page(conn, card, dict(changes, **typed_row))  # the window comes back with what was typed: nothing saved, nothing moved
             return back(card_id, "money")
-        client_fixed(conn, card, changed)
         if can("chats", "edit"):                                          # the chat of the order: unlink, move here, bind the offered or the typed one;
             # before the row: the row is priced by the account of the chats the order has after this press (order_offers.account_for)
             unlink, moved, offered = (_int(request.form.get(k)) for k in ("chat_unlink", "chat_move", "chat_bind"))
@@ -1624,6 +1624,7 @@ def register(app) -> None:
             flash("Поля заказа сохранены. Позиция не выбрана: начните вводить модель и выберите шину из списка.", "error")
         else:
             flash("Сохранено.", "ok")
+        point_fixed(conn, card_id, vk_before)                             # the fields and the typed row saved: the point's VK messages
         row = orders._row(conn, card_id)
         typed_number = bool(row["webmim_number"]) and "webmim_number" in changed     # the transfer number from MIM's cabinet, at the end
         if row["webmim_number"] and (("webmim_number" in changed and not number_before) or "webmim_id" in changed):
@@ -1712,12 +1713,13 @@ def register(app) -> None:
         if changes.get("responsible") == card["responsible"]:
             changes.pop("responsible")                                       # as «Сохранить»: who answers now is nobody new
         lacking_before = {t["id"] for t in engine.list_tasks(conn, card_id, ("error",)) if t["kind"] == "message"}
+        vk_before = point_before(conn, card_id)
         try:
             check_responsible(app, conn, changes.get("responsible"), card["responsible"])
             changed = orders.update_card(conn, card_id, changes, local_iso(), author())
         except orders.OrderError as err:
             return jsonify(ok=False, error=str(err)), 400
-        client_fixed(conn, card, changed)
+        point_fixed(conn, card_id, vk_before)
         if changed and lacking_before:                                    # a lacking value typed (the phone): the waiting messages, as «Сохранить»
             engine.refresh_tasks(conn, card_id, local_iso())
             if any(t["id"] in lacking_before for t in engine.list_tasks(conn, card_id, ("pending",))):
@@ -1775,10 +1777,14 @@ def register(app) -> None:
             chats_store.send_reply(conn, client, chat_row, text, token, stamp, author())
         return deliver
 
-    def client_fixed(conn, before: dict, changed) -> None:
-        """The client's name or phone saved in the window (committed): the message the panel sent to the point in VK is corrected
-        (vk_point_fix; the owner 2026-11-24). Only this order; nothing for a point's own save. Never fails the save."""
-        if not ({"client_name", "client_phone"} & set(changed or ())) or own_point() is not None:
+    def point_before(conn, card_id) -> dict:
+        """What the point's VK messages of the order are made from, before a change (vk_point_fix.snapshot); {} for a point's own save."""
+        return {} if own_point() is not None else vk_point_fix.snapshot(conn, card_id, local_iso())
+
+    def point_fixed(conn, card_id, before: dict) -> None:
+        """The order saved (committed): the messages the panel sent to the point in VK are made right — the client, the positions, the dates…
+        (vk_point_fix; the owner 2026-11-24/25). Only this order; nothing for a point's own save. Never fails the save."""
+        if not before or own_point() is not None:
             return
         try:
             box, http = app.config.get("SECRET_BOX"), vk_point_fix.short_http(app.config.get("VK_HTTP") or urllib_transport)
@@ -1786,8 +1792,7 @@ def register(app) -> None:
         except Exception:                                                 # noqa: BLE001  a key that cannot be read: nothing to VK
             log.exception("the key of the VK community could not be read")
             return
-        vk_point_fix.client_changed(conn, before["id"], {"client_name": before["client_name"], "client_phone": before["client_phone"]},
-                                    local_iso(), author(), send, edit)
+        vk_point_fix.order_changed(conn, card_id, before, local_iso(), author(), send, edit)
 
     def vk_sender(conn, quiet=False):
         """send(peer_id, text, random_id=) through the VK community; None without the master key or the key of the community.
@@ -1968,10 +1973,12 @@ def register(app) -> None:
             return back(card_id, "sale")
         if "was" in request.form:                                          # «+» of the card's window sends the whole window (the owner 2026-10-26:
             return order_save(card_id, part="items")                       # «Точка» was lost): its fields are saved as by «Сохранить», with the row
+        vk_before = point_before(conn, card_id)
         try:
             by_text = add_typed_item(conn, card_id, request.form)
             if by_text:
                 flash("Добавлено по тексту: %s." % by_text)
+            point_fixed(conn, card_id, vk_before)
         except orders.OrderError as err:
             flash(str(err))
         return back(card_id, "sale" if own_point() else "items")     # a point: its block «Продажа точки»
@@ -2011,7 +2018,9 @@ def register(app) -> None:
                 flash("Клиент взял все шины заказа №%d: заказ продолжается там, этот ушёл в «Отмену»." % whole, "ok")
                 tell_at_point(conn, whole, next(s for s in orders.list_stages(conn) if s["code"] == "at_point"), stamp)
                 return redirect("/orders/%d" % whole)
+            vk_before = point_before(conn, card_id)
             pieces = oth_sale.take(conn, card_id, item_id, source, local_iso(), author())
+            point_fixed(conn, card_id, vk_before)
             flash("Взято с ОТХ: %d шт. В WebMIM оформится только недостающее." % pieces)
         except orders.OrderError as err:
             flash(str(err))
@@ -2026,7 +2035,9 @@ def register(app) -> None:
         if item_id not in {i["id"] for i in card["items"]}:
             abort(404)
         try:
+            vk_before = point_before(conn, card_id)
             pieces = oth_sale.untake(conn, card_id, item_id, local_iso(), author())
+            point_fixed(conn, card_id, vk_before)
             flash("Возвращено на ОТХ: %d шт. Если шины нужны у поставщика, добавьте позицию заново." % pieces)
         except orders.OrderError as err:
             flash(str(err))
@@ -2169,9 +2180,11 @@ def register(app) -> None:
         card = card_or_404(conn, card_id)
         if item_id not in {i["id"] for i in card["items"]}:
             abort(404)
+        vk_before = point_before(conn, card_id)
         try:
             purchase = request.form.get("supplier_price", "").strip() if has_right("money") else ""     # the purchase is money: only with the right
             orders.update_item(conn, item_id, request.form.get("qty"), request.form.get("sale_unit"), local_iso(), author(), supplier_price=purchase or None)
+            point_fixed(conn, card_id, vk_before)
         except orders.OrderError as err:
             flash(str(err))
         return back(card_id, "sale" if own_point() else "items")     # a point: its block «Продажа точки»
@@ -2183,8 +2196,10 @@ def register(app) -> None:
         card = card_or_404(conn, card_id)
         if item_id not in {i["id"] for i in card["items"]}:
             abort(404)
+        vk_before = point_before(conn, card_id)
         try:
             orders.remove_item(conn, item_id, local_iso(), author())
+            point_fixed(conn, card_id, vk_before)
         except orders.OrderError as err:
             flash(str(err))
         return back(card_id, "sale" if own_point() else "items")     # a point: its block «Продажа точки»

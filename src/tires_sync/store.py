@@ -462,7 +462,7 @@ CREATE INDEX IF NOT EXISTS order_task_order ON order_task (order_id, status);
 CREATE TABLE IF NOT EXISTS vk_point_message (
     id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, peer_id TEXT NOT NULL, message_id INTEGER NOT NULL,
     kind TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', client_phone TEXT NOT NULL DEFAULT '',
-    sent_at TEXT NOT NULL, edited_at TEXT
+    sent_at TEXT NOT NULL, edited_at TEXT, template TEXT, vals TEXT, wrap TEXT
 );
 CREATE INDEX IF NOT EXISTS vk_point_message_order ON vk_point_message (order_id);
 CREATE TABLE IF NOT EXISTS order_want (
@@ -728,6 +728,8 @@ def _migrate(conn) -> None:
     _add_column(conn, "chat_send_log", "orig_at", "TEXT NOT NULL DEFAULT ''")        # the first start of the send, never moved: the chat is looked at from it
     _add_column(conn, "account", "feed_mode", "TEXT NOT NULL DEFAULT 'generated'")
     _add_column(conn, "order_task", "arg", "TEXT NOT NULL DEFAULT ''")
+    for column in ("template", "vals", "wrap"):                      # the template a point's VK message was built from (vk_point_fix, 2026-11-25)
+        _add_column(conn, "vk_point_message", column, "TEXT")
     _add_column(conn, "order_task", "stage_id", "INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "order_event", "level", "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "callback_task", "kind", "TEXT NOT NULL DEFAULT 'callback'")   # «Задачи» (2026-10-31): the old rows are «перезвонить»

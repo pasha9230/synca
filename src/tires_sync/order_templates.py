@@ -223,7 +223,12 @@ def _oth_source(conn, card_id) -> str:
 def render(conn, card: dict, body: str, now=None, mark: bool = False) -> Tuple[str, List[str]]:
     """The text of a template for a card and the names of the values it lacks (those variables are left out of the text; `mark`: put
     «[name]» in their place, the draft a person reads while a value is lacking, never sent: unfilled)."""
-    data = values(conn, card, now)
+    return fill(body, values(conn, card, now), mark)
+
+
+def fill(body: str, data: dict, mark: bool = False) -> Tuple[str, List[str]]:
+    """The text of a template with these values ({variable: text}) and the names of those it lacks (render; vk_point_fix rebuilds a point's
+    message with the values of the order as they are now)."""
     missing: List[str] = []
 
     def put(match):
