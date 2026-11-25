@@ -150,6 +150,71 @@ def test_the_chat_adds_a_position_out_of_the_feed(tmp_path, monkeypatch):
     assert orders.get_card(conn, card_id)["items"][-1]["sale_unit"] == 6200.0
 
 
+def test_positions_with_a_stock_come_before_those_without_whatever_the_match():
+    """The review of 2026-11-25: the list of 10 never loses a position with a stock to better matches without one."""
+    from helpers import make_offer
+    exact_none = make_offer(goods_id="a", name="AUTOGRAPH A", name_orig="Autograph A", brand_key="X", brand_raw="X", model_raw="Autograph", stock=0)
+    sound_some = make_offer(goods_id="b", name="AVTOGRAF B", name_orig="Avtograf B", brand_key="X", brand_raw="X", model_raw="Avtograf", stock=5)
+    pool = ParseResult(offers={"a": exact_none, "b": sound_some})
+    ranked = order_search._find(pool, {}, "autograph", every=True)
+    assert ranked[0][0] < ranked[1][0]                                                     # the one with a stock matches worse (by sound)
+    assert [offer.goods_id for _s, _e, offer in ranked] == ["b", "a"]
+
+
+def test_the_gone_positions_are_read_once_until_the_base_changes(tmp_path, monkeypatch):
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    gone(app, conn)
+    calls = []
+    real = catalog_archive.gone_offers
+    monkeypatch.setattr(catalog_archive, "gone_offers", lambda c: calls.append(1) or real(c))
+    order_search._GONE_CACHE.clear()
+    assert [o.goods_id for o in order_search.gone_cached(conn)] == ["x-gone"]
+    found(client, "autograph")
+    found(client, "autogr")
+    assert len(calls) == 1                                                                 # typing reads the JSON of the base once
+    [held] = order_search.gone_cached(conn)
+    other = dataclasses.replace(held, goods_id="x-two")
+    catalog_archive.record(conn, ParseResult(offers={"x-two": other}), "2026-11-02T10:00:00")
+    conn.execute("UPDATE catalog_item SET gone_since = ? WHERE goods_id = ?", ("2026-11-20T10:00:00", "x-two"))   # another one went away
+    conn.commit()
+    assert sorted(o.goods_id for o in order_search.gone_cached(conn)) == ["x-gone", "x-two"] and len(calls) == 2
+
+
+def test_the_manual_price_is_said_by_offer_args_itself(tmp_path, monkeypatch):
+    from tires_sync import order_offers
+    from tires_sync.panel.routes_main import context
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    with app.test_request_context():
+        _c, settings, parsed, ref = context(app)
+        no_price = order_search.locate(conn, parsed, "104")
+        args = order_search.located_args(conn, settings, parsed, ref, no_price, "2026-11-25", manual_sale="6100")
+        assert no_price.manual_price and order_offers.MANUAL_PRICE not in args and args["sale_unit"] == "6100"
+        priced = order_search.locate(conn, parsed, "100")
+        args = order_search.located_args(conn, settings, parsed, ref, priced, "2026-11-25", manual_sale="6100")
+        assert not priced.manual_price and args["sale_unit"] != "6100"                    # the panel's price: the typed one is not «manual»
+        assert order_offers.MANUAL_PRICE not in order_offers.item_args(conn, settings, parsed, ref, "100", "2026-11-25")
+
+
+def test_the_catalog_asks_to_type_a_price_only_when_the_panel_has_none(tmp_path, monkeypatch):
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    gone(app, conn)
+    based = client.get("/orders/new?goods_id=x-gone").get_data(as_text=True)               # the base has its price
+    assert "цена из базы позиций, проверьте наличие" in based and "впишите цену за шт." not in based
+    assert "впишите цену за шт." in client.get("/orders/new?goods_id=104").get_data(as_text=True)
+
+
+def test_the_chat_says_a_position_of_the_base_is_not_in_the_unload(tmp_path, monkeypatch):
+    app, client, tok, conn = setup(tmp_path, monkeypatch)
+    gone(app, conn)
+    main, _other = accounts(conn)
+    chat = chat_of(conn, main)
+    post(client, "/chats/%d/create-deal" % chat, tok)
+    card_id = conn.execute("SELECT order_id FROM avito_chat WHERE id = ?", (chat,)).fetchone()[0]
+    r = post(client, "/chats/%d/items/add" % chat, tok, order_id=str(card_id), goods_id="x-gone", qty="1")
+    assert orders.get_card(conn, card_id)["items"][-1]["goods_id"] == "x-gone"
+    assert "нет в выгрузке поставщика сегодня: проверьте наличие" in client.get(r.headers["Location"]).get_data(as_text=True)
+
+
 def test_a_point_has_no_search_of_positions(tmp_path, monkeypatch):
     from test_roles import person
     app, client, tok, conn = setup(tmp_path, monkeypatch)
