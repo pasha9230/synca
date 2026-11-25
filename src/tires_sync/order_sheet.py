@@ -265,8 +265,8 @@ def _sent(conn, card_id: int) -> Dict[str, str]:
 
 def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     """Position → (profit ₽, profit %) as the analytics counts it (order_report): the margin of the position's sale (at WebMIM's price where
-    there is one) less its share of the order's fixed sums (75 ₽ to the point, 50 ₽ for a client a point handed over, 50 ₽ a tyre the point
-    sold from «На ОТХ»), shared by the sum of
+    there is one) less its share of the order's fixed sums (order_report.fee_parts — the fee of the issue, the bonus of a handed-over client
+    and of the tyres sold from «На ОТХ» — with the sums the office set, order_report.fixes), shared by the sum of
     the sale, so the rows add up to the net profit of the order. None before the sale is written and after it is reversed."""
     ids = [i for i in card["sale_ids"] if i > 0]
     if not ids or len(ids) != len(card["sale_ids"]):
@@ -281,13 +281,18 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     by_point = order_report._by_point(order_report.list_point_rates(conn))           # a point's own rates (ТЗ 95), as the report
     issued = next((r["point_id"] for r in counted.values() if r.get("point_id") is not None), None)
     pieces = sum(r["pieces"] for r in counted.values())
-    fee = order_report.issue_fee(rates, by_point, ("id", issued), day, pieces)[0]    # per tyre from POINT_FEE_PER_TYRE_FROM, as the report
     handed, _names = order_report.handed_points(conn)                             # «чей клиент»: the report's one rule (a handoff, «Откуда
-    if card["id"] in handed:                                                      # клиент», the merge, the swap on «На ОТХ»)
-        to = order_report.bonus_point(("id", issued), handed[card["id"]])
-        fee += order_report.handoff_fee(rates, by_point, to, day, pieces)[0]      # per tyre from HANDOFF_PER_TYRE_FROM, as the report
-    if order_report.oth_sold_orders(conn, [card["id"]]):                          # the point sold them from «На ОТХ»: its bonus per tyre
-        fee += round(order_report.rate_for(rates, by_point, issued, "oth_sale_fee", day) * pieces, 2)    # as the report
+    key = ("id", issued) if issued is not None else ("name", "")                  # клиент», the merge, the swap on «На ОТХ»)
+    got = order_report.fee_parts(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]),
+                                 bool(order_report.oth_sold_orders(conn, [card["id"]])))     # the one formula of the report
+    fixed = order_report.fixes(conn)                                              # the sums the office set (point_item_fix), as the report
+    item = "order:%d" % card["id"]
+    mine = order_report._fix(dict(got), fixed.get((issued, item)), ("issue", "oth"))
+    fee = got["issue"] + got["oth"] + sum(mine.values())
+    if got["handoff_to"] is not None:
+        theirs = got["handoff_to"][1] if got["handoff_to"][0] == "id" else None
+        fee += got["handoff"] + sum(order_report._fix(dict(got), fixed.get((theirs, item)), ("handoff",)).values())
+    fee = round(fee, 2)
     total = sum(r["sale_total"] for r in counted.values())
     pairs = _pair(card["items"], [counted[i] for i in ids])
     out = {}

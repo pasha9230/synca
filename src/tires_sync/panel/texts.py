@@ -191,6 +191,15 @@ def audit_text(entry: dict) -> str:
         return "Расчёт с точкой №%s отменён: %s (%s ₽ снова к выплате)" % (d.get("point", "?"), d.get("item", "?"), d.get("amount", "?"))
     if action == "point_adjust":
         return "Корректировка выплаты точке №%s: %s ₽ — %s" % (d.get("point", "?"), d.get("amount", "?"), d.get("reason") or "без причины")
+    if action == "point_item_fix":
+        return "Начисление точке №%s изменено: %s (%s) → %s ₽ — %s" % (d.get("point", "?"), d.get("item", "?"), d.get("part", "?"),
+                                                                     d.get("amount", "?"), d.get("reason") or "без причины")
+    if action == "point_item_fix_undone":
+        return "Начисление точке №%s: %s снова по расчёту" % (d.get("point", "?"), d.get("item", "?"))
+    if action == "order_no_arrival":
+        return "Заказ №%s: шины физически не приезжали — начисление точке за выдачу снято" % d.get("order", "?")
+    if action == "order_no_arrival_undone":
+        return "Заказ №%s: отметка «шины не приезжали» снята" % d.get("order", "?")
     if action == "point_paid_request_closed":
         return "Запрос точки №%s «Вычли с кассы» закрыт офисом" % d.get("point", "?")
     if action == "point_paid_request":

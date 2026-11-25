@@ -49,6 +49,18 @@ CREATE TABLE IF NOT EXISTS point_paid_request (
 -- «Откуда клиент» = a point (ТЗ 92): the client the point gave by phone, set in the order by the office; a handed client of that point
 CREATE TABLE IF NOT EXISTS order_source_point (
     order_id INTEGER PRIMARY KEY, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL);
+-- the tyres the point physically got for an order (point_arrival, the owner 2026-11-25): the moment they came to «На точке» (this stay),
+-- the undo of that stage (undone_*), the office's «Шины физически не приезжали» (none_*); the base of the fee of the issue of an order
+-- left without a sale
+CREATE TABLE IF NOT EXISTS order_arrival (
+    order_id INTEGER PRIMARY KEY, arrived_at TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '', undone_at TEXT, undone_by TEXT,
+    none_at TEXT, none_by TEXT);
+-- a sum of the ledger set by the office (the owner 2026-11-25): an article (issue, handoff, oth, kpi, adj) of an item of a point gets
+-- `amount` instead of the counted sum, with a reason; «Отменить начисление» sets 0; undone_at — taken back (the counted sum again)
+CREATE TABLE IF NOT EXISTS point_item_fix (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, item TEXT NOT NULL, part TEXT NOT NULL, amount REAL NOT NULL,
+    reason TEXT NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, undone_at TEXT, undone_by TEXT);
+CREATE INDEX IF NOT EXISTS point_item_fix_item ON point_item_fix (point_id, item);
 CREATE TABLE IF NOT EXISTS economics_snapshot (
     day TEXT NOT NULL, brand_key TEXT NOT NULL, ads INTEGER NOT NULL, stock INTEGER NOT NULL, profit REAL NOT NULL,
     sale_total REAL NOT NULL, price_total REAL NOT NULL, no_terms INTEGER NOT NULL, PRIMARY KEY (day, brand_key));

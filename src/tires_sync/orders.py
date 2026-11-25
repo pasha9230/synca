@@ -632,6 +632,9 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
     if base["webmim_number"]:                                 # typed in the window of a new order: after the release too (re-review 2026-11-09)
         _mark_number(conn, cur.lastrowid, base["webmim_number"], now)
     add_event(conn, cur.lastrowid, now, author, "created", "Заказ создан на этапе «%s»" % stage["name"])
+    if stage.get("code") == "at_point":                       # made right on «На точке» (a merge): the tyres are there
+        from . import point_arrival
+        point_arrival.came(conn, cur.lastrowid, now, author)
     _attach_client(conn, cur.lastrowid, now, author)
     if commit:
         conn.commit()
@@ -1196,6 +1199,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         conn.rollback()
         return False
     add_event(conn, card_id, now, author, "stage", "Этап: «%s» → «%s»" % (card["stage"]["name"], stage["name"]))
+    from . import point_arrival
+    point_arrival.moved(conn, card_id, card["stage"].get("code"), stage["code"], now, author)     # the tyres the point got: its fee (2026-11-25)
     for (refused,) in conn.execute("SELECT e.id FROM order_event e WHERE e.order_id = ? AND e.kind = 'refused' AND e.level = 'red' AND NOT EXISTS ("
                                    "SELECT 1 FROM order_event_ack a WHERE a.event_id = e.id AND a.login = ?)", (card_id, order_alerts.EVERYBODY)).fetchall():
         order_alerts.resolve(conn, refused, now, author)                       # the card moved: its refused moves are no longer a cause to act

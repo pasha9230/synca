@@ -94,12 +94,12 @@ def items(conn, start: str, end: str, point_id: Optional[int] = None, report: Op
     def add(pid: int, item: str, day: str, total: float, **parts) -> None:
         seen.add((pid, item))
         mark = paid.get((pid, item))
-        if not total and not mark:
+        if not total and not mark and not parts.get("fixed"):          # a sum the office set to 0 stays in sight: it can be taken back
             return
         due, status = _status(total, mark)
         entry = dict(point_id=pid, point=names[pid], item=item, day=day, total=round(total, 2), paid_sum=mark["amount"] if mark else 0.0,
                      due=due, status=status, status_name=STATUSES[status], paid=mark, issue=0.0, handoff=0.0, handoff_pieces=0, oth=0.0,
-                     oth_pieces=0, kpi=0.0, adj=0.0, reason="", issue_pieces=0)
+                     oth_pieces=0, kpi=0.0, adj=0.0, reason="", issue_pieces=0, arrived=False, fixed={}, counted={})
         entry.update(_parts(item))
         entry.update(parts)
         out.append(entry)
@@ -110,13 +110,17 @@ def items(conn, start: str, end: str, point_id: Optional[int] = None, report: Op
             if e["order"] and start <= e["day"] <= end:
                 add(pid, "order:%d" % e["order"], e["day"], e["issue"] + e["handoff"] + e["oth"], issue=e["issue"],
                     issue_pieces=e.get("issue_pieces", 0), handoff=e["handoff"], handoff_pieces=e.get("handoff_pieces", 0), oth=e["oth"],
-                    oth_pieces=e["oth_pieces"])
+                    oth_pieces=e["oth_pieces"], arrived=bool(e.get("arrived")), fixed=e.get("fixed") or {}, counted=e.get("counted") or {})
         for p in report["kpi"]["premiums"].get(key, []):
             if start <= p["day"] <= end:
-                add(pid, p["item"], p["day"], p["fee"], kpi=p["fee"])
-    for a in adjustments(conn, point_id):
-        if a["point_id"] in names and start <= a["day"] <= end:
-            add(a["point_id"], "adj:%d" % a["id"], a["day"], a["amount"], adj=a["amount"], reason=a["reason"])
+                add(pid, p["item"], p["day"], p["fee"], kpi=p["fee"], fixed=p.get("fixed") or {}, counted=p.get("counted") or {})
+    for key, found in report.get("adjust", {}).items():      # the corrections of the count (order_report.build), the sums set by the office
+        if key[0] != "id" or key[1] not in names or (point_id is not None and key[1] != int(point_id)):
+            continue
+        for a in found:
+            if start <= a["day"] <= end:
+                add(key[1], a["item"], a["day"], a["adj"], adj=a["adj"], reason=a["reason"], fixed=a.get("fixed") or {},
+                    counted=a.get("counted") or {})
     for (pid, item), mark in paid.items():                    # paid, and gone from the count since: the payment is not lost
         if (pid, item) not in seen and (pid, item) not in counted and not item.startswith("adj:") and pid in names \
                 and start <= mark["day"] <= end:
@@ -216,6 +220,84 @@ def unsettle(conn, point_id: int, item: str, now: str, author: str) -> float:
             name[0] if name else point_id, _money(mark["amount"])))
     store.write_audit(conn, now, author, "point_paid_cancel", {"point": int(point_id), "item": str(item), "amount": mark["amount"]})
     return mark["amount"]
+
+
+def unsettle_many(conn, chosen: Iterable[Tuple[int, str]], now: str, author: str) -> dict:
+    """«Вернуть в долг» of the chosen items (a row, the rows checked, a whole point): the payments of each paid one are cancelled (unsettle);
+    the items not paid are skipped. Returns {count, amount}."""
+    count, amount = 0, 0.0
+    paid = paid_items(conn)
+    for point_id, item in sorted({(int(p), str(i)) for p, i in chosen}):
+        if (point_id, item) in paid:
+            amount = round(amount + unsettle(conn, point_id, item, now, author), 2)
+            count += 1
+    if not count:
+        raise PayoutError("Среди отмеченного нет рассчитанных позиций.")
+    return {"count": count, "amount": amount}
+
+
+PARTS_OF = {"order": ("issue", "handoff", "oth"), "kpi": ("kpi",), "adj": ("adj",)}
+
+
+def _item_parts(item: str) -> tuple:
+    return PARTS_OF[_parts(item)["kind"]]
+
+
+def fix_items(conn, chosen: Iterable[Tuple[int, str]], part: str, amount: float, reason: str, now: str, author: str) -> int:
+    """The office sets the sum of an article of the chosen items (the owner 2026-11-25: «корректировать сумму», штучно и массово) with a
+    reason: `part` — an article of order_report.FIX_PARTS, or "all" with amount 0 — «Отменить начисление» (every article of each item is 0).
+    The count everywhere (the report, the analytics, the ledger, the point's page) takes the sum set; the counted one stays (taken back by
+    unfix_items). A paid item then owes a «доплата» or a hold-back. The order's journal and the audit get it. Returns the items changed."""
+    reason = " ".join(str(reason or "").split())[:ADJUST_REASON_MAX]
+    if not reason:
+        raise PayoutError("Напишите причину.")
+    amount = round(float(amount), 2)
+    if amount != amount or abs(amount) > 1000000:
+        raise PayoutError("Сумма: не больше 1 000 000 ₽.")
+    if part != "all" and part not in order_report.FIX_PARTS:
+        raise PayoutError("Выберите статью.")
+    if part == "all" and amount:
+        raise PayoutError("Отменить начисление можно только суммой 0.")
+    names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
+    done = 0
+    for point_id, item in sorted({(int(p), str(i)) for p, i in chosen}):
+        if point_id not in names or _parts(item)["kind"] not in PARTS_OF:
+            continue
+        parts = _item_parts(item) if part == "all" else (part,)
+        if any(p not in _item_parts(item) for p in parts):
+            raise PayoutError("У позиции «%s» нет статьи «%s»." % (item, order_report.FIX_PARTS[part]))
+        for p in parts:
+            conn.execute("INSERT INTO point_item_fix (point_id, item, part, amount, reason, at, author) VALUES (?,?,?,?,?,?,?)",
+                         (point_id, item, p, amount, reason, now, author))
+        order_id = _parts(item)["order"]
+        if order_id:
+            text = ("Начисление точке «%s» за заказ отменено офисом: %s" % (names[point_id], reason) if part == "all" else
+                    "Начисление точке «%s» (%s) изменено офисом: %s — %s" % (names[point_id], order_report.FIX_PARTS[part], _money(amount), reason))
+            orders.add_event(conn, order_id, now, author, "field", text)
+        store.write_audit(conn, now, author, "point_item_fix", {"point": point_id, "item": item, "part": part, "amount": amount, "reason": reason})
+        done += 1
+    if not done:
+        raise PayoutError("Отметьте позиции.")
+    return done
+
+
+def unfix_items(conn, chosen: Iterable[Tuple[int, str]], now: str, author: str) -> int:
+    """«Вернуть по расчёту»: the sums the office set for the chosen items are taken back (kept, marked); the counted sums count again."""
+    names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
+    done = 0
+    for point_id, item in sorted({(int(p), str(i)) for p, i in chosen}):
+        cur = conn.execute("UPDATE point_item_fix SET undone_at = ?, undone_by = ? WHERE point_id = ? AND item = ? AND undone_at IS NULL",
+                           (now, author, point_id, item))
+        if not cur.rowcount:
+            continue
+        order_id = _parts(item)["order"]
+        if order_id:
+            orders.add_event(conn, order_id, now, author, "field", "Начисление точке «%s» снова по расчёту (правка офиса снята)" % names.get(point_id, point_id))
+        store.write_audit(conn, now, author, "point_item_fix_undone", {"point": point_id, "item": item})
+        done += 1
+    if not done:
+        raise PayoutError("Среди отмеченного нет позиций, изменённых вручную.")
+    return done
 
 
 ADJUST_REASON_MAX = 300

@@ -143,6 +143,7 @@ def test_a_real_sale_of_the_window_gives_the_bonus_once(tmp_path, monkeypatch):
     from test_order_reserve import db as order_db
     from test_oth_storage import split
     monkeypatch.setitem(order_report.STARTS, "oth_sale_fee", "2026-01-01")
+    monkeypatch.setattr(order_report, "BONUS_FROM", "2026-01-01")    # the base of these tests is of October: the bonuses start 2026-12-01
     conn = order_db(tmp_path)
     sale_rule(conn)
     cid, x = split(conn)
@@ -227,8 +228,9 @@ def test_switched_on_the_point_sees_its_own_sums_only(tmp_path, view):
     assert "За период выплат нет." in november
     assert mine.get("/my-point/income?m=junk").status_code == 200
     assert "за каждую шину, проданную с ОТХ, +50" in bonus.replace("\xa0", " ")
-    october = mine.get("/my-point/income?tab=bonus&m=2026-10").get_data(as_text=True)    # before OTH_SALE_FEE_FROM: no «+0 ₽» in the hint
-    assert "проданную с ОТХ" not in october
+    october = mine.get("/my-point/income?tab=bonus&m=2026-10").get_data(as_text=True).replace("\xa0", " ")
+    # before the bonuses start (BONUS_FROM, the owner 2026-11-25): the hint says the rates of that day and the day, never «+0 ₽»
+    assert "проданную с ОТХ, +50" in october and "за заказы с 01.12" in october and "+0 ₽" not in october
 
 
 def test_the_handed_page_shows_the_bonus_of_each_client(tmp_path):
