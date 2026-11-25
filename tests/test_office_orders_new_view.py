@@ -137,7 +137,8 @@ def test_off_written_is_the_same_markup_as_nothing_written(w):
 
 def test_the_board_shows_the_webmim_number_first_and_the_model_bold(w):
     """The card of the prototype of the audit (the owner 08.11): left-aligned, a field per line — № WebMIM, the tyres, «4 шт.», the sum,
-    the point, the account as a label, the days; no inner number, no «№ WebMIM ещё нет», no strip of numbers above the board."""
+    the point, the account as a label, the days; no «№ WebMIM ещё нет», no strip of numbers above the board. The panel's number only small,
+    «панель №N» (the owner 25.11: test_order_numbers_tiles.py)."""
     flag(w, "all")
     text = html(client_of(w, "chat1"), "/orders")
     a = re.search(r'<a class="ocard o2-card[^"]*"[^>]*data-card="%d".*?</a>' % w["ids"]["a"], text, re.S).group(0)
