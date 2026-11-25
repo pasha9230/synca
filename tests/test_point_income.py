@@ -72,11 +72,12 @@ def test_the_fees_75_50_50_each_to_its_point(tmp_path):
     by = {e["order"]: e for e in mine["orders"]}
     assert sorted(by) == [1, 2, 3, 4, 5]
     assert (by[1]["issue"], by[1]["handoff"], by[1]["oth"]) == (75, 0, 0)
-    assert (by[2]["issue"], by[2]["handoff"], by[2]["total"]) == (0, 50, 50)              # issued by Бета: Альфа gets the bonus only (BONUS_TO)
+    assert (by[2]["issue"], by[2]["handoff"], by[2]["handoff_pieces"], by[2]["total"]) == (0, 200, 4, 200)   # issued by Бета: Альфа gets the bonus only
+    # (BONUS_TO), 50 ₽ a tyre from HANDOFF_PER_TYRE_FROM (ТЗ 92)
     assert (by[3]["issue"], by[3]["oth"], by[3]["oth_pieces"], by[3]["total"]) == (75, 100, 2, 175)
     assert (by[4]["oth"], by[4]["oth_pieces"]) == (200, 4)                                # once, however many lines of the journal
     assert by[5]["oth"] == 0                                                              # the office's «Выполнено»: no sale of the point
-    assert (mine["issue"], mine["handoff"], mine["oth"], mine["bonus"], mine["total"]) == (300, 50, 300, 350, 650)
+    assert (mine["issue"], mine["handoff"], mine["oth"], mine["bonus"], mine["total"]) == (300, 200, 300, 500, 800)
     theirs = order_report.point_income(conn, START, END, b)
     assert [(e["order"], e["issue"], e["handoff"], e["oth"]) for e in theirs["orders"]] == [(2, 75, 0, 0)]
     assert theirs["total"] == 75
@@ -87,13 +88,13 @@ def test_the_report_the_analytics_and_the_page_are_one_count(tmp_path):
     a, b = base(conn)
     rep = order_report.build(conn, START, END)
     fee = {r["point"]: r["fee"] for r in rep["lines"]}
-    assert fee == {"Альфа": 650, "Бета": 75}
-    assert {f["point"]: (f["issue"], f["bonus"]) for f in rep["fees"]["lines"]} == {"Альфа": (300, 350), "Бета": (75, 0)}
-    assert (rep["fees"]["issue"], rep["fees"]["bonus"]) == (375, 350)
+    assert fee == {"Альфа": 800, "Бета": 75}
+    assert {f["point"]: (f["issue"], f["bonus"]) for f in rep["fees"]["lines"]} == {"Альфа": (300, 500), "Бета": (75, 0)}
+    assert (rep["fees"]["issue"], rep["fees"]["bonus"]) == (375, 500)
     assert (rep["oth"]["orders"], rep["oth"]["pieces"], rep["oth"]["fee"]) == (2, 6, 300)
     money = analytics.money(conn, START, END)
-    assert (money["point_fees"], money["issue_fees"], money["bonus_fees"], money["handoff_fees"], money["oth_fees"]) == (725, 375, 350, 50, 300)
-    assert {r["point"]: (r["issue_fee"], r["bonus_fee"], r["point_fee"]) for r in money["by_point"]} == {"Альфа": (300, 350, 650), "Бета": (75, 0, 75)}
+    assert (money["point_fees"], money["issue_fees"], money["bonus_fees"], money["handoff_fees"], money["oth_fees"]) == (875, 375, 500, 200, 300)
+    assert {r["point"]: (r["issue_fee"], r["bonus_fee"], r["point_fee"]) for r in money["by_point"]} == {"Альфа": (300, 500, 800), "Бета": (75, 0, 75)}
     assert order_report.point_income(conn, START, END, a)["total"] + order_report.point_income(conn, START, END, b)["total"] == money["point_fees"]
 
 
@@ -178,7 +179,7 @@ def test_the_switch_is_off_by_default_the_point_has_no_page_nor_menu(tmp_path):
         page = mine.get(url).get_data(as_text=True)
         assert 'href="/my-point/income"' not in page and "Ваш бонус" not in page
     office = owner.get("/my-point/income?p=%d" % a)                                   # the owner checks the sums before switching on
-    assert office.status_code == 200 and "650" in office.get_data(as_text=True)
+    assert office.status_code == 200 and "800" in office.get_data(as_text=True)
     money = owner.get("/orders/settings/money").get_data(as_text=True)
     assert "Показывать точкам страницу дохода" in money and "скрыта от точек" in money
 
@@ -207,8 +208,8 @@ def test_switched_on_the_point_sees_its_own_sums_only(tmp_path, view):
     page = mine.get("/my-point/income").get_data(as_text=True)
     assert 'href="/my-point/income"' in page
     total = re.search(r'data-income="total">([^<]+)<', page).group(1)
-    assert total.replace("\xa0", " ").startswith("650")
-    assert 'data-income="issue">300' in page.replace("\xa0", " ") and 'data-income="bonus">350' in page.replace("\xa0", " ")
+    assert total.replace("\xa0", " ").startswith("800")
+    assert 'data-income="issue">300' in page.replace("\xa0", " ") and 'data-income="bonus">500' in page.replace("\xa0", " ")
     rows = re.findall(r'<tr data-order="(\d+)">', page)
     assert sorted(map(int, rows)) == [1, 2, 3, 4, 5]
     for secret in ("Закупка", "Прибыль", "20 000", "4 000"):                       # no purchase, no profit, no prices
@@ -216,7 +217,7 @@ def test_switched_on_the_point_sees_its_own_sums_only(tmp_path, view):
     other = mine.get("/my-point/income?p=%d" % b).get_data(as_text=True)          # ?p= is never the point's choice
     assert re.findall(r'<tr data-order="(\d+)">', other) == rows
     theirs = manager(app, conn, b, login_="delta").get("/my-point/income").get_data(as_text=True)
-    assert re.findall(r'<tr data-order="(\d+)">', theirs) == ["2"] and "650" not in theirs
+    assert re.findall(r'<tr data-order="(\d+)">', theirs) == ["2"] and "800" not in theirs
     november = mine.get("/my-point/income?m=2026-11").get_data(as_text=True)
     assert "За этот месяц выплат нет." in november
     assert mine.get("/my-point/income?m=junk").status_code == 200
@@ -234,12 +235,12 @@ def test_the_handed_page_shows_the_bonus_of_each_client(tmp_path):
     assert "Ваш бонус" not in mine.get("/my-point/handed").get_data(as_text=True)
     switch(owner, tok, True)
     page = mine.get("/my-point/handed").get_data(as_text=True).replace("\xa0", " ")
-    assert 'data-handoff-bonus="%d">Ваш бонус: +50 ₽' % card in page
+    assert 'data-handoff-bonus="%d">Ваш бонус: +200 ₽' % card in page
 
 
 def test_the_analytics_shows_the_fees_and_the_bonuses(tmp_path):
     app, owner, tok, conn, a, b = panel(tmp_path)
     page = owner.get("/analytics?from=%s&to=%s" % (START, END)).get_data(as_text=True).replace("\xa0", " ")
-    assert "Выплаты точкам" in page and "за выдачу 375 ₽, бонусы 350 ₽" in page
-    assert re.search(r"<td>Альфа</td><td>4</td><td>300 ₽</td><td>350 ₽</td><td>650 ₽</td>", page)
+    assert "Выплаты точкам" in page and "за выдачу 375 ₽, бонусы 500 ₽" in page
+    assert re.search(r"<td>Альфа</td><td>4</td><td>300 ₽</td><td>500 ₽</td><td>800 ₽</td>", page)
     assert "продажи с ОТХ 300 ₽ (6 шт.)" in page

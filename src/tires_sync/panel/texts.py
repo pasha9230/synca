@@ -24,7 +24,8 @@ def author_label(author: str) -> str:
 
 
 ORDER_RATES = {"point_fee": ("Выплата точке за заказ", "₽"), "owner_share": ("Доля собственника", "%"), "handoff_fee": ("За переданного клиента", "₽"),
-               "oth_sale_fee": ("За шину, проданную с ОТХ", "₽")}
+               "oth_sale_fee": ("За шину, проданную с ОТХ", "₽"), "kpi_orders": ("KPI: заказов за месяц", "шт."),
+               "kpi_tyres": ("KPI: шин за месяц", "шт."), "kpi_bonus": ("Премия KPI", "₽")}
 INQUIRY_EVENTS = {"message": "сообщение", "call": "звонок", "handoff": "передача заказа"}
 
 
@@ -181,6 +182,15 @@ def audit_text(entry: dict) -> str:
         return "Подписи долей в отчёте по заказам: «%s» и «%s»" % (to.get("owner") or "по умолчанию", to.get("partner") or "по умолчанию")
     if action == "order_rate":
         return _order_rate_text(d)
+    if action == "point_rate":
+        text = _order_rate_text(d).replace("Ставка", "Ставка точки №%s" % d.get("point", "?"), 1)
+        return text.replace("→ — ", "→ общая ") if d.get("to") is None else text
+    if action == "point_paid":
+        return "Расчёт с точками: отмечено «Рассчитан» %s поз. на %s ₽" % (d.get("count", "?"), d.get("amount", "?"))
+    if action == "point_paid_request":
+        return "Точка №%s: «Вычли с кассы и получили бонусы» — %s ₽, запрос офису" % (d.get("point", "?"), d.get("amount", "?"))
+    if action == "order_source_point":
+        return "Заказ №%s: откуда клиент — точка %s" % (d.get("order", "?"), d.get("name") or "не указана")
     if action == "point_income_shown":
         return "Страница «Доход» у точек: %s" % ("показывается" if d.get("on") else "скрыта")
     if action == "inquiry":

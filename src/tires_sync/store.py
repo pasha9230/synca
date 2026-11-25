@@ -28,6 +28,21 @@ CREATE INDEX IF NOT EXISTS sale_day ON sale (day);
 CREATE TABLE IF NOT EXISTS order_rate (
     name TEXT NOT NULL, valid_from TEXT NOT NULL, value REAL NOT NULL, created TEXT NOT NULL, author TEXT NOT NULL,
     PRIMARY KEY (name, valid_from));
+-- the rates of one point (ТЗ 95, «Индивидуальные настройки»): over order_rate from valid_from; value NULL — the general rate again
+CREATE TABLE IF NOT EXISTS point_rate (
+    point_id INTEGER NOT NULL, name TEXT NOT NULL, valid_from TEXT NOT NULL, value REAL, created TEXT NOT NULL, author TEXT NOT NULL,
+    PRIMARY KEY (point_id, name, valid_from));
+-- «Рассчитан» (ТЗ 95): what the office paid a point, item by item («order:<id>» — the order's fee and bonuses, «kpi:<YYYY-MM>:<n>» — a premium)
+CREATE TABLE IF NOT EXISTS point_paid (
+    point_id INTEGER NOT NULL, item TEXT NOT NULL, amount REAL NOT NULL, day TEXT NOT NULL, paid_at TEXT NOT NULL, author TEXT NOT NULL,
+    PRIMARY KEY (point_id, item));
+-- «Вычли с кассы и получили бонусы» of a point: a request to the office (a task); the sum stays the point's until «Рассчитан»
+CREATE TABLE IF NOT EXISTS point_paid_request (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, amount REAL NOT NULL,
+    items TEXT NOT NULL, task_id INTEGER);
+-- «Откуда клиент» = a point (ТЗ 92): the client the point gave by phone, set in the order by the office; a handed client of that point
+CREATE TABLE IF NOT EXISTS order_source_point (
+    order_id INTEGER PRIMARY KEY, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS economics_snapshot (
     day TEXT NOT NULL, brand_key TEXT NOT NULL, ads INTEGER NOT NULL, stock INTEGER NOT NULL, profit REAL NOT NULL,
     sale_total REAL NOT NULL, price_total REAL NOT NULL, no_terms INTEGER NOT NULL, PRIMARY KEY (day, brand_key));
