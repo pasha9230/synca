@@ -281,7 +281,17 @@ def _sell(conn, order_id, point, day):
                    note="Заказ №%d" % order_id, now=NOW, author="o", today=day, source="order")
 
 
-def test_fifty_rubles_for_an_issued_order_of_a_handed_over_client_from_the_24th(tmp_path):
+def _old_bonus_days(monkeypatch):
+    """The days of the bonus before the owner's 2026-11-25 (from 2026-10-24, per order until 2026-11-27): these tests keep the dated rate and
+    the choice of the point tested on their October base; the new start (BONUS_FROM, 2026-12-01) is test_point_income_rules.py's."""
+    monkeypatch.setattr(order_report, "BONUS_FROM", "2026-10-24")
+    monkeypatch.setattr(order_report, "HANDOFF_FEE_FROM", "2026-10-24")
+    monkeypatch.setattr(order_report, "HANDOFF_PER_TYRE_FROM", "2026-11-27")
+    monkeypatch.setitem(order_report.STARTS, "handoff_fee", "2026-10-24")
+
+
+def test_fifty_rubles_for_an_issued_order_of_a_handed_over_client_from_the_24th(tmp_path, monkeypatch):
+    _old_bonus_days(monkeypatch)
     conn = store.connect(str(tmp_path / "x.db"))
     orders.ensure_pipeline(conn, NOW)
     for order_id in (1, 2, 3):
@@ -408,8 +418,9 @@ def test_any_refusal_of_the_keyboard_still_answers_the_point(tmp_path):
     assert len(calls) == 2 and "keyboard" not in calls[1] and calls[1]["message"][0] == mgr.signed(mgr.BUTTON_ANSWER)
 
 
-def test_the_fifty_go_to_the_point_that_handed_the_client_over_the_75_to_the_point_that_issued(tmp_path):
+def test_the_fifty_go_to_the_point_that_handed_the_client_over_the_75_to_the_point_that_issued(tmp_path, monkeypatch):
     """The lead 2026-10-23 (the owner to confirm): the fixed sum to the point that handed the client over (order_report.bonus_point)."""
+    _old_bonus_days(monkeypatch)
     conn = store.connect(str(tmp_path / "x.db"))
     orders.ensure_pipeline(conn, NOW)
     beta = points.save_point(conn, {"name": "Бета", "manager_name": "А", "channel": "vk"})
