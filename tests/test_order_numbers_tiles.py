@@ -1,6 +1,6 @@
 """The number of an order always seen (the owner 25.11: «№ заказов МИМ не вижу на самой плитке»): a tile of «Заказы» (the board, «Список»,
-«Ожидает наличие» — the waiting list is a column of the board) shows the WebMIM number and, small, the panel's one («панель №…»), so an order
-without WebMIM is still known; the dark head of the card shows «№ панели N · № MIM X» top left (MIM only when there is one), in both views.
+«Ожидает наличие» — the waiting list is a column of the board) shows the WebMIM number; without it, small, the panel's one («панель №…»), so an
+order without WebMIM is still known (the old view keeps its «№N клиент» and adds «MIM №X» small); the dark head of the card shows «№ панели N · № MIM X» top left (MIM only when there is one), in both views.
 A point keeps what it saw: its own number (point_entity), no WebMIM number added to its pages."""
 from __future__ import annotations
 
@@ -63,15 +63,14 @@ def head(text):
 
 
 @pytest.mark.parametrize("state", ["all", "off"])
-def test_the_waiting_tile_shows_the_panel_number_and_a_webmim_tile_both(w, state):
+def test_the_waiting_tile_shows_the_panel_number_and_a_webmim_tile_its_own(w, state):
     view(w, state)
     text = html(owner(w), "/orders")
     bare, both = tile(text, w["wait"]), tile(text, w["mim"])
     assert 'data-stage="%d"' % w["wait_stage"] in text                                  # «Ожидает наличие» is a column of the board
     if state == "all":                                                                   # «Новый вид»: № WebMIM, the panel's small
         assert '<span class="xs muted" data-panel-no>панель №%d</span>' % w["wait"] in bare and "o2-wm" not in bare
-        assert '<span class="o2-wm">№ 7712345</span>' in both and "панель №%d" % w["mim"] in both
-        assert both.index("o2-wm") < both.index("data-panel-no")
+        assert '<span class="o2-wm">№ 7712345</span>' in both and "data-panel-no" not in both    # with WebMIM no inner number (08.11)
     else:                                                                                # the old view: «№N клиент», MIM small under it
         assert "№%d Борис" % w["wait"] in bare and "MIM №" not in bare
         assert "№%d Анна" % w["mim"] in both and '<div class="xs muted" data-mim-no>MIM №7712345</div>' in both

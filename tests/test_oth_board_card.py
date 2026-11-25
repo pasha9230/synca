@@ -122,7 +122,7 @@ def test_other_stages_keep_their_card(w):
     cid = order(w, code="at_point")
     card = card_html(board(w), cid)
     if w["view"] == "new":                                       # the card of the prototype: no client, no inner number (the owner 08.11)
-        assert lines(board(w), cid) == NEW[:1] + ["панель №%d" % cid] + NEW[1:] and "внутр." not in card    # the panel's number small (the owner 25.11)
+        assert lines(board(w), cid) == NEW and "внутр." not in card
         return
     assert "Иван Клиентов" in card and "× 4" in card and "Кол-во" not in card and "data-oth-transfer" not in card
     assert ("внутр. № %d" % cid in card) if w["view"] == "new" else ("№%d Иван Клиентов" % cid in card)
