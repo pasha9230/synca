@@ -347,16 +347,23 @@ def point_comment(conn, card: dict) -> str:
     """«Комментарий» of the order's window as the point reads it in the card (the owner 2026-11-25): the person's text only — not the
     automatic part a new order gets from its ad or call (order_notes.person_text), never an Avito account's name; empty: no line."""
     from .. import order_notes
-    return orders.without_account_names(conn, order_notes.person_text(card.get("comment") or "")).strip()
+    text = order_notes.person_text(card.get("comment") or "")
+    if not text.strip():
+        return ""
+    names = g.get("point_account_names")
+    if names is None:                                                  # the names of the accounts: read once a request
+        names = g.point_account_names = orders.account_names(conn)
+    return orders.without_account_names(conn, text, names).strip()
 
 
-def point_rev(conn, point_id) -> str:
-    """A print of what «Рабочее место» shows of the point's orders (its cards on the way, at the point, on «На ОТХ» and «На возврат»): the
-    office changes the positions, the client, the dates, the numbers, the comment or moves an order — the print is new and the open page reloads
-    itself (notify.js, the owner 2026-11-25). Read from the orders themselves, the one source; no money of the office in it."""
+def point_rev(conn, cards: list) -> str:
+    """A print of what «Рабочее место» shows of the point's orders (`cards`: already read, _cards + _oth_cards — on the way, at the point,
+    on «На ОТХ» and «На возврат»): the office changes the positions, the client, the dates, the numbers, the comment or moves an order —
+    the print is new and the open page reloads itself (notify.js, the owner 2026-11-25). Read from the orders themselves, the one source;
+    no money of the office in it."""
     import hashlib
     parts = []
-    for card in sorted(_cards(conn, point_id) + _oth_cards(conn, point_id), key=lambda c: c["id"]):
+    for card in sorted(cards, key=lambda c: c["id"]):
         parts.append([card["id"], card["stage_id"], card["entered_at"], card["client_name"], card["client_phone"],
                       card["delivery_date"], card["delivery_time"], card["reserve_until"], card["transfer_number"], card["webmim_number"],
                       point_comment(conn, card), [[i["id"], i["name"], i.get("code"), i["goods_id"], i["qty"], i["sale_unit"]] for i in card["items"]]])
@@ -602,7 +609,8 @@ def register(app) -> None:
         today = now[:10]
         cards = []
         tomorrow = (date.fromisoformat(today) + timedelta(days=1)).isoformat()
-        for card in ((_cards(conn, point_id) + _oth_cards(conn, point_id)) if point_id is not None else []):
+        loaded = (_cards(conn, point_id) + _oth_cards(conn, point_id)) if point_id is not None else []
+        for card in loaded:
             until = (card["reserve_until"] or "") if card["stage"]["code"] == "at_point" else ""     # «На ОТХ» has no term (2026-10-30)
             delivery = card["delivery_date"] or ""
             code = card["stage"]["code"]
@@ -701,7 +709,7 @@ def register(app) -> None:
                                return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK, not_taken_next=oth_point_return.NOT_TAKEN_NEXT,
                                buyer_ask=oth_point_return.BUYER_ASK, comment_max=oth_point_return.COMMENT_MAX,
                                undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL,
-                               rev=point_rev(conn, point_id) if own_point() is not None and point_id is not None else "")    # the feed's own point only
+                               rev=point_rev(conn, loaded) if own_point() is not None and point_id is not None else "")    # the feed's own point only
 
     def _undo(card_id):
         """«Отменить» a press that moved the order (point_log.undo; the address /my-point/<order>/undo, the endpoint of the presses): the
@@ -998,11 +1006,11 @@ def register(app) -> None:
         if point_id is None:
             return jsonify({"who": who, "items": calls})
         from .routes_alerts import HERE, grouped, href, with_orders
-        cards, now = _cards(conn, point_id), local_iso()
+        cards, oth_cards, now = _cards(conn, point_id), _oth_cards(conn, point_id), local_iso()     # read once: the items and the print
         items = [{"key": "question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Клиент забрал заказ № %s?" % mgr.label(card), "text": card["client_name"] or "",
                   "href": HERE} for card in cards if reserve.question_open(conn, card, now)]      # of the stay: a new stay rings again
         items += [{"key": "oth-question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Заказ № %s: выдали или на точке?"
-                   % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=%s" % ("oth" if card["stage"]["code"] == "oth" else "return")} for card in _oth_cards(conn, point_id)
+                   % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=%s" % ("oth" if card["stage"]["code"] == "oth" else "return")} for card in oth_cards
                   if order_oth.question_open(conn, card)]
         today = order_oth.return_day(conn, point_id, now)                      # «Сегодня возврат!»: a new key at 09:00, 12:00 and 15:00
         if today and not today["not_taken"]:                                    # «Водитель не забрал» (G): the sound of the date stops
@@ -1024,5 +1032,5 @@ def register(app) -> None:
                        "text": (r["text"] or "")[:200], "href": href(r)} for r in with_orders(conn, grouped(conn, who))]
         answer = {"who": who, "items": items + calls}
         if own_point() is not None:                                             # the page of the point's own person reloads on a change (point_rev)
-            answer["rev"] = point_rev(conn, point_id)
+            answer["rev"] = point_rev(conn, cards + oth_cards)
         return jsonify(answer)

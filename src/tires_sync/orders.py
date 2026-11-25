@@ -1336,14 +1336,20 @@ def account_tags(conn) -> set:
     return {" ".join(str(r[0]).split())[:MAX_TAG].lower() for r in conn.execute("SELECT name FROM account WHERE name != ''")}
 
 
-def without_account_names(conn, text: str) -> str:
-    """A text a manager of a point reads (the journal of the order, a row of the bell, the comment) with the names of the Avito accounts put
-    out (the owner 2026-10-29: a point never sees an account's name): a whole word or phrase, in any case; never a piece of a word."""
-    text = str(text or "")
+def account_names(conn) -> set:
+    """The names of the Avito accounts without_account_names puts out: as saved, cut as a tag, and the cabinet's own name."""
     names = {" ".join(str(r[0]).split()) for r in conn.execute("SELECT name FROM account WHERE name != ''")}
     names |= {n[:MAX_TAG].strip() for n in names}                       # the tag of a long name is cut (chat_deals._account_tag)
     from . import connections
-    names |= connections.avito_names(conn)                               # the cabinet's own name, as the panel shows it (2026-10-30)
+    return names | connections.avito_names(conn)                         # the cabinet's own name, as the panel shows it (2026-10-30)
+
+
+def without_account_names(conn, text: str, names: Optional[set] = None) -> str:
+    """A text a manager of a point reads (the journal of the order, a row of the bell, the comment) with the names of the Avito accounts put
+    out (the owner 2026-10-29: a point never sees an account's name): a whole word or phrase, in any case; never a piece of a word.
+    `names`: account_names read once for many texts."""
+    text = str(text or "")
+    names = account_names(conn) if names is None else names
     for name in sorted(names, key=len, reverse=True):
         if len(name) >= 2 and name.lower() in text.lower():
             text = re.sub(r"(?<!\w)%s(?!\w)" % r"\s+".join(re.escape(w) for w in name.split()), ACCOUNT_SHOWN, text, flags=re.I)
