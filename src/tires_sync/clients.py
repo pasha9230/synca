@@ -279,6 +279,7 @@ def purchases_view(conn, client: dict) -> List[dict]:
     marks = ",".join("?" * len(ids))
     points = dict(conn.execute("SELECT c.id, p.name FROM order_card c JOIN point p ON p.id = c.point_id WHERE c.id IN (%s)" % marks, ids))
     names = dict(conn.execute("SELECT id, name FROM point"))
+    numbers = dict(conn.execute("SELECT id, webmim_number FROM order_card WHERE id IN (%s)" % marks, ids))     # «№ MIM» by the panel's (the owner 25.11)
 
     def line(name, qty, unit, deleted: bool) -> dict:
         size = SIZE_IN_TITLE.search(name or "")
@@ -302,10 +303,10 @@ def purchases_view(conn, client: dict) -> List[dict]:
             items[order_id].append(line(name, qty, unit, True))
             live[order_id].add(item_id)
     views = [{"id": o["id"], "created": o["created_at"], "stage": o["stage"], "won": o["kind"] == "won", "lost": o["kind"] == "lost",
-              "deleted": False, "point": points.get(o["id"], ""), "items": items[o["id"]],
+              "deleted": False, "point": points.get(o["id"], ""), "items": items[o["id"]], "webmim": numbers.get(o["id"]) or "",
               "total": round(sum(i["sum"] for i in items[o["id"]] if not i["deleted"]), 2)} for o in client["orders"]]
     views += [{"id": o["id"], "created": o["created_at"], "stage": o["stage"], "won": False, "lost": False, "deleted": True,
-               "point": names.get(o["point_id"], "") if o["point_id"] else "", "items": items[o["id"]], "total": 0.0} for o in gone]
+               "point": names.get(o["point_id"], "") if o["point_id"] else "", "items": items[o["id"]], "total": 0.0, "webmim": ""} for o in gone]
     return sorted(views, key=lambda v: v["id"], reverse=True)
 
 

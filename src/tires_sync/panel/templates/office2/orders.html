@@ -102,8 +102,10 @@
 {% else %}<div class="col-head" title="{{ col.stage.hint }}"><span class="dot" style="background:{{ col.stage.color|stage_color }}"></span><span class="col-name">{% if words|length > 1 %}{{ words[0] }} {% endif %}<span class="nowrap">{{ words[-1] }} <span class="o2-count">{{ col.count }}</span></span></span>{% if col.sum is not none %}<span class="sum">{{ col.sum|money }}</span>{% endif %}</div>{% endif %}
 <div class="col-body" id="col-body-{{ col.stage.id }}">
 {% for c in col.cards %}{% set acc = c.tags|select("in", account_names)|list if account_names else [] %}{% set wm_no = c.oth_card.number if c.oth_card else c.webmim %}{% set pos = positions.get(c.id, {"n": 0, "qty": 0, "name": ""}) %}<a class="ocard o2-card o2-card--col{% if waiting.get(c.id) %} waiting{% endif %}" draggable="{{ 'true' if can_post('order_move') else 'false' }}" data-card="{{ c.id }}" href="/orders/{{ c.id }}">
-{# the owner 08.11: left-aligned, a field per line — the WebMIM number, the tyres, the count, the sum, the point, the Avito account as a label, the days on the stage, the statuses at the bottom; no inner number, no line of the stage #}
-{% if wm_no or dots.get(c.id) %}<div class="o2-t1">{{ odot(c.id) }}{% if wm_no %}<span class="o2-wm"{% if c.oth_card %} data-oth-title{% endif %}>№ {{ wm_no }}</span>{% endif %}</div>{% endif %}
+{# the owner 08.11: left-aligned, a field per line — the WebMIM number, the tyres, the count, the sum, the point, the Avito account as a label, the days on the stage, the statuses at the bottom; no inner number when there is a WebMIM one, no line of the stage #}
+{# the owner 25.11: a number always on the tile — the WebMIM one; without it the panel's, small («панель №…»), so an order without WebMIM
+   (a waiting one) is still known; with it no inner number (08.11) #}
+<div class="o2-t1">{{ odot(c.id) }}{% if wm_no %}<span class="o2-wm"{% if c.oth_card %} data-oth-title{% endif %}>№ {{ wm_no }}</span>{% endif %}{% if not wm_no %}<span class="xs muted" data-panel-no>панель №{{ c.id }}</span>{% endif %}</div>
 {% if pos.n > 1 %}<div class="o2-items"><b class="o2-model">{{ pos.n }} {{ plural(pos.n, "позиция", "позиции", "позиций") }} · {{ pos.qty }} шт.</b></div>
 {% elif pos.n == 1 %}<div class="o2-items"><b class="o2-model">{{ pos.name }}</b></div><div class="o2-meta" data-qty>{{ pos.qty }} шт.</div>
 {% else %}<div class="o2-items"><b class="o2-model">без позиций</b></div>{% endif %}
