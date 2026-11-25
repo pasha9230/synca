@@ -18,16 +18,11 @@
 {% if choose and points %}<form method="get" action="/my-point/handed" class="mp-choose" data-autosubmit><label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if point and p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><noscript><button class="btn btn--secondary">Показать</button></noscript></form>{% endif %}
 {% if not point %}<p class="mp-empty">Точек пока нет: их заводит владелец в «Подключения → Точки».</p>
 {% else %}
-<section class="p2-box mp-handed" aria-labelledby="mp-handed-h"><div class="p2-section"><h2 id="mp-handed-h">Переданные клиенты{% if handed %} <span class="p2-count">{{ handed|length }}</span>{% endif %}</h2>
-{% if handed %}<ul class="p2-list">{% for h in handed %}<li><div class="p2-grow"><span class="mp-name"><b>{{ (h.phone|phone) if h.phone else (h.client or "клиент из чата") }}</b></span><span class="p2-sub">№ {{ h.label }} · {{ h.at|short_dt }}{% if h.source %} · {{ h.source }}{% endif %}</span>{% if h.need %}<span class="p2-sub">{{ h.need }}</span>{% endif %}{% if paid and paid.get(h.id) %}<span class="p2-sub" data-handoff-bonus="{{ h.id }}">Ваш бонус: +{{ paid[h.id]|money }}</span>{% endif %}
-{% if h.cancellable %}<form method="post" action="/my-point/handoff/{{ h.id }}/cancel" class="inline" data-once data-confirm-title="Отменить передачу клиента?" data-confirm="Заказ № {{ h.label }} уйдёт в «Отмена», менеджеру придёт сообщение. Клиенту ничего не отправится." data-confirm-ok="Отменить передачу"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="p2-quiet" data-handoff-cancel="{{ h.id }}">Отменить передачу</button></form>{% endif %}</div>
-<span class="p2-tag {{ {'': 'p2-tag--grey', 'taken': 'p2-tag--warn', 'placed': 'p2-tag--warn', 'done': 'p2-tag--ok', 'refused': 'p2-tag--err', 'cancelled': 'p2-tag--grey'}[h.status] }}" data-status="{{ h.status or 'new' }}">{{ h.status_name }}</span></li>{% endfor %}</ul>
-{% else %}<p class="p2-sub">За две недели никого не передавали.</p>{% endif %}
-{% if bonus %}<p class="p2-sub">За каждую шину выданного заказа переданного клиента точке +{{ bonus|money }} (комплект из 4 шин — +{{ (bonus * 4)|money }}) сверх обычной выплаты.</p>{% endif %}</div></section>
+{% include "_handed_banner.html" %}
 <section class="p2-box mp-handoff" id="handoff" aria-labelledby="mp-handoff-h">
 <form method="post" action="/my-point/handed" class="mp-handoff-form" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ handoff_token }}">{{ pin }}
 <h2 id="mp-handoff-h">Передать клиента</h2>
-<p class="p2-sub" style="margin:0">Клиент пришёл, а нужных шин нет? Передайте его менеджеру — он подберёт и оформит заказ. Передать можно и из «Звонков».</p>
+<p class="p2-sub" style="margin:0">Клиент пришёл, а нужных шин нет? Передайте его менеджеру — он подберёт и оформит заказ. Передать можно и из «Чатов», и из «Звонков».</p>
 <label class="field"><span class="label">Телефон клиента</span><input class="input" type="tel" name="phone" required inputmode="tel" autocomplete="off" placeholder="+7 900 000-00-00" value="{{ handoff_form.phone or '' }}"{% if handoff_error %} aria-invalid="true" aria-describedby="mp-handoff-err"{% endif %}></label>
 {% if handoff_error %}<p class="p2-err mp-err" id="mp-handoff-err" role="alert">{{ handoff_error }}</p>{% endif %}
 <div class="p2-row2"><label class="field"><span class="label">Типоразмер</span><input class="input" name="size" maxlength="40" placeholder="205/55 R16" value="{{ handoff_form.size or '' }}"></label>
@@ -39,8 +34,14 @@
 {% if handoff_form.dup %}<div class="flash flash--err" id="mp-dup" role="alert"><div class="flash-text">У клиента уже есть открытый заказ № {{ handoff_form.dup.label }}{% if handoff_form.dup.date %} от {{ handoff_form.dup.date }}{% endif %} — откройте его.
 {% if handoff_form.dup.href %}<a href="{{ handoff_form.dup.href }}" data-dup-open>Открыть его</a>{% endif %}
 <a href="/my-point/handed{{ pq }}" data-dup-cancel>Отмена</a></div></div>{% endif %}
-<p class="p2-sub" style="margin:0">Клиента возьмёт в работу дежурный менеджер; что с ним стало — выше, в списке.</p></form>
+<p class="p2-sub" style="margin:0">Клиента возьмёт в работу дежурный менеджер; что с ним стало — ниже, в списке.</p></form>
 </section>
+<section class="p2-box mp-handed" aria-labelledby="mp-handed-h"><div class="p2-section"><h2 id="mp-handed-h">Переданные клиенты{% if handed %} <span class="p2-count">{{ handed|length }}</span>{% endif %}</h2>
+{% if handed %}<ul class="p2-list">{% for h in handed %}<li><div class="p2-grow"><span class="mp-name"><b>{{ (h.phone|phone) if h.phone else (h.client or "клиент из чата") }}</b></span><span class="p2-sub">№ {{ h.label }} · {{ h.at|short_dt }}{% if h.source %} · {{ h.source }}{% endif %}</span>{% if h.need %}<span class="p2-sub">{{ h.need }}</span>{% endif %}{% if paid and paid.get(h.id) %}<span class="p2-sub" data-handoff-bonus="{{ h.id }}">Ваш бонус: +{{ paid[h.id]|money }}</span>{% endif %}
+{% if h.cancellable %}<form method="post" action="/my-point/handoff/{{ h.id }}/cancel" class="inline" data-once data-confirm-title="Отменить передачу клиента?" data-confirm="Заказ № {{ h.label }} уйдёт в «Отмена», менеджеру придёт сообщение. Клиенту ничего не отправится." data-confirm-ok="Отменить передачу"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{{ pin }}<button class="p2-quiet" data-handoff-cancel="{{ h.id }}">Отменить передачу</button></form>{% endif %}</div>
+<span class="p2-tag {{ {'': 'p2-tag--grey', 'taken': 'p2-tag--warn', 'placed': 'p2-tag--warn', 'done': 'p2-tag--ok', 'refused': 'p2-tag--err', 'cancelled': 'p2-tag--grey'}[h.status] }}" data-status="{{ h.status or 'new' }}">{{ h.status_name }}</span></li>{% endfor %}</ul>
+{% else %}<p class="p2-sub">За две недели никого не передавали.</p>{% endif %}
+{% if bonus %}<p class="p2-sub">За каждую шину выданного заказа переданного клиента точке +{{ bonus|money }} (комплект из 4 шин — +{{ (bonus * 4)|money }}) сверх обычной выплаты.</p>{% endif %}</div></section>
 {% endif %}
 {% with section="handed" %}{% include "point2/_nav.html" %}{% endwith %}
 </div>

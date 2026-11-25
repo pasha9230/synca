@@ -1,0 +1,7 @@
+{# «Переданные клиенты»: the banner of the section (the owner 2026-11-25, ТЗ F), both views — where the clients are handed over from and what
+   the point gets; the rates are the point's own (routes_mypoint.mypoint_handed: those of BONUS_FROM on), no figure is written in. #}
+{% if rates %}<section class="inc-banner" data-handed-banner><span class="inc-banner-ico" aria-hidden="true">🤝</span><div>
+<h2>Передавайте клиентов — зарабатывайте больше</h2>
+<p>Клиента можно передать здесь, а также из разделов <b>«Чаты»</b> и <b>«Звонки»</b>. Когда заказ выдан, вы получаете <b>+{{ (rates.handoff_fee * 4)|money }} за комплект</b> (+{{ rates.handoff_fee|money }} за шину) сверх обычной выплаты.</p>
+<p>🎯 <b>Выдача с вашей же точки</b> — сразу три плюса: выплата за выдачу ({{ (rates.point_fee * 4)|money }} за комплект) + бонус + 1 заказ к выполнению KPI.</p>
+<p class="small">📅 Бонус и KPI считаются за заказы с {{ bonus_from|short_dt }}. Что стало с переданными клиентами и ваш бонус — в списке ниже.</p></div></section>{% endif %}

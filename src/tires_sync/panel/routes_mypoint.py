@@ -571,10 +571,12 @@ def register(app) -> None:
         paid = {}                                                               # order → the bonus of a client handed over (ТЗ 80): the report's
         if point_id is not None and _income_open(conn):
             paid = {e["order"]: e["handoff"] for e in order_report.point_income(conn, since, local_iso()[:10], point_id)["orders"] if e["handoff"]}
+        # the rates of the banner: from BONUS_FROM on, the day the bonuses start (the owner 2026-11-25), so «+200 ₽» is said before it too
+        rates = order_report.point_rates_now(conn, point_id, max(local_iso()[:10], order_report.BONUS_FROM)) if point_id is not None else {}
         return render_template(point_page("mypoint_handed.html"), point=point, choose=own_point() is None, user=current_user(),
                                points=points.list_points(conn) if own_point() is None else [],
                                handed=mgr.point_handoffs(conn, point_id, since) if point_id is not None else [], seasons=mgr.SEASONS,
-                               bonus=order_report.point_rates_now(conn, point_id, local_iso()[:10])["handoff_fee"] if point_id is not None else 0, paid=paid,
+                               bonus=rates["handoff_fee"] if rates else 0, paid=paid, rates=rates, bonus_from=order_report.BONUS_FROM,
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form), 400 if error else 200
 
     def _income_open(conn) -> bool:

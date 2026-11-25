@@ -134,8 +134,14 @@ def build(conn, point_id: int, args, today: str) -> dict:
     view["debt_day"] = upto
     view["request"] = point_payouts.last_request(conn, point_id, view["debt"]["items"])
     rates = order_report.point_rates_now(conn, point_id, upto)
+    if upto < order_report.BONUS_FROM:                      # the bonuses start on BONUS_FROM (the owner 2026-11-25): their rates of that day
+        later = order_report.point_rates_now(conn, point_id, order_report.BONUS_FROM)
+        rates.update({k: later[k] for k in ("handoff_fee", "oth_sale_fee", "kpi_orders", "kpi_tyres", "kpi_bonus")})
     view["rates"] = rates
+    view["bonus_from"] = order_report.BONUS_FROM
     view["issue_per_tyre_from"] = order_report.POINT_FEE_PER_TYRE_FROM
+    view["filtered"] = sum(1 for on in (f["q"], f["from"] != point_payouts.LEDGER_FROM, f["to"] != today, f["pay"] != "active",
+                                        f["deal"] != "all", f["sort"] != "date", f["dir"] != "desc") if on)
     view["income"] = {"issue": round(sum(e["issue"] for e in entries), 2), "bonus": round(sum(e["handoff"] + e["oth"] for e in entries), 2),
                       "kpi": round(sum(e["kpi"] for e in entries), 2), "adj": round(sum(e["adj"] for e in entries), 2), "orders": []}
     view["income"]["total"] = round(sum(view["income"][k] for k in ("issue", "bonus", "kpi", "adj")), 2)
