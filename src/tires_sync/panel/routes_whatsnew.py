@@ -24,7 +24,8 @@ def whatsnew_dot() -> bool:
     """Once per request: a point's page draws it twice (the menu and the phone's sections)."""
     if "whatsnew_dot" not in g:
         user = current_user()
-        g.whatsnew_dot = whatsnew.has_new(get_conn(), user["login"], user["role"], updates())
+        conn = get_conn()
+        g.whatsnew_dot = whatsnew.has_new(conn, user["login"], user["role"], updates(), whatsnew.flags(conn))
     return g.whatsnew_dot
 
 
@@ -34,14 +35,14 @@ def register(app) -> None:
     @app.route("/whats-new")
     def whatsnew_page():
         conn, user = get_conn(), current_user()
-        role, shown = user["role"], updates()
-        values = {"updates": whatsnew.for_role(shown, role), "sees_all": role in whatsnew.SEES_ALL, "role_names": users.ROLES,
+        role, shown, on = user["role"], updates(), whatsnew.flags(conn)
+        values = {"updates": whatsnew.for_role(shown, role, on), "sees_all": role in whatsnew.SEES_ALL, "role_names": users.ROLES,
                   "point": role == "point", "client": role == "client"}
         if role == "client":
             from .. import shop_cart
             values["cart_count"] = len(shop_cart.cart(conn, user["login"]))
         try:                                                                 # before the menu is drawn: no dot on the page that reads it
-            whatsnew.mark_seen(conn, user["login"], role, shown, now_iso())
+            whatsnew.mark_seen(conn, user["login"], role, shown, now_iso(), on)
             g.whatsnew_dot = False
         except Exception:                                                    # a busy database: the page still opens, the dot stays
             log.exception("whatsnew: the mark of %s not saved", user["login"])

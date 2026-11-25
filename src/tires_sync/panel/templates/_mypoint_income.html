@@ -1,20 +1,80 @@
-{# The body of «Доход» of a point (ТЗ 80, routes_mypoint.mypoint_income), both views: the month, the sums of the top, the orders one by one.
-   Only what the point is paid (order_report.point_income): the rates and the sums, nothing of the purchase, the profit or the prices. #}
-<form method="get" action="/my-point/income" class="mp-choose" data-autosubmit>
-<label class="field"><span class="label">Месяц</span><input class="input" type="month" name="m" value="{{ month }}" max="{{ this_month }}"></label>
-{% if choose and points %}<label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if point and p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>{% endif %}
-<button class="btn btn--secondary">Показать</button></form>
+{# The body of «Доход» of a point (ТЗ 80, 91, 92, 95; routes_mypoint.mypoint_income, panel/income_view), both views: the active debt and
+   «Вычли с кассы и получили бонусы» on top, the tabs «Доход», «Бонусы», «KPI». Only what the point is paid: the rates and the sums, nothing
+   of the purchase, the profit or the prices. #}
+{% set f = v.f %}
+{% macro url(tab) %}{% set q = {"tab": tab, "from": v.f["from"], "to": v.f.to, "q": v.f.q, "pay": v.f.pay, "deal": v.f.deal, "sort": v.f.sort, "dir": v.f.dir, "km": v.f.km} %}{% if choose and point %}{% set _ = q.update({"p": point.id}) %}{% endif %}/my-point/income?{{ q|urlencode }}{% endmacro %}
 {% if not point %}<p class="mp-empty">Точек пока нет: их заводит владелец в «Подключения → Точки».</p>
 {% else %}
-<div class="tiles tiles--row" data-income-total>
-<div class="tile"><span class="tile-label">За выдачу</span><span class="tile-value" data-income="issue">{{ income.issue|money }}</span><span class="tile-sub">{{ income.orders|selectattr("issue")|list|length }} заказ(ов)</span></div>
-<div class="tile"><span class="tile-label">Бонусы</span><span class="tile-value" data-income="bonus">{{ income.bonus|money }}</span><span class="tile-sub">переданные {{ income.handoff|money }} · с ОТХ {{ income.oth|money }}</span></div>
-<div class="tile"><span class="tile-label">Всего</span><span class="tile-value" data-income="total">{{ income.total|money }}</span><span class="tile-sub">с {{ start|short_dt }} по {{ end|short_dt }}</span></div>
+{% if choose and points %}<form method="get" action="/my-point/income" class="mp-choose" data-autosubmit><input type="hidden" name="tab" value="{{ f.tab }}">
+<label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+<button class="btn btn--secondary">Показать</button></form>{% endif %}
+<div class="tiles tiles--row" data-income-debt>
+<div class="tile"><span class="tile-label">К выплате на {{ v.debt_day|short_dt }}</span><span class="tile-value" data-debt="total" style="font-size:var(--fs-2xl, 1.75rem)">{{ v.debt.total|money }}</span><span class="tile-sub">не рассчитано: за выдачу {{ v.debt.issue|money }} · бонусы {{ v.debt.bonus|money }}{% if v.debt.kpi %} · KPI {{ v.debt.kpi|money }}{% endif %}{% if v.debt.adj %} · корректировки {{ v.debt.adj|money }}{% endif %}{% if v.debt.extra %} · доплаты {{ v.debt.extra|money }}{% endif %}</span>
+{% if v.debt.over %}<span class="tile-sub" data-debt="over">переплата / к удержанию: {{ v.debt.over|money }} (уже учтена в сумме)</span>{% endif %}</div>
 </div>
-{% if income.orders %}<div style="overflow-x:auto"><table class="table" data-income-orders><thead><tr><th>Заказ</th><th>Дата</th><th>За выдачу</th><th>Переданный клиент</th><th>Продажа с ОТХ</th><th>Всего</th></tr></thead><tbody>
-{% for e in income.orders %}<tr data-order="{{ e.order }}"><td>№ {{ labels.get(e.order, e.order) }}</td><td>{{ e.day|short_dt }}</td><td>{{ e.issue|money if e.issue else "—" }}</td><td>{{ e.handoff|money if e.handoff else "—" }}</td>
-<td>{% if e.oth %}{{ e.oth|money }} ({{ e.oth_pieces }} шт.){% else %}—{% endif %}</td><td>{{ e.total|money }}</td></tr>{% endfor %}
+{% if v.adjust %}<p class="mp-hint" data-adjust>{% for a in v.adjust %}Корректировка {{ a.day|short_dt }}: {{ "+" if a.adj > 0 else "" }}{{ a.adj|money }} — {{ a.reason }} ({{ a.status_name }}){% if not loop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
+{% if v.request and v.request.open %}<p class="mp-hint" data-request-open>Запрос «Вычли с кассы и получили бонусы» на {{ v.request.amount|money }} отправлен {{ v.request.at|short_dt }}: офис проверяет кассу. Сумма уйдёт из «К выплате», когда офис отметит «Рассчитан».</p>
+{% elif can_request and v.debt.total > 0 %}<form method="post" action="/my-point/income/request" class="inline" data-once data-confirm-title="Вычли с кассы и получили бонусы?" data-confirm="В офис уйдёт запрос на {{ v.debt.total|money }}. Офис проверит кассу и отметит «Рассчитан»; до этого сумма остаётся в «К выплате»." data-confirm-ok="Отправить запрос"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary" data-request>Вычли с кассы и получили бонусы</button></form>{% endif %}
+<nav class="mp-tabs" aria-label="Доход точки" data-income-tabs>{% for key, name in v.tabs.items() %}<a class="mp-tab{% if key == f.tab %} is-active{% endif %}" href="{{ url(key) }}"{% if key == f.tab %} aria-current="page"{% endif %} data-tab="{{ key }}">{{ name }}</a>{% endfor %}</nav>
+{% if f.tab in ("income", "bonus") %}
+<form method="get" action="/my-point/income" class="mp-choose" style="flex-wrap:wrap" data-income-filters><input type="hidden" name="tab" value="{{ f.tab }}">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}
+<label class="field"><span class="label">Поиск</span><input class="input" type="search" name="q" value="{{ f.q }}" placeholder="№, имя, телефон, шина"></label>
+<label class="field"><span class="label">От</span><input class="input" type="date" name="from" value="{{ f['from'] }}"></label>
+<label class="field"><span class="label">До</span><input class="input" type="date" name="to" value="{{ f.to }}"></label>
+{% if f.tab == "bonus" %}<label class="field"><span class="label">Сделка</span><select class="select" name="deal">{% for key, name in v.deals.items() %}<option value="{{ key }}"{% if key == f.deal %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>{% endif %}
+<label class="field"><span class="label">Выплата</span><select class="select" name="pay">{% for key, name in v.pay_names.items() %}<option value="{{ key }}"{% if key == f.pay %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Сортировка</span><select class="select" name="sort">{% for key, name in v.sorts.items() %}<option value="{{ key }}"{% if key == f.sort %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Порядок</span><select class="select" name="dir"><option value="desc"{% if f.dir == "desc" %} selected{% endif %}>сначала новые / большие</option><option value="asc"{% if f.dir == "asc" %} selected{% endif %}>сначала старые / меньшие</option></select></label>
+<button class="btn btn--secondary">Показать</button></form>
+<div class="tiles tiles--row" data-income-total>
+<div class="tile"><span class="tile-label">За выдачу</span><span class="tile-value" data-income="issue">{{ income.issue|money }}</span><span class="tile-sub">с {{ f['from']|short_dt }} по {{ f.to|short_dt }}</span></div>
+<div class="tile"><span class="tile-label">Бонусы</span><span class="tile-value" data-income="bonus">{{ income.bonus|money }}</span><span class="tile-sub">переданные клиенты и продажи с ОТХ</span></div>
+<div class="tile"><span class="tile-label">Всего</span><span class="tile-value" data-income="total">{{ income.total|money }}</span><span class="tile-sub">{% if income.kpi %}с премией KPI {{ income.kpi|money }}{% else %}выдача и бонусы{% endif %}</span></div>
+</div>
+{% endif %}
+{% if f.tab == "income" %}
+{% if v.rows %}<div style="overflow-x:auto"><table class="table" data-income-orders><thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>Статус заказа</th><th>За выдачу</th><th>Выплата</th></tr></thead><tbody>
+{% for e in v.rows %}<tr data-order="{{ e.order }}"><td>№ {{ e.card.label }}</td><td>{{ e.day|short_dt }}</td><td>{{ e.card.client or "—" }}</td><td>{{ e.card.stage }}</td><td>{{ e.issue|money }}</td>
+<td><span class="badge {{ {'unpaid': 'badge--warn', 'paid': 'badge--ok', 'extra': 'badge--warn', 'over': 'badge--err'}[e.status] }}" data-paid="{{ e.status }}">{{ e.status_name }}{% if e.status in ("extra", "over") %} {{ e.due|money }}{% endif %}</span></td></tr>{% endfor %}
 </tbody></table></div>
-{% else %}<p class="mp-empty">За этот месяц выплат нет.</p>{% endif %}
-<p class="mp-hint">За выданный заказ {{ rates.point_fee|money }}; за выданный заказ клиента, которого вы передали, +{{ rates.handoff_fee|money }}{% if rates.oth_sale_fee %}; за каждую шину, проданную с ОТХ, +{{ rates.oth_sale_fee|money }}{% endif %}. Считается по дню продажи; отменённые заказы не входят.</p>
+{% else %}<p class="mp-empty">За период выплат нет.</p>{% endif %}
+<p class="mp-hint">{% if v.debt_day >= v.issue_per_tyre_from %}За каждую выданную шину {{ v.rates.point_fee|money }} (комплект из 4 шин — {{ (v.rates.point_fee * 4)|money }}){% else %}За выданный заказ {{ v.rates.point_fee|money }}{% endif %}. Считается по дню продажи; отменённые заказы не входят. Рассчитанные заказы скрыты: выберите «Выплата: Рассчитан» или «Все».</p>
+{% elif f.tab == "bonus" %}
+<div class="mp-hint" style="padding:var(--s-3);border:1px solid var(--gray-200);border-radius:var(--r-lg)" data-bonus-banner><b>🔥 БОНУС +{{ (v.rates.handoff_fee * 4)|money }} за каждый комплект!</b><br>Передавайте нам клиентов на покупку шин или продавайте шины напрямую с ОТХ. После закрытия сделки вы получаете +{{ (v.rates.handoff_fee * 4)|money }} за комплект поверх обычной оплаты за выдачу!</div>
+{% if v.rows %}<div style="overflow-x:auto"><table class="table" data-bonus-orders><thead><tr><th>Клиент</th><th>Позиции</th><th>Бонус</th><th>Сделка</th><th>Расчёт</th></tr></thead><tbody>
+{% for r in v.rows %}<tr data-bonus-order="{{ r.order }}"><td><details><summary><b>{{ r.card.client or "клиент" }}</b>{% if r.card.phone %}<br>{{ r.card.phone|phone }}{% endif %}<br><span class="small muted">№ {{ r.card.label }}{% if r.day %} · {{ r.day|short_dt }}{% endif %}{% if r.kinds %} · {{ r.kinds }}{% endif %}</span></summary>
+<div class="small" data-bonus-detail><b>Состав заказа:</b> {% for i in r.card["items"] %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}позиций ещё нет{% endfor %}
+{% if r.card.wants %}<br><b>Пожелания:</b> {{ r.card.wants|join("; ") }}{% endif %}<br><span class="muted">Этап: {{ r.card.stage }}. Менять заказ могут офис и оператор.</span></div></details></td>
+<td>{% for i in r.card["items"] %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td>
+<td data-bonus-sum>{% if r.amount is none %}—{% elif r.expected %}+{{ r.amount|money }} <span class="small muted">после выдачи</span>{% elif r.amount %}+{{ r.amount|money }}{% else %}0 ₽{% endif %}</td>
+<td><span class="badge {{ {'done': 'badge--ok', 'work': 'badge--warn', 'lost': 'badge--err'}[r.deal] }}" data-deal="{{ r.deal }}">{{ r.deal_name }}</span></td>
+<td>{% if r.deal != "done" or not r.amount or not r.entry %}—{% else %}<span class="badge {{ {'unpaid': 'badge--warn', 'paid': 'badge--ok', 'extra': 'badge--warn', 'over': 'badge--err'}[r.entry.status] }}" data-paid="{{ r.entry.status }}">{{ r.entry.status_name }}</span>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>
+{% else %}<p class="mp-empty">За период переданных клиентов и продаж с ОТХ нет.</p>{% endif %}
+<p class="mp-hint">За каждую шину выданного заказа клиента, которого вы передали, +{{ v.rates.handoff_fee|money }}{% if v.rates.oth_sale_fee %}; за каждую шину, проданную с ОТХ, +{{ v.rates.oth_sale_fee|money }}{% endif %}. Бонус начисляется, когда заказ выдан (этап «Выполнено»); у сделки в работе показан ожидаемый бонус.</p>
+{% else %}{% set k = v.kpi %}
+<form method="get" action="/my-point/income" class="mp-choose" data-autosubmit><input type="hidden" name="tab" value="kpi">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}
+<label class="field"><span class="label">Месяц</span><input class="input" type="month" name="km" value="{{ k.month }}" max="{{ v.today[:7] }}"></label><button class="btn btn--secondary">Показать</button></form>
+<section data-kpi data-kpi-cycles="{{ k.cycles }}">
+<div class="tiles tiles--row">
+<div class="tile"><span class="tile-label">Премия KPI за месяц</span><span class="tile-value" data-kpi-fee>{{ k.fee|money }}</span><span class="tile-sub">{{ k.cycles }} {{ plural(k.cycles, "цикл", "цикла", "циклов") }} по {{ k.bonus|money }}</span></div>
+<div class="tile"><span class="tile-label">Закрыто за месяц</span><span class="tile-value">{{ k.orders }} зак. · {{ k.tyres }} шин</span><span class="tile-sub">по переданным клиентам</span></div>
+</div>
+<p><b>Следующая премия:</b> заказы {{ k.cycle_orders }} из {{ k.need_orders }}</p>
+<progress max="{{ k.need_orders }}" value="{{ k.cycle_orders }}" style="width:100%;height:1.25rem" data-kpi-bar="orders" aria-label="Заказы цикла">{{ k.pct_orders }}%</progress>
+<p>шины {{ k.cycle_tyres }} из {{ k.need_tyres }}</p>
+<progress max="{{ k.need_tyres }}" value="{{ k.cycle_tyres }}" style="width:100%;height:1.25rem" data-kpi-bar="tyres" aria-label="Шины цикла">{{ k.pct_tyres }}%</progress>
+{% if k.premiums %}<p class="small">{% for p in k.premiums %}Цикл {{ p.cycle }} закрыт {{ p.day|short_dt }}: +{{ p.fee|money }} — {{ "Рассчитан" if p.paid else "Не рассчитан" }}{% if not loop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
+{% if not k.started %}<p class="mp-hint">Премия KPI начисляется с {{ "01.12.2026" }}.</p>{% endif %}
+</section>
+<section class="mp-hint" style="padding:var(--s-3);border:1px solid var(--gray-200);border-radius:var(--r-lg)" data-kpi-text>
+<h3>🚀 Что такое KPI и как удвоить свой доход?</h3>
+<p>KPI — это ваша дополнительная премия за активность, которая начисляется сверх всех обычных выплат за выдачу и бонусов за передачу клиентов. Главное правило: Закройте за календарный месяц от {{ k.need_orders }} заказов (общим объемом от {{ k.need_tyres }} шин / ~{{ k.sets }} комплектов) по переданным клиентам и заберите премию +{{ k.bonus|money }}.</p>
+<p>Количество премий в месяц не ограничено! Сделали {{ k.need_orders * 2 }} заказов — забрали {{ (k.bonus * 2)|money }}, сделали {{ k.need_orders * 3 }} — получили {{ (k.bonus * 3)|money }}!</p>
+{% if k.standard %}<p><b>💰 Пример: как заработать 6 250 ₽ на 10 клиентах</b></p>
+<p>Допустим, за месяц по вашей рекомендации купили ~10 комплектов шин (38 шин) с выдачей через вашу точку:</p>
+<ol><li>Обычная выдача комплектов (~300 ₽ за комплект): 2 850 ₽</li><li>БОНУС за передачу клиентов (~200 ₽ за комплект): + 1 900 ₽</li><li>Премия за выполнение KPI (за 10 закрытых заказов): + 1 500 ₽</li></ol>
+<p><b>🎯 ИТОГО: 6 250 ₽ вместо стандартных 2 850 ₽ — ваш доход вырастает более чем в 2 раза!</b></p>{% endif %}
+</section>
+{% endif %}
 {% endif %}

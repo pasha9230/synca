@@ -27,6 +27,12 @@
 <td>{{ (r.chat_to_order * 100)|pct(0) ~ " %" if r.chat_to_order is not none else "—" }}</td><td>{{ r.orders }}</td><td>{{ r.issued }}</td><td>{{ r.cancelled }}</td><td>{{ r.returned }}</td><td>{{ r.open }}</td>
 <td>{{ (r.order_to_issued * 100)|pct(0) ~ " %" if r.order_to_issued is not none else "—" }}</td></tr>{% endfor %}
 </tbody></table>{% if funnel.chats_undated %}<p class="small muted">Чатов без даты начала от Авито: {{ funnel.chats_undated }} (в периоды не входят).</p>{% endif %}</div></section>
+<section class="card" style="margin-bottom:var(--s-4)" data-handed-funnel><div class="card-head"><h3>Переданные точкой</h3><span class="sub">клиенты, которых точки передали в периоде (и «Откуда клиент» = точка), по этапу сейчас</span>{% if has_right("money") %}<a class="btn btn--link small ml-auto" href="/points/payouts?from={{ start }}&to={{ end }}">Пункты выдачи</a>{% endif %}</div>
+{% if handed.rows %}<div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Точка</th><th>Передан</th><th>В работе</th><th>Выполнен</th><th>Не состоялось</th><th>Шин выдано</th><th>Передан → выполнен</th></tr></thead><tbody>
+{% for r in handed.rows + [dict(handed.total, point="Итого", point_id="")] %}<tr{% if loop.last %} class="strong"{% endif %} data-handed-point="{{ r.point_id }}"><td>{{ r.point }}</td><td>{{ r.handed }}</td><td>{{ r.work }}</td><td>{{ r.done }}</td><td>{{ r.lost }}</td><td>{{ r.tyres }}</td>
+<td>{% if r.rate is not none %}<progress max="100" value="{{ (r.rate * 100)|round|int }}" style="width:6rem;vertical-align:middle"></progress> {{ (r.rate * 100)|pct(0) }} %{% else %}—{% endif %}</td></tr>{% endfor %}
+</tbody></table>{% if money and money.bonus_fees %}<p class="small muted">Бонусы точкам за период: переданные клиенты {{ money.handoff_fees|money }}, продажи с ОТХ {{ money.oth_fees|money }}, KPI {{ money.kpi_fees|money }}.</p>{% endif %}</div>
+{% else %}<div class="card-body muted">За период точки никого не передавали.</div>{% endif %}</section>
 <section class="card"><div class="card-head"><h3>Время на этапах</h3><span class="sub">пребывания, закончившиеся в периоде; «зависли» — сейчас дольше срока этапа</span></div>
 <div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Этап</th><th>Пребываний</th><th>В среднем, ч</th><th>Медиана, ч</th><th>Зависли сейчас</th></tr></thead><tbody>
 {% set stuck = {} %}{% for s in times.stuck %}{% set _ = stuck.update({s.name: s}) %}{% endfor %}

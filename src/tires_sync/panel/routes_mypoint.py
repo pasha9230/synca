@@ -24,7 +24,8 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
-from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_point_sale, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
+from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_point_sale, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, point_payouts, users
+from . import income_view
 from .common import author, current_user, get_conn, has_right, login_required, own_point
 from .routes_design import point_page
 from .routes_orders import local_iso, local_now
@@ -532,7 +533,7 @@ def register(app) -> None:
         return render_template(point_page("mypoint_handed.html"), point=point, choose=own_point() is None, user=current_user(),
                                points=points.list_points(conn) if own_point() is None else [],
                                handed=mgr.point_handoffs(conn, point_id, since) if point_id is not None else [], seasons=mgr.SEASONS,
-                               bonus=order_report.rate_on(order_report.list_rates(conn), "handoff_fee", local_iso()[:10]), paid=paid,
+                               bonus=order_report.point_rates_now(conn, point_id, local_iso()[:10])["handoff_fee"] if point_id is not None else 0, paid=paid,
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form), 400 if error else 200
 
     def _income_open(conn) -> bool:
@@ -542,32 +543,35 @@ def register(app) -> None:
     @app.route("/my-point/income")
     @login_required
     def mypoint_income():
-        """«Доход» of a point (ТЗ 80): what it is paid for a month, order by order — the fee of an issued order, the bonus of a client it handed
-        over, the bonus of the tyres it sold from «На ОТХ» — from order_report.point_income (the count of the report and of the analytics).
-        Its own point only (own_point); the switch off: the point gets 404, as if the page were not there."""
+        """«Доход» of a point (ТЗ 80, 91, 92, 95): three tabs — «Доход» (the fee of the issued orders), «Бонусы» (the clients it handed over and
+        the tyres it sold from «На ОТХ»), «KPI» (the month's cycles) — and on top the active debt (what the office has not marked «Рассчитан»)
+        with «Вычли с кассы и получили бонусы». All from order_report.build (the count of the report and of the analytics) through
+        point_payouts. Its own point only (own_point); the rates and the sums only, nothing of the purchase, the profit or the prices; the
+        switch off: the point gets 404, as if the page were not there."""
         conn = get_conn()
         if not _income_open(conn):
             abort(404 if own_point() is not None else 403)
         point_id, point = _the_point(conn)
-        this_month = local_iso()[:7]
-        month = request.args.get("m", "").strip()[:7]
-        try:
-            first = date.fromisoformat(month + "-01")
-        except ValueError:
-            first = date.fromisoformat(this_month + "-01")
-        last = (first.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
-        start, end = first.isoformat(), last.isoformat()
-        income = order_report.point_income(conn, start, end, point_id) if point_id is not None else {"orders": []}
-        ids = [e["order"] for e in income["orders"] if e["order"]]
-        labels = {}
-        if ids:                                                                 # the numbers in one query: the WebMIM number, else the panel's
-            labels = {r[0]: r[1] or str(r[0]) for r in conn.execute(
-                "SELECT id, webmim_number FROM order_card WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)}
-        rates = order_report.list_rates(conn)
+        view = income_view.build(conn, point_id, request.args, local_iso()[:10]) if point_id is not None else income_view.empty(request.args, local_iso()[:10])
         return render_template(point_page("mypoint_income.html"), point=point, choose=own_point() is None,
-                               points=points.list_points(conn) if own_point() is None else [], income=income, labels=labels,
-                               month=first.isoformat()[:7], this_month=this_month, start=start, end=end,
-                               rates={name: order_report.rate_on(rates, name, min(end, local_iso()[:10])) for name in ("point_fee", "handoff_fee", "oth_sale_fee")})
+                               points=points.list_points(conn) if own_point() is None else [], v=view, income=view.get("income", {"orders": []}),
+                               can_request=own_point() is not None)
+
+    @app.route("/my-point/income/request", methods=["POST"])
+    @login_required
+    def mypoint_income_request():
+        """«Вычли с кассы и получили бонусы» (ТЗ 95): a request to the office (a task to the admin); the sum stays until «Рассчитан»."""
+        conn = get_conn()
+        if own_point() is None or not order_report.income_shown(conn):
+            abort(404)
+        try:
+            done = point_payouts.request(conn, own_point(), local_iso()[:10], local_iso(), author())
+            conn.commit()
+            flash("Запрос отправлен в офис: %s. Сумма уйдёт из «К выплате», когда офис отметит «Рассчитан»." % income_view.rub(done["amount"]))
+        except point_payouts.PayoutError as err:
+            conn.rollback()
+            flash(str(err))
+        return redirect("/my-point/income")
 
     @app.route("/my-point", methods=["GET", "POST"])
     @login_required
