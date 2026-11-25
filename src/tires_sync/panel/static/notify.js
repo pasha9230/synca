@@ -96,6 +96,7 @@
       if (!r.ok || r.redirected) throw new Error(r.status);                    // an expired login answers with the login page
       return r.json();
     }).then(function (data) {
+      changed(data.rev);
       var items = once(data.items || []), keys = items.map(function (it) { return it.key; });
       var who = String(data.who || ""), stored = readSeen(who), seen = stored === undefined ? memory : stored;
       memory = keys;
@@ -155,6 +156,12 @@
     if (PAGE && !waiting) tryRefresh();
   }
   function moved() { active = Date.now(); }
+  // Офис поменял состав, клиента, даты, комментарий заказа точки (решение владельца 2026-11-25): отпечаток ленты не тот, что у страницы, —
+  // страница обновляется тихо (без звука и уведомления), по тем же правилам простоя.
+  function changed(rev) {
+    var holder = PAGE && document.querySelector("[data-point-rev]");
+    if (holder && rev && holder.getAttribute("data-point-rev") !== String(rev)) refreshSoon();
+  }
 
   if (PAGE) {
     ["click", "keydown", "touchstart", "pointerdown", "wheel", "input", "scroll"].forEach(function (name) {
