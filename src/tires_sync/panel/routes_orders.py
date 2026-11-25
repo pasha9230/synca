@@ -1068,7 +1068,7 @@ def register(app) -> None:
         target = next((s for s in orders.list_stages(conn) if s["id"] == stage_id), None)
         # «Шины физически не приезжали?» of «Отменить заказ» (the owner 2026-11-25, point_arrival): «да» — the fee of the order is taken off;
         # nothing to leave on «На ОТХ» then, the question of the point is not asked
-        no_arrival = request.form.get("no_arrival") == "yes" and target is not None and target["code"] == "cancel"
+        no_arrival = request.form.get("no_arrival") == "yes" and target is not None and target["code"] == "cancel" and has_right("money")
         asked = oth_offer(conn, card, stage_id) if stage_id is not None and not no_arrival else None
         if asked is not None:
             return ask_oth(card_id, asked, reason)
@@ -1118,6 +1118,19 @@ def register(app) -> None:
         ost = request.form.get("ost")
         if own_point() is not None and ost in points.POINT_STAGES:                 # the cards of «Заказы» on a phone: back to the stage
             return redirect("/orders?ost=" + ost)
+        return redirect("/orders/%d" % card_id)
+
+    @app.route("/orders/<int:card_id>/arrival-back", methods=["POST"])
+    @login_required
+    def order_arrival_back(card_id):
+        """«Вернуть отметку» of «Шины физически не приезжали» (the review 2026-11-26): the fee of the order counts again; the money right."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if not has_right("money"):
+            abort(403)
+        if point_arrival.unmark_none(conn, card_id, local_iso(), author()):
+            conn.commit()
+            flash("Отметка снята: начисление точке за выдачу по заказу снова в расчёте.")
         return redirect("/orders/%d" % card_id)
 
     def _back_ask(card: dict):
@@ -1445,7 +1458,7 @@ def register(app) -> None:
             merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
             merge_items=order_merge_store.items_of(conn, card_id), merge_unordered=order_merge_store.unordered(conn, card),
             oth_at_point=oth_sale.all_from_oth(conn, card) and own_point() is None and can_post("order_oth_at_point"),
-            arrival=point_arrival.state(conn, card_id),     # «Шины физически не приезжали?»
+            arrival=dict(point_arrival.state(conn, card_id), money=has_right("money")),     # «Шины физически не приезжали?»
             oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stage_day=orders.stage_day(orders.stage_since(conn, card)), stage_at=card["entered_at"] if orders.stage_day(card["entered_at"]) == orders.stage_day(orders.stage_since(conn, card)) else "", stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS if own_point() is None else POINT_DEAL_KINDS, marks=orders.MARKS,

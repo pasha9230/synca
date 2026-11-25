@@ -50,11 +50,12 @@ CREATE TABLE IF NOT EXISTS point_paid_request (
 CREATE TABLE IF NOT EXISTS order_source_point (
     order_id INTEGER PRIMARY KEY, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL);
 -- the tyres the point physically got for an order (point_arrival, the owner 2026-11-25): the moment they came to «На точке» (this stay),
--- the undo of that stage (undone_*), the office's «Шины физически не приезжали» (none_*); the base of the fee of the issue of an order
--- left without a sale
+-- the point and the order's own tyres of that moment, the moment it left the point without a sale (left_at: the day of the fee), the undo
+-- of that stage (undone_*), the office's «Шины физически не приезжали» (none_*); the base of the fee of the issue of an order left
+-- without a sale
 CREATE TABLE IF NOT EXISTS order_arrival (
-    order_id INTEGER PRIMARY KEY, arrived_at TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '', undone_at TEXT, undone_by TEXT,
-    none_at TEXT, none_by TEXT);
+    order_id INTEGER PRIMARY KEY, arrived_at TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '', point_id INTEGER,
+    pieces INTEGER NOT NULL DEFAULT 0, left_at TEXT, undone_at TEXT, undone_by TEXT, none_at TEXT, none_by TEXT);
 -- a sum of the ledger set by the office (the owner 2026-11-25): an article (issue, handoff, oth, kpi, adj) of an item of a point gets
 -- `amount` instead of the counted sum, with a reason; «Отменить начисление» sets 0; undone_at — taken back (the counted sum again)
 CREATE TABLE IF NOT EXISTS point_item_fix (

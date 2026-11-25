@@ -243,7 +243,24 @@ def _item_parts(item: str) -> tuple:
     return PARTS_OF[_parts(item)["kind"]]
 
 
-def fix_items(conn, chosen: Iterable[Tuple[int, str]], part: str, amount: float, reason: str, now: str, author: str) -> int:
+def _existing_parts(entry: dict) -> set:
+    """The articles an item really has in the count of its point: a sum counted (or set before), the tyres of the issue, a handed client, a
+    sale from «На ОТХ»."""
+    found = set(entry.get("fixed") or {}) | {p for p, v in (entry.get("counted") or {}).items() if v}
+    for part in ("issue", "handoff", "oth", "kpi", "adj"):
+        if entry.get(part):
+            found.add(part)
+    if entry.get("issue_pieces") or entry.get("arrived"):
+        found.add("issue")
+    if entry.get("handoff_pieces"):
+        found.add("handoff")
+    if entry.get("oth_pieces"):
+        found.add("oth")
+    return found
+
+
+def fix_items(conn, chosen: Iterable[Tuple[int, str]], part: str, amount: float, reason: str, now: str, author: str,
+              start: str = LEDGER_FROM, end: str = "2099-12-31", today: Optional[str] = None) -> int:
     """The office sets the sum of an article of the chosen items (the owner 2026-11-25: «корректировать сумму», штучно и массово) with a
     reason: `part` — an article of order_report.FIX_PARTS, or "all" with amount 0 — «Отменить начисление» (every article of each item is 0).
     The count everywhere (the report, the analytics, the ledger, the point's page) takes the sum set; the counted one stays (taken back by
@@ -258,14 +275,24 @@ def fix_items(conn, chosen: Iterable[Tuple[int, str]], part: str, amount: float,
         raise PayoutError("Выберите статью.")
     if part == "all" and amount:
         raise PayoutError("Отменить начисление можно только суммой 0.")
+    if amount < 0 and part != "adj":
+        raise PayoutError("Минус — только в «Корректировке» (удержание с причиной); у статей начисления сумма от 0.")
     names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
+    today = today or now[:10]
+    known = {(e["point_id"], e["item"]): e for e in items(conn, start, end, report=ledger_report(conn, start, end, today))}
     done = 0
     for point_id, item in sorted({(int(p), str(i)) for p, i in chosen}):
         if point_id not in names or _parts(item)["kind"] not in PARTS_OF:
             continue
-        parts = _item_parts(item) if part == "all" else (part,)
-        if any(p not in _item_parts(item) for p in parts):
-            raise PayoutError("У позиции «%s» нет статьи «%s»." % (item, order_report.FIX_PARTS[part]))
+        entry = known.get((point_id, item))
+        if entry is None:
+            raise PayoutError("Позиции «%s» нет в расчёте точки «%s» за период." % (item, names[point_id]))
+        has = _existing_parts(entry)
+        parts = [p for p in _item_parts(item) if p in has] if part == "all" else [part]
+        if part != "all" and part not in has:
+            raise PayoutError("У позиции «%s» точки «%s» нет статьи «%s»." % (item, names[point_id], order_report.FIX_PARTS[part]))
+        if not parts:
+            continue
         for p in parts:
             conn.execute("INSERT INTO point_item_fix (point_id, item, part, amount, reason, at, author) VALUES (?,?,?,?,?,?,?)",
                          (point_id, item, p, amount, reason, now, author))

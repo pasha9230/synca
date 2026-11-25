@@ -97,6 +97,7 @@
 <div><button class="btn btn--secondary btn--sm">Сохранить даты</button></div></form>
 {% else %}<dl class="small">{% for key, label in marks.items() %}<dt>{{ label }}</dt><dd>{{ c[key] or "—" }}</dd>{% endfor %}</dl>{% endif %}
 </div>{% endcall %}
+{% if arrival and arrival.none %}<div class="flash flash--info" data-arrival-none><div class="flash-text">Отмечено: шины физически не приезжали на точку — выплата точке за выдачу по заказу снята.{% if arrival.money %} <form method="post" action="/orders/{{ c.id }}/arrival-back" class="inline" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--link btn--sm" data-arrival-back>Вернуть отметку</button></form>{% endif %}</div></div>{% endif %}
 {% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}{% include "_order_finish.html" %}{% endif %}
 </div>
 <div class="ocard-side">

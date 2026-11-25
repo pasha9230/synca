@@ -1200,7 +1200,7 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         return False
     add_event(conn, card_id, now, author, "stage", "Этап: «%s» → «%s»" % (card["stage"]["name"], stage["name"]))
     from . import point_arrival
-    point_arrival.moved(conn, card_id, card["stage"].get("code"), stage["code"], now, author)     # the tyres the point got: its fee (2026-11-25)
+    point_arrival.moved(conn, card_id, card["stage"].get("code"), stage["code"], now, author, stage["kind"])   # the tyres the point got (2026-11-25)
     for (refused,) in conn.execute("SELECT e.id FROM order_event e WHERE e.order_id = ? AND e.kind = 'refused' AND e.level = 'red' AND NOT EXISTS ("
                                    "SELECT 1 FROM order_event_ack a WHERE a.event_id = e.id AND a.login = ?)", (card_id, order_alerts.EVERYBODY)).fetchall():
         order_alerts.resolve(conn, refused, now, author)                       # the card moved: its refused moves are no longer a cause to act

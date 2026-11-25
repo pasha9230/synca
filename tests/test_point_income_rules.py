@@ -117,6 +117,116 @@ def test_the_cancel_window_asks_and_both_ways_write_the_journal(tmp_path):
     assert point_arrival.arrived(conn, other)                                # «нет» (the default): the fee stays
 
 
+# ---- the review 2026-11-26 -------------------------------------------------------------------------------------------------------------
+
+def _take_from(conn, b, a, qty):
+    """The position of order `b` is `qty` tyres taken from «На ОТХ» of order `a` (as oth_sale writes it)."""
+    item = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (b,)).fetchone()[0]
+    src = conn.execute("SELECT id FROM order_item WHERE order_id = ?", (a,)).fetchone()[0]
+    conn.execute("INSERT INTO order_item_oth (item_id, order_id, from_item, from_order, qty, at, author) VALUES (?,?,?,?,?,?,'o')",
+                 (item, b, src, a, qty, DAY))
+    conn.commit()
+
+
+def test_the_tyres_from_oth_are_paid_once(tmp_path):
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    first = card(conn, a, phone="+7 900 000 00 11")
+    go(conn, first, "placed", "moving", "at_point", "cancel")                  # came, the client refused: the issue is paid (300)
+    taken = card(conn, a, phone="+7 900 000 00 12")
+    _take_from(conn, taken, first, 4)
+    go(conn, taken, "placed", "moving", "at_point", "oth")                     # the same tyres from «На ОТХ», refused again: 0
+    assert issue_of(conn, a) == {first: (300, True)}
+    sold = card(conn, a, phone="+7 900 000 00 13")
+    _take_from(conn, sold, first, 4)
+    go(conn, sold, "placed", "moving", "at_point", "done")
+    orders.record_sales(conn, sold, "2026-12-12", NOW, "owner", "2026-12-12")
+    conn.execute("INSERT INTO order_event (order_id, at, author, kind, text) VALUES (?,?,?,?,?)", (sold, NOW, "o", "point", order_report.OTH_SOLD_EVENT))
+    conn.commit()
+    got = {e["order"]: e for e in order_report.point_income(conn, START, END, a)["orders"]}
+    assert (got[sold]["issue"], got[sold]["oth"]) == (0, 200)                 # no second fee of the issue, the bonus of «На ОТХ» only
+    assert got[first]["issue"] == 300
+
+
+def test_the_arrival_keeps_its_point_and_tyres_and_the_day_it_left(tmp_path):
+    conn = order_db(tmp_path)
+    a, b = point(conn, "Альфа"), point(conn, "Бета")
+    cid = card(conn, a)
+    go(conn, cid, "placed", "moving", "at_point")
+    conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (b, cid))
+    conn.execute("UPDATE order_item SET qty = 1 WHERE order_id = ?", (cid,))
+    conn.commit()
+    go(conn, cid, "cancel", when="2026-12-20T10:00:00")
+    assert issue_of(conn, b) == {}
+    [entry] = order_report.point_income(conn, START, END, a)["orders"]
+    assert (entry["order"], entry["issue"], entry["issue_pieces"], entry["day"]) == (cid, 300, 4, "2026-12-20")
+    assert not order_report.point_income(conn, START, "2026-12-19", a)["orders"]          # the day it left, not the day it came
+
+
+def test_old_rows_of_the_table_keep_their_sums(tmp_path):
+    from test_order_sheet import placed, stage as sheet_stage
+    from tires_sync import order_sheet as sheet
+    conn = order_db(tmp_path)
+    pid = point(conn, "Альфа")
+    mine = placed(conn, goods=(("111", 4),))
+    conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (pid, mine))
+    handed(conn, mine, pid)
+    orders.move_card(conn, mine, sheet_stage(conn, "done")["id"], NOW, "owner")
+    orders.record_sales(conn, mine, "2026-11-28", NOW, "owner", "2026-11-28")
+    rows = list(sheet.rows_of(conn, mine, NOW).values())
+    report = order_report.build(conn, "2026-11-28", "2026-11-28")
+    assert report["handoff"]["fee"] == 0                                                   # the report: no bonus before 01.12
+    assert round(sum(r["Прибыль ₽"] for r in rows), 2) == round(report["total"]["net"] - 200, 2)   # the row: as written (50 ₽ a tyre)
+    point_payouts.fix_items(conn, [(pid, "order:%d" % mine)], "issue", 0, "ошибка", NOW, "owner", "2026-11-01", "2026-11-30")
+    rows = list(sheet.rows_of(conn, mine, NOW).values())
+    assert round(sum(r["Прибыль ₽"] for r in rows), 2) == order_report.build(conn, "2026-11-28", "2026-11-28")["total"]["net"]
+
+
+def test_only_the_money_right_says_the_tyres_never_came_and_takes_it_back(tmp_path):
+    from tires_sync import store, users
+    app, owner, tok, conn, a, b = panel(tmp_path)
+    orders.ensure_pipeline(conn, DAY)
+    cid = card(conn, a)
+    go(conn, cid, "placed", "moving", "at_point")
+    users.add_user(conn, "chats1", "Secret-pass-123", NOW, role="chats")
+    conn.commit()
+    other = app.test_client()
+    with other.session_transaction() as session:
+        session["user"], session["epoch"], session["csrf"] = "chats1", store.get_session_epoch(conn, "chats1"), "tok"
+    page = other.get("/orders/%d" % cid).get_data(as_text=True)
+    assert "data-no-arrival disabled" in page and "data-no-arrival-locked" in page
+    post(other, "/orders/%d/move" % cid, "tok", stage_id=str(stage(conn, "cancel")), cancel_kind="отменил клиент", no_arrival="yes", oth_answer="no")
+    assert orders.get_card(conn, cid)["stage"]["code"] == "cancel" and point_arrival.arrived(conn, cid)     # «да» without the right: not taken
+    point_arrival.mark_none(conn, cid, NOW, "owner")
+    conn.commit()
+    assert "data-arrival-back" in owner.get("/orders/%d" % cid).get_data(as_text=True)
+    assert "data-arrival-back" not in other.get("/orders/%d" % cid).get_data(as_text=True)
+    post(other, "/orders/%d/arrival-back" % cid, "tok")
+    assert not point_arrival.arrived(conn, cid)
+    post(owner, "/orders/%d/arrival-back" % cid, tok)
+    assert point_arrival.arrived(conn, cid)
+
+
+def test_a_sum_is_set_only_for_an_article_the_item_has(tmp_path):
+    from test_point_income import db
+    conn = db(tmp_path)
+    a, b = base(conn)
+    for part, amount in (("handoff", 10), ("kpi", 10), ("issue", -5)):                    # order 1: the issue only; no minus there
+        try:
+            point_payouts.fix_items(conn, [(a, "order:1")], part, amount, "x", NOW, "owner")
+            raise AssertionError(part)
+        except point_payouts.PayoutError:
+            pass
+    try:
+        point_payouts.fix_items(conn, [(a, "order:2")], "issue", 10, "x", NOW, "owner")    # Альфа gets the bonus of order 2, Бета the issue
+        raise AssertionError("issue of another point")
+    except point_payouts.PayoutError:
+        pass
+    assert point_payouts.fix_items(conn, [(a, "order:2")], "handoff", 100, "x", NOW, "owner") == 1
+    adj = point_payouts.adjust(conn, a, 400, "разовый бонус", "2026-12-05", NOW, "owner")
+    assert point_payouts.fix_items(conn, [(a, "adj:%d" % adj)], "adj", -50, "удержание", NOW, "owner") == 1
+
+
 # ---- 2. the office's operations on every item ---------------------------------------------------------------------------------------
 
 def base(conn):

@@ -130,6 +130,7 @@ def register(app) -> None:
                 abort(400)
             chosen.append((int(point), item))
         action, now = request.form.get("action", ""), local_iso()
+        period = _period(request.form, now[:10])
         from ..amounts import parse_amount
         try:
             if not chosen:
@@ -138,14 +139,15 @@ def register(app) -> None:
                 done = point_payouts.unsettle_many(conn, chosen, now, author())
                 text = "Возвращено в долг: %d поз. на %s." % (done["count"], point_payouts._money(done["amount"]))
             elif action == "cancel":
-                done = point_payouts.fix_items(conn, chosen, "all", 0, request.form.get("reason", ""), now, author())
+                done = point_payouts.fix_items(conn, chosen, "all", 0, request.form.get("reason", ""), now, author(), *period, today=now[:10])
                 text = "Начисление отменено: %d поз." % done
             elif action == "fix":
                 try:
                     amount = parse_amount(request.form.get("amount", ""))
                 except ValueError:
                     raise point_payouts.PayoutError("Сумма: нужно число.")
-                done = point_payouts.fix_items(conn, chosen, request.form.get("part", ""), amount, request.form.get("reason", ""), now, author())
+                done = point_payouts.fix_items(conn, chosen, request.form.get("part", ""), amount, request.form.get("reason", ""), now, author(),
+                                               *period, today=now[:10])
                 text = "Сумма изменена: %d поз." % done
             elif action == "unfix":
                 done = point_payouts.unfix_items(conn, chosen, now, author())

@@ -108,6 +108,7 @@
 {% endif %}
 {% if -1 in c.sale_ids %}<div class="flash flash--err" data-sale-broken role="alert"><div class="flash-text row" style="gap:var(--s-3);flex-wrap:wrap;align-items:center"><span>Запись продажи не завершена (сбой при записи).</span>
 {% if can_post("order_sale_reverse") %}<form method="post" action="/orders/{{ c.id }}/sale/reverse" data-once>{{ csrf }}<button class="btn btn--danger-outline btn--sm">Освободить заказ</button></form>{% endif %}</div></div>{% endif %}
+{% if arrival and arrival.none %}<div class="flash flash--info" data-arrival-none><div class="flash-text">Отмечено: шины физически не приезжали на точку — выплата точке за выдачу по заказу снята.{% if arrival.money %} <form method="post" action="/orders/{{ c.id }}/arrival-back" class="inline" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--link btn--sm" data-arrival-back>Вернуть отметку</button></form>{% endif %}</div></div>{% endif %}
 {% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}{% include "_order_finish.html" %}{% endif %}
 {% endcall %}<div class="o2c-split" data-split="0" role="separator" aria-orientation="vertical" tabindex="0" title="Потяните, чтобы изменить ширину. Двойной щелчок — ширина по умолчанию"></div>
 {% call col(1) %}

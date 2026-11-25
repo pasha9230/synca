@@ -278,6 +278,7 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
     oth_lines: Dict[tuple, dict] = {}
     payouts: Dict[tuple, Dict[str, dict]] = {}                                          # point → order → what it is paid for it (point_income)
     oth_sold = oth_sold_orders(conn, {_order_id(r["note"]) for items in grouped.values() for r in items} - {None})
+    paid_oth = point_arrival.paid_oth_pieces(conn, {_order_id(r["note"]) for items in grouped.values() for r in items} - {None})
     fixed = fixes(conn)
     point_names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
     issues: Dict[tuple, List[tuple]] = {}                                               # point → (share, sum) of its fees for the issue
@@ -292,7 +293,7 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
             order_id = _order_id(note)
             day = min(r["day"] for r in parts)
             got = fee_parts(rates, by_point, key, day, sum(r["pieces"] for r in parts), order_id in handed, handed.get(order_id),
-                            order_id in oth_sold)
+                            order_id in oth_sold, paid_oth.get(order_id, 0))
             mine = _payout(payouts, key, note, day)
             mine["issue"], mine["issue_pieces"], mine["oth"], mine["oth_pieces"] = got["issue"], got["issue_pieces"], got["oth"], got["oth_pieces"]
             mine["oth_sold"] = order_id in oth_sold
@@ -453,18 +454,48 @@ def oth_fee(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str, p
 
 
 def fee_parts(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str, pieces: int, handed: bool = False, handed_to=None,
-              oth_sold: bool = False) -> dict:
+              oth_sold: bool = False, paid_before: int = 0) -> dict:
     """What the points get for one order issued by `key` on `day` with `pieces` tyres — the one formula of the report, the ledger and the
     row of the Google table: {issue, issue_pieces (to `key`), oth, oth_pieces (to `key`, a sale from «На ОТХ»), handoff, handoff_pieces,
     handoff_to (the point of a handed-over client, bonus_point; None — none)}."""
     out = {"handoff": 0.0, "handoff_pieces": 0, "handoff_to": None, "oth": 0.0, "oth_pieces": 0}
-    out["issue"], out["issue_pieces"] = issue_fee(rates, by_point, key, day, pieces)
+    # `paid_before`: the tyres taken from «На ОТХ» whose arrival paid the issue already (point_arrival.paid_oth_pieces): not again
+    out["issue"], out["issue_pieces"] = issue_fee(rates, by_point, key, day, max(pieces - paid_before, 0)) if pieces > paid_before or not paid_before \
+        else (0.0, 0)
     if oth_sold:
         out["oth"], out["oth_pieces"] = oth_fee(rates, by_point, key, day, pieces)
     if handed:                                                  # handed_to None: the point is gone, the issuing one gets it (bonus_point)
         out["handoff_to"] = bonus_point(key, handed_to)
         out["handoff"], out["handoff_pieces"] = handoff_fee(rates, by_point, out["handoff_to"], day, pieces)
     return out
+
+
+LEGACY_STARTS = {"handoff_fee": "2026-10-24", "oth_sale_fee": "2026-11-25"}     # the starts of the bonuses before the owner's 2026-11-25
+LEGACY_PER_TYRE_FROM = "2026-11-27"
+
+
+def _legacy_rate(rates: List[dict], by_point: Dict[int, List[dict]], key, name: str, day: str) -> float:
+    point_id = key[1] if isinstance(key, tuple) and key and key[0] == "id" else None
+    own = own_rate(by_point.get(point_id, []), name, day) if point_id is not None else None
+    if own is not None:
+        return own
+    found = [r for r in rates if r["name"] == name and r["valid_from"] <= day]
+    if found:
+        return float(max(found, key=lambda r: r["valid_from"])["value"])
+    return DEFAULTS[name] if day >= LEGACY_STARTS[name] else 0.0
+
+
+def legacy_fee(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str, pieces: int, handed: bool = False, handed_to=None,
+               oth_sold: bool = False) -> float:
+    """What an order sold on `day` cost in fixed sums by the rules before the owner's 2026-11-25 (the bonuses from LEGACY_STARTS, a handed
+    client per order before LEGACY_PER_TYRE_FROM): only the rows of the Google table already written keep it (order_sheet.KEEPS_BEFORE)."""
+    fee = issue_fee(rates, by_point, key, day, pieces)[0]
+    if oth_sold:
+        fee += round(_legacy_rate(rates, by_point, key, "oth_sale_fee", day) * pieces, 2)
+    if handed:
+        rate = _legacy_rate(rates, by_point, bonus_point(key, handed_to), "handoff_fee", day)
+        fee += round(rate * pieces, 2) if day >= LEGACY_PER_TYRE_FROM else rate
+    return round(fee, 2)
 
 
 # ---- the sums the office set by hand (point_item_fix, the owner 2026-11-25) ------------------------------------------------------------------
