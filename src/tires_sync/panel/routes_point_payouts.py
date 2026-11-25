@@ -42,7 +42,7 @@ def register(app) -> None:
         chosen = request.args.get("p", "").strip()
         point_id = int(chosen) if chosen.isdigit() and int(chosen) in names else None
         pay = request.args.get("pay", "") if request.args.get("pay", "") in ("active", "paid", "all") else "active"
-        report = order_report.build(conn, min(start, point_payouts.LEDGER_FROM), max(end, today))     # one count for the page
+        report = point_payouts.ledger_report(conn, start, end, today)       # one count for the page, the same as «Рассчитан»
         found = point_payouts.items(conn, start, end, point_id, report)
         summary = {}
         for e in found:
@@ -89,7 +89,8 @@ def register(app) -> None:
             chosen.append((int(point), item))
         expect = request.form.get("expect", "").strip()
         try:
-            done = point_payouts.settle(conn, chosen, start, end, local_iso(), author(), expect=float(expect) if expect else None)
+            done = point_payouts.settle(conn, chosen, start, end, local_iso(), author(), expect=float(expect) if expect else None,
+                                        today=local_iso()[:10])
             conn.commit()
             flash("Рассчитано: %d поз. на %s." % (done["count"], point_payouts._money(done["amount"])))
         except ValueError as err:

@@ -183,3 +183,48 @@ def test_whats_new_shows_the_point_its_income_only_while_the_switch_is_on(tmp_pa
     assert "Доход: ваши выплаты" in page and "Пункты выдачи: расчёты" not in page
     office = owner.get("/whats-new").get_data(as_text=True)
     assert "Пункты выдачи: расчёты с точками" in office and "Доход: ваши выплаты" in office
+
+
+def test_two_presses_never_pay_twice(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    a, b = base(conn)
+    stale = point_payouts.paid_items(conn, [a])                                            # what the second press read before the first
+    point_payouts.settle(conn, [(a, "order:1")], START, END, NOW, "owner")
+    try:
+        point_payouts.settle(conn, [(a, "order:1")], START, END, NOW, "owner")              # a second press: nothing is owed
+        raise AssertionError("paid twice")
+    except point_payouts.PayoutError:
+        pass
+    monkeypatch.setattr(point_payouts, "paid_items", lambda conn_, ids=None: stale)        # it counted with the old payments
+    try:
+        point_payouts.settle(conn, [(a, "order:1")], START, END, NOW, "owner")
+        raise AssertionError("paid twice on old data")
+    except point_payouts.PayoutError as err:
+        assert "только что рассчитали" in str(err)
+    assert conn.execute("SELECT COUNT(*), SUM(amount) FROM point_paid WHERE item = 'order:1'").fetchone() == (1, 300)
+    assert not conn.in_transaction
+
+
+def test_a_period_not_whole_never_makes_a_false_hold_back(tmp_path):
+    from test_point_kpi import sell as sell_any
+    app, owner, tok, conn, a, b = panel(tmp_path)
+    sell_any(conn, 50, a, pieces=2, day="2026-12-02")                                        # sold in parts: before the period
+    sell_any(conn, 50, a, pieces=2, day="2026-12-12")                                        # and in it
+    point_payouts.settle(conn, [(a, "order:50")], "2026-12-01", "2026-12-31", NOW, "owner")    # 4 tyres, 300 ₽ paid
+    page = owner.get("/points/payouts?from=2026-12-10&to=2026-12-31&pay=all").get_data(as_text=True)
+    assert 'data-status="over"' not in page
+    got = post(owner, "/points/payouts/settle", tok, **{"from": "2026-12-10", "to": "2026-12-31", "item": "%d|order:50" % a})
+    assert got.status_code == 302
+    assert conn.execute("SELECT COUNT(*), SUM(amount) FROM point_paid WHERE item = 'order:50'").fetchone() == (1, 300)   # no false hold-back
+    [e] = [e for e in point_payouts.items(conn, "2026-12-01", "2026-12-31", a,
+                                           point_payouts.ledger_report(conn, "2026-12-01", "2026-12-31", TODAY)) if e["item"] == "order:50"]
+    assert (e["total"], e["due"], e["status"]) == (300, 0, "paid")
+
+
+def test_closing_the_request_closes_its_task(tmp_path):
+    conn = db(tmp_path)
+    a, b = base(conn)
+    made = point_payouts.request(conn, a, TODAY, NOW, "gamma")
+    conn.commit()
+    point_payouts.close_request(conn, made["id"], NOW, "owner")
+    assert conn.execute("SELECT done_at FROM callback_task WHERE id = ?", (made["task_id"],)).fetchone()[0] == NOW
