@@ -1553,6 +1553,8 @@ def register(app) -> None:
                 raise orders.OrderError("На этом этапе нельзя загрузить позиции без цены продажи.")
             for line in lines:
                 orders.add_item(conn, card_id, now=stamp, author=who, commit=False, awaiting_sale_price=awaiting_prices, **line)
+            from .. import order_webmim
+            order_webmim.snapshot(conn, card_id, stamp, fresh=True)
             orders.add_event(conn, card_id, stamp, who, "webmim", "Позиции загружены из заказа WebMIM.")
             conn.commit()
             flash("Позиции загружены из WebMIM. Укажите цены продажи вручную." if awaiting_prices
