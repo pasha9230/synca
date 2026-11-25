@@ -1014,7 +1014,7 @@
     function show(found) {
       items = found; active = -1; list.innerHTML = "";
       if (!found.length) {
-        var none = document.createElement("li"); none.className = "s-empty"; none.textContent = "Нет позиций с остатком по этому запросу";
+        var none = document.createElement("li"); none.className = "s-empty"; none.textContent = "Нет позиций по этому запросу";
         list.appendChild(none);
       }
       found.forEach(function (it, i) {
@@ -1022,8 +1022,12 @@
         li.setAttribute("role", "option");
         name.className = "s-name"; name.textContent = it.point ? "«" + it.name + "»" : it.name;
         meta.className = "s-meta"; meta.textContent = it.point ? "шина с точки, нет в выгрузке WebMIM" : it.size + " · остаток " + it.stock + " · код " + it.goods_id + (it.oth ? " · " + it.oth : "");
-        cost.className = "s-price"; cost.textContent = it.point ? "впишите цену" : (it.price != null ? Math.round(it.price).toLocaleString("ru-RU") + " ₽" : "нет цены");
+        cost.className = "s-price"; cost.textContent = it.point ? "впишите цену" : (it.price != null ? Math.round(it.price).toLocaleString("ru-RU") + " ₽" : (it.marks ? "нет цены — впишите" : "нет цены"));
         li.appendChild(name); li.appendChild(meta); li.appendChild(cost);
+        if (it.marks && it.marks.length) {                            // ТЗ 94: the office may order it, the list says what it is not (a warning, not a block)
+          var warn = document.createElement("span"); warn.className = "s-warn"; warn.textContent = "⚠ " + it.marks.join(" · ");
+          li.appendChild(warn);
+        }
         li.addEventListener("mousedown", function (e) { e.preventDefault(); pick(i); });
         list.appendChild(li);
       });

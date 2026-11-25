@@ -224,7 +224,9 @@ def test_a_position_the_supplier_took_away_stays_in_the_catalog_with_stock_zero_
     assert ">GONE1<" not in get("?st=feed") and ">GONE1<" not in get("?st=no")                          # it is neither in the feed nor «not in the feed»
     assert ">GONE1<" in get("?q=175/70") and ">GONE1<" in get("?q=old%20model") and ">GONE1<" in get("?d=13")
     assert ">GONE1<" not in get("?d=16") and ">GONE1<" not in get("?s=summer") and ">GONE1<" not in get("?q=lauf")
-    assert "op\" value=\"on:900" not in page and "goods_id=900" not in page                          # nothing can be sold, ordered or added from it
+    assert "op\" value=\"on:900" not in page and "sales/new?goods_id=900" not in page                # nothing can be sold or added to the feed from it
+    # ТЗ 94 (the owner 2026-11-25): the office may still order it by hand — the only link with its code is «Заказ»
+    assert re.findall(r'href="[^"]*goods_id=900[^"]*"', page) == ['href="/orders/new?goods_id=900"']
 
 
 def test_a_gone_position_that_came_back_in_a_fresher_unload_is_shown_once_and_a_gone_row_has_no_checkbox_but_a_preview(tmp_path):
