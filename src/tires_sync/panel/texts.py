@@ -187,6 +187,12 @@ def audit_text(entry: dict) -> str:
         return text.replace("→ — ", "→ общая ") if d.get("to") is None else text
     if action == "point_paid":
         return "Расчёт с точками: отмечено «Рассчитан» %s поз. на %s ₽" % (d.get("count", "?"), d.get("amount", "?"))
+    if action == "point_paid_cancel":
+        return "Расчёт с точкой №%s отменён: %s (%s ₽ снова к выплате)" % (d.get("point", "?"), d.get("item", "?"), d.get("amount", "?"))
+    if action == "point_adjust":
+        return "Корректировка выплаты точке №%s: %s ₽ — %s" % (d.get("point", "?"), d.get("amount", "?"), d.get("reason") or "без причины")
+    if action == "point_paid_request_closed":
+        return "Запрос точки №%s «Вычли с кассы» закрыт офисом" % d.get("point", "?")
     if action == "point_paid_request":
         return "Точка №%s: «Вычли с кассы и получили бонусы» — %s ₽, запрос офису" % (d.get("point", "?"), d.get("amount", "?"))
     if action == "order_source_point":

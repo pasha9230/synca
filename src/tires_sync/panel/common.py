@@ -352,8 +352,9 @@ NEEDS.update(order_receipt_send="send", order_receipt_file="money", orders_recei
 # «Собрать фид сейчас» (feed_now, 2026-11-03): the owner and the partner (the lead's task) — exactly those who have «orders» to change and
 # the right «supplier»; the partner has no «publish» and only looks at the catalog
 # «Пункты выдачи» (ТЗ 95, routes_point_payouts): the ledger is the money's (analytics); «Рассчитан» writes: «orders» with the money right
-SECTION_OF.update(points_payouts_page="analytics", points_payouts_settle="orders")
-NEEDS.update(points_payouts_settle="money")
+SECTION_OF.update(points_payouts_page="analytics", points_payouts_settle="orders", points_payouts_unsettle="orders", points_payouts_adjust="orders",
+                  points_payouts_request_close="orders")
+NEEDS.update(points_payouts_settle="money", points_payouts_unsettle="money", points_payouts_adjust="money", points_payouts_request_close="money")
 SECTION_OF.update(feed_update_now="orders")
 NEEDS.update(feed_update_now="supplier")
 # «На возврат» of a position on the page «На ОТХ» (the owner 2026-11-07): the owner and the partner, as «Согласовано с поставщиком»; the page itself

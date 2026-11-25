@@ -3,8 +3,11 @@ handed over and of the tyres it sold from «На ОТХ», the KPI premiums — 
 the analytics and the point's page), and what the office already paid («Рассчитан»).
 
 Only an account: nothing is paid here, no money moves. An item is «order:<id>» (all a point gets for one order) or «kpi:<YYYY-MM>:<n>»
-(a premium). «Рассчитан» (point_paid) is set by the office with the money right; the paid item leaves the point's active debt and stays in
-the report, the CRM and the journal. «Вычли с кассы и получили бонусы» of a point is a request (point_paid_request + a task to the admin):
+(a premium) or «adj:<id>» (a correction of the office, ± with a reason). «Рассчитан» (point_paid) is set by the office with the money
+right: each press is a payment row of the item's due sum — the sum now less what was paid. An item whose sum grew after it was paid owes a
+«доплата»; one whose sum fell (a reversed sale) shows «переплата / к удержанию», and «Рассчитан» on it records the hold-back (a negative
+row); a paid item gone from the report stays with the sum 0. «Отменить расчёт» cancels the payments of an item (kept, marked). The paid
+item leaves the point's active debt and stays in the report, the CRM and the journal. «Вычли с кассы и получили бонусы» of a point is a request (point_paid_request + a task to the admin):
 the point's sum stays until the office presses «Рассчитан» (the lane's choice for the owner's open question of ТЗ 95: the office checks
 the cash first). The ledger starts at LEDGER_FROM: the earlier months were settled before the panel kept it."""
 from __future__ import annotations
@@ -15,7 +18,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from . import order_report, orders, store
 
 LEDGER_FROM = "2026-11-01"           # the first day the ledger keeps: earlier items are not shown as a debt
-STATUSES = {"unpaid": "Не рассчитан", "paid": "Рассчитан"}
+STATUSES = {"unpaid": "Не рассчитан", "paid": "Рассчитан", "extra": "Доплата", "over": "Переплата / к удержанию"}
 REQUEST_TASK = "Точка «%s»: вычли с кассы и получили бонусы %s — проверить кассу и отметить «Рассчитан»"
 
 
@@ -29,83 +32,176 @@ def _money(value: float) -> str:
 
 
 def paid_items(conn, point_ids: Optional[Iterable[int]] = None) -> Dict[Tuple[int, str], dict]:
-    """(point, item) → {amount, day, paid_at, author} of what the office marked «Рассчитан»."""
-    query, args = "SELECT point_id, item, amount, day, paid_at, author FROM point_paid", []
+    """(point, item) → {amount (all its payments not cancelled), day (of the first), paid_at, author (of the last), count, ids} of «Рассчитан»."""
+    query, args = "SELECT id, point_id, item, amount, day, paid_at, author FROM point_paid WHERE cancelled_at IS NULL", []
     if point_ids is not None:
         ids = sorted({int(i) for i in point_ids})
         if not ids:
             return {}
-        query += " WHERE point_id IN (%s)" % ",".join("?" * len(ids))
+        query += " AND point_id IN (%s)" % ",".join("?" * len(ids))
         args = ids
-    return {(r[0], r[1]): {"amount": r[2], "day": r[3], "paid_at": r[4], "author": r[5]} for r in conn.execute(query, args)}
+    out: Dict[Tuple[int, str], dict] = {}
+    for row_id, pid, item, amount, day, paid_at, author in conn.execute(query + " ORDER BY id", args):
+        got = out.setdefault((pid, item), {"amount": 0.0, "day": day, "count": 0, "ids": []})
+        got["amount"] = round(got["amount"] + amount, 2)
+        got["paid_at"], got["author"] = paid_at, author
+        got["count"] += 1
+        got["ids"].append(row_id)
+    return out
+
+
+def _status(total: float, paid: Optional[dict]) -> Tuple[float, str]:
+    due = round(total - (paid["amount"] if paid else 0.0), 2)
+    if not paid:
+        return due, "unpaid"
+    return due, "paid" if due == 0 else "extra" if due > 0 else "over"
+
+
+def _parts(item: str) -> dict:
+    """The kind, the order, the month and the cycle of an item by its name."""
+    bits = item.split(":")
+    if bits[0] == "kpi" and len(bits) == 3:
+        return {"kind": "kpi", "order": None, "month": bits[1], "cycle": int(bits[2]) if bits[2].isdigit() else 0}
+    if bits[0] == "adj":
+        return {"kind": "adj", "order": None, "month": "", "cycle": 0}
+    return {"kind": "order", "order": int(bits[1]) if len(bits) > 1 and bits[1].isdigit() else None, "month": "", "cycle": 0}
+
+
+def adjustments(conn, point_id: Optional[int] = None) -> List[dict]:
+    query, args = "SELECT id, point_id, day, amount, reason, at, author FROM point_adjust", ()
+    if point_id is not None:
+        query, args = query + " WHERE point_id = ?", (int(point_id),)
+    return [dict(zip(("id", "point_id", "day", "amount", "reason", "at", "author"), r)) for r in conn.execute(query + " ORDER BY id", args)]
 
 
 def items(conn, start: str, end: str, point_id: Optional[int] = None, report: Optional[dict] = None) -> List[dict]:
-    """Every item the points get for start..end (one point with `point_id`), oldest first: {point_id, point, item, kind («order» / «kpi»),
-    order, day, issue, handoff, handoff_pieces, oth, oth_pieces, kpi, total, month, cycle, paid (None or the mark)}. Only the points of the
-    panel (a sale of a deleted point has no one to pay)."""
+    """Every item the points get for start..end by its day (one point with `point_id`), oldest first: {point_id, point, item, kind («order»,
+    «kpi», «adj» — a correction of the office), order, day, issue, handoff, handoff_pieces, oth, oth_pieces, kpi, adj, reason, total (the
+    sum now), paid_sum, due (total − paid_sum), status (STATUSES), paid (the payments or None), month, cycle}. `report`: order_report.build
+    of a period that holds start..end (one count per screen). A paid item no longer in the report (its sale reversed) is kept with the sum
+    0: its payment is «к удержанию». Only the points of the panel."""
     report = report if report is not None else order_report.build(conn, start, end)
     names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
     wanted = [k for k in set(report["payouts"]) | set(report["kpi"]["premiums"])
               if k[0] == "id" and k[1] in names and (point_id is None or k[1] == int(point_id))]
-    paid = paid_items(conn, [k[1] for k in wanted])
-    out = []
+    paid = paid_items(conn, None if point_id is None else [point_id])
+    out, seen = [], set()
+
+    def add(pid: int, item: str, day: str, total: float, **parts) -> None:
+        seen.add((pid, item))
+        mark = paid.get((pid, item))
+        if not total and not mark:
+            return
+        due, status = _status(total, mark)
+        entry = dict(point_id=pid, point=names[pid], item=item, day=day, total=round(total, 2), paid_sum=mark["amount"] if mark else 0.0,
+                     due=due, status=status, status_name=STATUSES[status], paid=mark, issue=0.0, handoff=0.0, handoff_pieces=0, oth=0.0,
+                     oth_pieces=0, kpi=0.0, adj=0.0, reason="", issue_pieces=0)
+        entry.update(_parts(item))
+        entry.update(parts)
+        out.append(entry)
+
     for key in wanted:
         pid = key[1]
         for e in report["payouts"].get(key, []):
-            if not e["order"]:
-                continue
-            item = "order:%d" % e["order"]
-            total = round(e["issue"] + e["handoff"] + e["oth"], 2)
-            if not total:
-                continue
-            out.append(dict(point_id=pid, point=names[pid], item=item, kind="order", order=e["order"], day=e["day"], issue=e["issue"],
-                            handoff=e["handoff"], handoff_pieces=e.get("handoff_pieces", 0), oth=e["oth"], oth_pieces=e["oth_pieces"], kpi=0.0,
-                            total=total, month="", cycle=0, paid=paid.get((pid, item))))
+            if e["order"] and start <= e["day"] <= end:
+                add(pid, "order:%d" % e["order"], e["day"], e["issue"] + e["handoff"] + e["oth"], issue=e["issue"],
+                    issue_pieces=e.get("issue_pieces", 0), handoff=e["handoff"], handoff_pieces=e.get("handoff_pieces", 0), oth=e["oth"],
+                    oth_pieces=e["oth_pieces"])
         for p in report["kpi"]["premiums"].get(key, []):
-            out.append(dict(point_id=pid, point=names[pid], item=p["item"], kind="kpi", order=None, day=p["day"], issue=0.0, handoff=0.0,
-                            handoff_pieces=0, oth=0.0, oth_pieces=0, kpi=p["fee"], total=p["fee"], month=p["month"], cycle=p["cycle"],
-                            paid=paid.get((pid, p["item"]))))
+            if start <= p["day"] <= end:
+                add(pid, p["item"], p["day"], p["fee"], kpi=p["fee"])
+    for a in adjustments(conn, point_id):
+        if a["point_id"] in names and start <= a["day"] <= end:
+            add(a["point_id"], "adj:%d" % a["id"], a["day"], a["amount"], adj=a["amount"], reason=a["reason"])
+    for (pid, item), mark in paid.items():                    # paid, and gone from the count since: the payment is not lost
+        if (pid, item) not in seen and pid in names and start <= mark["day"] <= end:
+            add(pid, item, mark["day"], 0.0)
     out.sort(key=lambda e: (e["day"], e["point"], e["order"] or 0, e["item"]))
     return out
 
 
 def balance(conn, point_id: int, today: str, report: Optional[dict] = None) -> dict:
-    """The point's active debt on `today` (ТЗ 91): what is not «Рассчитан» since LEDGER_FROM — {issue, bonus (handed + OTH), kpi, total,
-    count}."""
-    found = [e for e in items(conn, LEDGER_FROM, today, point_id, report) if e["paid"] is None]
-    out = {"issue": round(sum(e["issue"] for e in found), 2), "bonus": round(sum(e["handoff"] + e["oth"] for e in found), 2),
-           "kpi": round(sum(e["kpi"] for e in found), 2), "count": len(found), "items": [e["item"] for e in found]}
-    out["total"] = round(out["issue"] + out["bonus"] + out["kpi"], 2)
+    """The point's account on `today` since LEDGER_FROM (ТЗ 91): {issue, bonus, kpi — of the items not paid yet; adj — the corrections not
+    paid yet; extra — the «доплаты»; over — «переплата / к удержанию» (≤ 0); due — what is owed (hold-backs aside); total — due + over, what
+    the office owes now; count, items — the items with something owed}."""
+    found = [e for e in items(conn, LEDGER_FROM, today, point_id, report) if e["due"]]
+    unpaid = [e for e in found if e["status"] == "unpaid"]
+    out = {"issue": round(sum(e["issue"] for e in unpaid), 2), "bonus": round(sum(e["handoff"] + e["oth"] for e in unpaid), 2),
+           "kpi": round(sum(e["kpi"] for e in unpaid), 2), "adj": round(sum(e["adj"] for e in unpaid), 2),
+           "extra": round(sum(e["due"] for e in found if e["status"] == "extra"), 2),
+           "over": round(sum(e["due"] for e in found if e["status"] == "over"), 2), "count": len([e for e in found if e["due"] > 0]),
+           "items": [e["item"] for e in found if e["due"] > 0]}
+    out["due"] = round(sum(e["due"] for e in found if e["due"] > 0), 2)
+    out["total"] = round(sum(e["due"] for e in found), 2)                  # the corrections and the hold-backs counted
     return out
 
 
-def settle(conn, chosen: Iterable[Tuple[int, str]], start: str, end: str, now: str, author: str) -> dict:
-    """«Рассчитан» of the chosen (point, item) of start..end: each is marked with its sum now (counted again here, never taken from the
-    form), once; the order's journal and the audit get it. Returns {count, amount}. An item already paid or not of the period is skipped."""
+def settle(conn, chosen: Iterable[Tuple[int, str]], start: str, end: str, now: str, author: str, expect: Optional[float] = None,
+           report: Optional[dict] = None) -> dict:
+    """«Рассчитан» of the chosen (point, item) of start..end: each gets a payment row of its due sum now (counted again here, never taken from
+    the form): the whole sum, a «доплата», or a hold-back of an overpayment (< 0). `expect`: the sum the person confirmed — another sum now
+    refuses it all (the window asks again). The order's journal and the audit get it. Returns {count, amount}."""
     chosen = {(int(p), str(i)) for p, i in chosen}
     if not chosen:
         raise PayoutError("Отметьте, что рассчитано.")
-    known = {(e["point_id"], e["item"]): e for e in items(conn, start, end)}
-    count, amount, by_point = 0, 0.0, {}
-    for key in sorted(chosen):
-        entry = known.get(key)
-        if entry is None or entry["paid"] is not None:
-            continue
-        if conn.execute("INSERT OR IGNORE INTO point_paid (point_id, item, amount, day, paid_at, author) VALUES (?,?,?,?,?,?)",
-                        (key[0], key[1], entry["total"], entry["day"], now, author)).rowcount != 1:
-            continue
-        count += 1
-        amount = round(amount + entry["total"], 2)
-        by_point.setdefault(entry["point"], []).append(key[1])
-        if entry["order"]:
-            orders.add_event(conn, entry["order"], now, author, "field", "Рассчитано с точкой «%s»: %s (выплата точке за заказ)" % (
-                entry["point"], _money(entry["total"])))
-    if not count:
-        conn.rollback()
+    known = {(e["point_id"], e["item"]): e for e in items(conn, start, end, report=report)}
+    picked = [known[k] for k in sorted(chosen) if k in known and known[k]["due"]]
+    if not picked:
         raise PayoutError("Нечего отмечать: эти позиции уже рассчитаны или не входят в период.")
-    store.write_audit(conn, now, author, "point_paid", {"count": count, "amount": amount, "items": by_point})
-    return {"count": count, "amount": amount}
+    amount = round(sum(e["due"] for e in picked), 2)
+    if expect is not None and round(float(expect), 2) != amount:
+        raise PayoutError("Сумма изменилась: было %s, сейчас %s. Проверьте и подтвердите ещё раз." % (_money(float(expect)), _money(amount)))
+    by_point: Dict[str, List[str]] = {}
+    for e in picked:
+        conn.execute("INSERT INTO point_paid (point_id, item, amount, day, paid_at, author) VALUES (?,?,?,?,?,?)",
+                     (e["point_id"], e["item"], e["due"], e["day"], now, author))
+        by_point.setdefault(e["point"], []).append(e["item"])
+        if e["order"]:
+            if e["due"] < 0:
+                text = "Удержано с точки «%s»: %s (переплата: сумма за заказ уменьшилась после расчёта)" % (e["point"], _money(-e["due"]))
+            else:
+                text = "Рассчитано с точкой «%s»: %s (%s)" % (e["point"], _money(e["due"]),
+                                                              "доплата за заказ" if e["status"] == "extra" else "выплата точке за заказ")
+            orders.add_event(conn, e["order"], now, author, "field", text)
+    store.write_audit(conn, now, author, "point_paid", {"count": len(picked), "amount": amount, "items": by_point})
+    return {"count": len(picked), "amount": amount}
+
+
+def unsettle(conn, point_id: int, item: str, now: str, author: str) -> float:
+    """«Отменить расчёт» (the owner 2026-11-25): every payment of the item is cancelled (kept, marked), the item is owed again; the order's
+    journal and the audit get it. Returns the sum cancelled."""
+    mark = paid_items(conn, [point_id]).get((int(point_id), str(item)))
+    if not mark:
+        raise PayoutError("Эта позиция не рассчитана.")
+    conn.execute("UPDATE point_paid SET cancelled_at = ?, cancelled_by = ? WHERE id IN (%s)" % ",".join("?" * len(mark["ids"])),
+                 [now, author] + mark["ids"])
+    name = conn.execute("SELECT name FROM point WHERE id = ?", (int(point_id),)).fetchone()
+    order_id = _parts(str(item))["order"]
+    if order_id:
+        orders.add_event(conn, order_id, now, author, "field", "Расчёт с точкой «%s» отменён: %s снова к выплате" % (
+            name[0] if name else point_id, _money(mark["amount"])))
+    store.write_audit(conn, now, author, "point_paid_cancel", {"point": int(point_id), "item": str(item), "amount": mark["amount"]})
+    return mark["amount"]
+
+
+ADJUST_REASON_MAX = 300
+
+
+def adjust(conn, point_id: int, amount: float, reason: str, day: str, now: str, author: str) -> int:
+    """«Корректировка» of what a point is paid (the owner 2026-11-25): a sum ± with a reason, on `day`; the counted sums stay as they are, the
+    correction is an item of its own (owed until «Рассчитан»), shown to the point. Audited."""
+    if not conn.execute("SELECT 1 FROM point WHERE id = ?", (int(point_id),)).fetchone():
+        raise PayoutError("Такой точки нет.")
+    reason = " ".join(str(reason or "").split())[:ADJUST_REASON_MAX]
+    if not reason:
+        raise PayoutError("Напишите причину корректировки.")
+    amount = round(float(amount), 2)
+    if not amount or abs(amount) > 1000000 or amount != amount:
+        raise PayoutError("Корректировка: сумма не 0 и не больше 1 000 000 ₽.")
+    adj_id = conn.execute("INSERT INTO point_adjust (point_id, day, amount, reason, at, author) VALUES (?,?,?,?,?,?)",
+                          (int(point_id), day, amount, reason, now, author)).lastrowid
+    store.write_audit(conn, now, author, "point_adjust", {"point": int(point_id), "amount": amount, "reason": reason, "day": day, "id": adj_id})
+    return adj_id
 
 
 def set_source_point(conn, order_id: int, value, was, now: str, author: str) -> bool:
@@ -142,40 +238,55 @@ def set_source_point(conn, order_id: int, value, was, now: str, author: str) -> 
     return True
 
 
-def last_request(conn, point_id: int) -> Optional[dict]:
-    row = conn.execute("SELECT id, at, author, amount, items, task_id FROM point_paid_request WHERE point_id = ? ORDER BY id DESC LIMIT 1",
+REQUEST_FIELDS = ("id", "point_id", "at", "author", "amount", "items", "task_id", "closed_at", "closed_by")
+
+
+def last_request(conn, point_id: int, owed: Iterable[str]) -> Optional[dict]:
+    """The point's last request; `open` while the office has not closed it and an item of it is still owed (`owed`: balance()["items"])."""
+    row = conn.execute("SELECT %s FROM point_paid_request WHERE point_id = ? ORDER BY id DESC LIMIT 1" % ", ".join(REQUEST_FIELDS),
                        (int(point_id),)).fetchone()
     if row is None:
         return None
-    out = dict(zip(("id", "at", "author", "amount", "items", "task_id"), row))
+    out = dict(zip(REQUEST_FIELDS, row))
     out["items"] = json.loads(out["items"] or "[]")
-    paid = paid_items(conn, [point_id])
-    out["open"] = any((int(point_id), i) not in paid for i in out["items"])         # waits while an item of it is not «Рассчитан»
+    owed = set(owed)
+    out["open"] = out["closed_at"] is None and any(i in owed for i in out["items"])
     return out
 
 
-def open_requests(conn) -> Dict[int, dict]:
-    """Point → its last request while it waits for the office."""
+def open_requests(conn, today: str, report: Optional[dict] = None) -> Dict[int, dict]:
+    """Point → its last request while it waits for the office (`report`: a build that holds LEDGER_FROM..today)."""
     out = {}
     for (pid,) in conn.execute("SELECT DISTINCT point_id FROM point_paid_request").fetchall():
-        found = last_request(conn, pid)
+        found = last_request(conn, pid, balance(conn, pid, today, report)["items"])
         if found and found["open"]:
             out[pid] = found
     return out
 
 
+def close_request(conn, request_id: int, now: str, author: str) -> bool:
+    """The office closes a request (the cash checked, settled otherwise): audited. True if it was open."""
+    row = conn.execute("SELECT point_id FROM point_paid_request WHERE id = ? AND closed_at IS NULL", (int(request_id),)).fetchone()
+    if row is None:
+        return False
+    conn.execute("UPDATE point_paid_request SET closed_at = ?, closed_by = ? WHERE id = ?", (now, author, int(request_id)))
+    store.write_audit(conn, now, author, "point_paid_request_closed", {"request": int(request_id), "point": row[0]})
+    return True
+
+
 def request(conn, point_id: int, today: str, now: str, author: str) -> dict:
-    """«Вычли с кассы и получили бонусы» of a point: a request to the office with the point's active debt now and a task to the admin. The
+    """«Вычли с кассы и получили бонусы» of a point: a request to the office with the point's account now and a task to the admin. The
     sum is not zeroed: it leaves the debt when the office marks it «Рассчитан». A second request while one waits is refused."""
     from . import order_notify, tasks
     row = conn.execute("SELECT name FROM point WHERE id = ?", (int(point_id),)).fetchone()
     if row is None:
         raise PayoutError("Такой точки нет.")
-    waiting = last_request(conn, point_id)
+    report = order_report.build(conn, LEDGER_FROM, today)
+    debt = balance(conn, point_id, today, report)
+    waiting = last_request(conn, point_id, debt["items"])
     if waiting and waiting["open"]:
         raise PayoutError("Запрос уже отправлен: ждём, пока офис проверит кассу и отметит «Рассчитан».")
-    debt = balance(conn, point_id, today)
-    if not debt["total"]:
+    if debt["total"] <= 0:
         raise PayoutError("Нечего рассчитывать: всё уже рассчитано.")
     owner = order_notify.get_owner_login(conn)
     task_id = tasks.add(conn, kind="other", title=(REQUEST_TASK % (row[0], _money(debt["total"])))[:tasks.TITLE_MAX], due_at=now[:16],

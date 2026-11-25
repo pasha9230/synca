@@ -98,10 +98,10 @@ def test_the_own_rates_of_a_point(tmp_path):
     clients(conn, a, 5, pieces=4)
     clients(conn, b, 5, first=50, pieces=4)
     mine = order_report.point_income(conn, "2026-12-01", "2026-12-31", a)
-    assert {e["issue"] for e in mine["orders"]} == {100} and {e["handoff"] for e in mine["orders"]} == {240}
+    assert {e["issue"] for e in mine["orders"]} == {400} and {e["handoff"] for e in mine["orders"]} == {240}
     assert mine["kpi"] == 2000
     theirs = order_report.point_income(conn, "2026-12-01", "2026-12-31", b)
-    assert {e["issue"] for e in theirs["orders"]} == {75} and theirs["kpi"] == 0
+    assert {e["issue"] for e in theirs["orders"]} == {300} and theirs["kpi"] == 0
     assert order_report.point_rates_now(conn, a, "2026-12-15")["point_fee"] == 100
     # back to the general rate from a later day; a past day keeps its own
     assert order_report.set_point_rates(conn, a, "2026-12-20", "2026-12-15", NOW, "owner", {"point_fee": None}) == ["point_fee"]

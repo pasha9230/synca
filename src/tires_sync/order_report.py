@@ -27,7 +27,10 @@ OTH_SALE_FEE = 50.0                  # rubles to the point for every tyre it sol
 OTH_SALE_FEE_FROM = "2026-11-25"     # the sales of earlier days get 0: a past report is never recounted (as HANDOFF_FEE_FROM)
 # ТЗ 92 / 95 (the owner 2026-11-24: «50 ₽ за каждую шину», «+200 ₽ за комплект»): from this day the bonus of a handed-over client is
 # handoff_fee for every tyre of the issued order; the orders of earlier days keep it per order (a past report is never recounted)
-HANDOFF_PER_TYRE_FROM = "2026-11-26"
+HANDOFF_PER_TYRE_FROM = "2026-11-27"
+# the owner 2026-11-25: the fee of the issue (point_fee, 75 ₽) is for every tyre of the order (a set of 4 — 300 ₽), from this day; the
+# orders of earlier days keep it per order (a past report is never recounted)
+POINT_FEE_PER_TYRE_FROM = "2026-11-27"
 # KPI (ТЗ 95): in a calendar month, for every full cycle of kpi_orders closed orders AND kpi_tyres tyres of the clients the point handed
 # over, the premium kpi_bonus; the cycles are not limited: min(orders // kpi_orders, tyres // kpi_tyres) premiums (20 / 76 → 2). The rates
 # of a month are those in force on its first day. The premium is the point's on the day of the order that closes the cycle.
@@ -67,7 +70,7 @@ def rate_on(rates: List[dict], name: str, day: str) -> float:
 
 def _check_rate(name: str, value: float) -> None:
     if name == "point_fee" and not 0 <= value <= MAX_POINT_FEE:
-        raise ValueError("Выплата точке: от 0 до 100 000 ₽ за заказ.")
+        raise ValueError("Выплата точке за выдачу: от 0 до 100 000 ₽.")
     if name == "owner_share" and not 0 <= value <= 1:
         raise ValueError("Доля собственника: от 0 до 100 %.")
     if name == "handoff_fee" and not 0 <= value <= MAX_POINT_FEE:
@@ -214,18 +217,12 @@ def _split(net: float, by_share: Dict[float, float]) -> tuple:
 HANDED_SLICES = {"": "Все заказы", "only": "Только переданные точкой", "none": "Без переданных точкой"}     # the slice of the report (ТЗ 95)
 
 
-def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", handed_by: Optional[int] = None) -> dict:
-    """Lines per point (most profitable first), the total and the manual sales (not in the total). Reversed sales are not counted.
-    `handed_slice` (ТЗ 95): "only" — the orders of the clients a point handed over (of the point `handed_by`, if given), with their KPI;
-    "none" — the others, without the handed clients' bonuses and the KPI; "" — all."""
-    rates = list_rates(conn)
-    by_point = _by_point(list_point_rates(conn))
-    month_start = start[:8] + "01" if start else ""
-    # all points: a point's fixed sum may come from an order issued elsewhere; from the first day of the month of `start`: the KPI of the month
-    every = sales_store.list_sales(conn, month_start, end)
-    rows = _counted(conn, [r for r in every if not start or r["day"] >= start])
-    names: Dict[tuple, str] = {}                                                        # point key → its name in the report
-    handed = {}                                                                         # the clients the points handed over (order_manager.handoff)
+def handed_points(conn) -> tuple:
+    """({order: the point key that handed its client over, or None — a point gone}, {point key: its name}): the one rule of «чей клиент» of
+    the report, the KPI and the row of the table (order_sheet): the handoff (order_handoff), else «Откуда клиент» = a point (ТЗ 92); a merged
+    order takes it from a handed source (order_merge.handed); a client changed on «На ОТХ» moves it or takes it off (oth_swap.fee_handed)."""
+    names: Dict[tuple, str] = {}
+    handed: Dict[int, Optional[tuple]] = {}
     for order_id, point_id, name in conn.execute("SELECT h.order_id, p.id, p.name FROM order_handoff h LEFT JOIN point p ON p.id = h.point_id"):
         handed[order_id] = ("id", point_id) if point_id is not None else None
         if point_id is not None:
@@ -244,6 +241,18 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
             handed[order_id] = handed[source]
     for order_id in off - set(moved):
         handed.pop(order_id, None)
+    return handed, names
+
+
+def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", handed_by: Optional[int] = None) -> dict:
+    """Lines per point (most profitable first), the total and the manual sales (not in the total). Reversed sales are not counted.
+    `handed_slice` (ТЗ 95): "only" — the orders of the clients a point handed over (of the point `handed_by`, if given), with their KPI;
+    "none" — the others, without the handed clients' bonuses and the KPI; "" — all."""
+    rates = list_rates(conn)
+    by_point = _by_point(list_point_rates(conn))
+    # all points: a point's fixed sum may come from an order issued elsewhere
+    rows = _counted(conn, sales_store.list_sales(conn, start, end))
+    handed, names = handed_points(conn)                                                 # point key → its name in the report too
     if handed_slice in ("only", "none"):
         def kept(r) -> bool:
             by = handed.get(_order_id(r["note"])) if r["source"] == "order" else None
@@ -270,7 +279,7 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
             order_id = _order_id(note)
             day = min(r["day"] for r in parts)
             mine = _payout(payouts, key, note, day)
-            mine["issue"] = rate_for(rates, by_point, key, "point_fee", day)
+            mine["issue"], mine["issue_pieces"] = issue_fee(rates, by_point, key, day, sum(r["pieces"] for r in parts))
             if order_id in oth_sold:                                                    # the point that sold them, once per order, per tyre
                 pieces = sum(r["pieces"] for r in parts)
                 extra = round(rate_for(rates, by_point, key, "oth_sale_fee", day) * pieces, 2)
@@ -290,7 +299,7 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
             got = handoff_lines.setdefault(to, {"point": names[to], "clients": 0, "fee": 0.0})
             got["clients"] += 1
             got["fee"] = round(got["fee"] + extra, 2)
-    kpi, progress = _kpi(every, handed, rates, by_point, start, end)
+    kpi, progress = _kpi(conn, handed, rates, by_point, start, end)
     if handed_slice == "none":
         kpi = {}
     elif handed_slice == "only" and handed_by is not None:
@@ -318,8 +327,8 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
         fee_sum, bonus_sum, by_share = 0.0, 0.0, {}
         for note, parts in per_point.get(key, {}).items():
             day = min(r["day"] for r in parts)
-            fee, share = rate_for(rates, by_point, key, "point_fee", day), rate_on(rates, "owner_share", day)
-            used.add((fee, share))
+            fee, share = issue_fee(rates, by_point, key, day, sum(r["pieces"] for r in parts))[0], rate_on(rates, "owner_share", day)
+            used.add((rate_for(rates, by_point, key, "point_fee", day), share))   # the rate, not the sum of the order
             fee_sum += fee
             by_share[share] = by_share.get(share, 0.0) + sum(r["margin_total"] for r in parts) - fee
         for share, extra in bonuses.get(key, []):
@@ -362,6 +371,15 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
             "payouts": {key: sorted(found.values(), key=lambda e: (e["day"], e["order"] or 0)) for key, found in payouts.items()}}
 
 
+def issue_fee(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str, pieces: int) -> tuple:
+    """(the fee, the tyres it is paid for) of an order the point `key` issued on `day` with `pieces` tyres: point_fee a tyre from
+    POINT_FEE_PER_TYRE_FROM (the owner 2026-11-25: «75 ₽ за шину, комплект 300 ₽»), before it once per order (tyres 0). The one place."""
+    fee = rate_for(rates, by_point, key, "point_fee", day)
+    if day >= POINT_FEE_PER_TYRE_FROM:
+        return round(fee * pieces, 2), pieces
+    return fee, 0
+
+
 def handoff_fee(rates: List[dict], by_point: Dict[int, List[dict]], to, day: str, pieces: int) -> tuple:
     """(the bonus, the tyres it is paid for) of a handed-over client's order issued on `day` with `pieces` tyres: handoff_fee a tyre from
     HANDOFF_PER_TYRE_FROM (ТЗ 92: «1 шина = 50 ₽, комплект 200 ₽»), before it once per order (tyres 0). The one place of that rule."""
@@ -389,26 +407,26 @@ def kpi_item(month: str, cycle: int) -> str:
     return "kpi:%s:%d" % (month, cycle)
 
 
-def _kpi(every: List[dict], handed: dict, rates: List[dict], by_point: Dict[int, List[dict]], start: str, end: str) -> tuple:
-    """The KPI of the handing points (ТЗ 95), from the sales `every` (the whole month of `start` up to `end`): ({point key: [{month, cycle,
-    day, fee, item}]} — the premiums whose cycle closed within start..end; {point key: {month: {orders, tyres, cycles, need_orders,
-    need_tyres, bonus, fee}}} — the count of each month up to `end`). An order is closed on the day of its first sale (not reversed)."""
-    closed: Dict[tuple, Dict[str, dict]] = {}                                   # point → order note → {day, tyres}
-    for r in every:
-        if r["source"] != "order":
-            continue
-        order_id = _order_id(r["note"])
+def _kpi(conn, handed: dict, rates: List[dict], by_point: Dict[int, List[dict]], start: str, end: str) -> tuple:
+    """The KPI of the handing points (ТЗ 95): ({point key: [{month, cycle, day, fee, item}]} — the premiums whose cycle closed within
+    start..end; {point key: {month: {orders, tyres, cycles, need_orders, need_tyres, bonus, fee}}} — the count of each month from the month
+    of `start` up to `end`). An order is closed once, on the day of the first of ALL its sales (not reversed): sold in two months, it counts
+    in the first one only, with every tyre sold up to `end`."""
+    closed: Dict[tuple, List[dict]] = {}                                        # point → [{order, day, tyres}]
+    month_start = start[:8] + "01" if start else ""
+    for note, first, tyres in conn.execute(
+            "SELECT note, MIN(day), SUM(CASE WHEN day <= ? THEN pieces ELSE 0 END) FROM sale WHERE source = 'order' AND reversed_at IS NULL "
+            "GROUP BY note", (end or "9999-12-31",)):
+        order_id = _order_id(note)
         to = handed.get(order_id)
-        if to is None:
+        if to is None or (end and first > end) or (month_start and first < month_start):
             continue
-        got = closed.setdefault(to, {}).setdefault(r["note"], {"order": order_id, "day": r["day"], "tyres": 0})
-        got["day"] = min(got["day"], r["day"])
-        got["tyres"] += r["pieces"]
+        closed.setdefault(to, []).append({"order": order_id, "day": first, "tyres": tyres})
     premiums: Dict[tuple, List[dict]] = {}
     progress: Dict[tuple, Dict[str, dict]] = {}
     for to, found in closed.items():
         months: Dict[str, List[dict]] = {}
-        for entry in found.values():
+        for entry in found:
             months.setdefault(entry["day"][:7], []).append(entry)
         for month, entries in sorted(months.items()):
             first = month + "-01"
@@ -432,7 +450,8 @@ def _kpi(every: List[dict], handed: dict, rates: List[dict], by_point: Dict[int,
 
 def _payout(payouts: Dict[tuple, Dict[str, dict]], key: tuple, note: str, day: str) -> dict:
     """The line of the order `note` in what the point `key` is paid (made empty: no sum yet)."""
-    return payouts.setdefault(key, {}).setdefault(note, {"order": _order_id(note), "day": day, "issue": 0.0, "handoff": 0.0, "handoff_pieces": 0,
+    return payouts.setdefault(key, {}).setdefault(note, {"order": _order_id(note), "day": day, "issue": 0.0, "issue_pieces": 0, "handoff": 0.0,
+                                                         "handoff_pieces": 0,
                                                          "oth": 0.0, "oth_pieces": 0})
 
 

@@ -271,6 +271,12 @@ def swaps(conn) -> Dict[int, dict]:
     return {int(d["order"]): d for d in _history(conn)}
 
 
+def handed_orders(conn) -> Set[int]:
+    """The orders of a client a point handed over: its handoff (order_handoff) or «Откуда клиент» = the point (order_source_point, ТЗ 92).
+    The one list of «чей клиент» for the fee, the swap and the merge."""
+    return {r[0] for r in conn.execute("SELECT order_id FROM order_handoff UNION SELECT order_id FROM order_source_point")}
+
+
 def fee_handed(conn) -> Tuple[Set[int], Dict[int, int]]:
     """(the orders whose own fee of a handed client is off: the client changed, and every order B whose client went to an order A — by any swap,
     not only the last one of A (oth-return-fixes: a second swap of A never makes the first B pay for itself again); the orders that pay the fee of
@@ -278,7 +284,7 @@ def fee_handed(conn) -> Tuple[Set[int], Dict[int, int]]:
     (order_merge.handed)."""
     history = _history(conn)
     found = {int(d["order"]): d for d in history}
-    handed = {r[0] for r in conn.execute("SELECT order_id FROM order_handoff")}
+    handed = handed_orders(conn)
     moved = {a: int(d["from_order"]) for a, d in found.items() if d.get("from_order") and int(d["from_order"]) in handed}
     gave = {int(d["from_order"]) for d in history if d.get("from_order")}          # B: its client (and fee) went to A, never paid by B
     return (set(found) | gave) - set(moved), moved
@@ -293,4 +299,4 @@ def handed_fee(conn, order_id) -> bool:
         return True
     if order_id in off:
         return False
-    return bool(conn.execute("SELECT 1 FROM order_handoff WHERE order_id = ?", (order_id,)).fetchone()) or order_id in order_merge.handed(conn)
+    return order_id in handed_orders(conn) or order_id in order_merge.handed(conn)

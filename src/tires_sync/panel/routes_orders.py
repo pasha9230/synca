@@ -891,6 +891,7 @@ def register(app) -> None:
                                income_switch=current_user()["role"] == "owner",
                                kpi={name: order_report.rate_on(rates, name, today) for name in ("kpi_orders", "kpi_tyres", "kpi_bonus")},
                                kpi_from=order_report.KPI_FROM, per_tyre_from=order_report.HANDOFF_PER_TYRE_FROM,
+                               issue_per_tyre_from=order_report.POINT_FEE_PER_TYRE_FROM,
                                point_rates=order_report.list_point_rates(conn), point_rate_names=order_report.POINT_RATES,
                                points=points.list_points(conn),
                                saved_labels=order_report.saved_share_labels(conn), label_defaults=order_report.SHARE_LABELS,
@@ -1629,7 +1630,7 @@ def register(app) -> None:
                 return card_page(conn, card, dict(changes, **typed_row))  # the window comes back with what was typed: nothing saved, nothing moved
             return back(card_id, "money")
         client_fixed(conn, card, changed)
-        if own_point() is None and "source_point" in request.form:        # «Откуда клиент» = a point (ТЗ 92): its bonus, as a handed client
+        if own_point() is None and has_right("money") and "source_point" in request.form:   # «Откуда клиент» = a point (ТЗ 92): money
             try:
                 point_payouts.set_source_point(conn, card_id, request.form.get("source_point", ""), request.form.get("source_point_was", ""),
                                                local_iso(), author())

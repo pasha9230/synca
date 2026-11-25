@@ -32,14 +32,20 @@ CREATE TABLE IF NOT EXISTS order_rate (
 CREATE TABLE IF NOT EXISTS point_rate (
     point_id INTEGER NOT NULL, name TEXT NOT NULL, valid_from TEXT NOT NULL, value REAL, created TEXT NOT NULL, author TEXT NOT NULL,
     PRIMARY KEY (point_id, name, valid_from));
--- «Рассчитан» (ТЗ 95): what the office paid a point, item by item («order:<id>» — the order's fee and bonuses, «kpi:<YYYY-MM>:<n>» — a premium)
+-- «Рассчитан» (ТЗ 95): each payment of the office to a point, item by item («order:<id>» — the order's fee and bonuses, «kpi:<YYYY-MM>:<n>» —
+-- a premium); an item paid again (its sum grew: «доплата») or held back (it fell: «к удержанию», amount < 0) gets a row more
 CREATE TABLE IF NOT EXISTS point_paid (
-    point_id INTEGER NOT NULL, item TEXT NOT NULL, amount REAL NOT NULL, day TEXT NOT NULL, paid_at TEXT NOT NULL, author TEXT NOT NULL,
-    PRIMARY KEY (point_id, item));
+    id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, item TEXT NOT NULL, amount REAL NOT NULL, day TEXT NOT NULL,
+    paid_at TEXT NOT NULL, author TEXT NOT NULL, cancelled_at TEXT, cancelled_by TEXT);     -- «Отменить расчёт»: kept, marked
+CREATE INDEX IF NOT EXISTS point_paid_item ON point_paid (point_id, item);
+-- «Корректировка» of what a point is paid (the owner 2026-11-25): ± with a reason, an item «adj:<id>» of the ledger
+CREATE TABLE IF NOT EXISTS point_adjust (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, day TEXT NOT NULL, amount REAL NOT NULL, reason TEXT NOT NULL,
+    at TEXT NOT NULL, author TEXT NOT NULL);
 -- «Вычли с кассы и получили бонусы» of a point: a request to the office (a task); the sum stays the point's until «Рассчитан»
 CREATE TABLE IF NOT EXISTS point_paid_request (
     id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, amount REAL NOT NULL,
-    items TEXT NOT NULL, task_id INTEGER);
+    items TEXT NOT NULL, task_id INTEGER, closed_at TEXT, closed_by TEXT);
 -- «Откуда клиент» = a point (ТЗ 92): the client the point gave by phone, set in the order by the office; a handed client of that point
 CREATE TABLE IF NOT EXISTS order_source_point (
     order_id INTEGER PRIMARY KEY, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL);
