@@ -226,8 +226,10 @@ def money(conn, start: str, end: str) -> dict:
     manual = report["manual"] or {"sales": 0, "pieces": 0, "sale": 0.0, "cost": 0.0, "margin": 0.0}
     return {"start": start, "end": end, "has_data": bool(report["lines"] or report["manual"]), "orders": total["orders"], "pieces": total["pieces"], "revenue": total["sale"], "cost": total["cost"],
             "profit": total["margin"], "point_fees": total["fee"], "net": total["net"], "owner": total["owner"], "partner": total["partner"],
+            "issue_fees": report["fees"]["issue"], "bonus_fees": report["fees"]["bonus"],       # the fees: for the issued orders and the bonuses (ТЗ 80)
+            "handoff_fees": report["handoff"]["fee"], "oth_fees": report["oth"]["fee"], "oth_pieces": report["oth"]["pieces"],
             "by_point": [{"point": r["point"], "orders": r["orders"], "revenue": r["sale"], "profit": r["margin"], "point_fee": r["fee"],
-                          "net": r["net"]} for r in report["lines"]],
+                          "issue_fee": f["issue"], "bonus_fee": f["bonus"], "net": r["net"]} for r, f in zip(report["lines"], report["fees"]["lines"])],
             "manual": {"sales": manual["sales"], "pieces": manual["pieces"], "revenue": manual["sale"], "cost": manual["cost"],
                        "profit": manual["margin"]},
             "rates_used": report["rates_used"],

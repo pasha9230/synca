@@ -265,7 +265,8 @@ def _sent(conn, card_id: int) -> Dict[str, str]:
 
 def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     """Position → (profit ₽, profit %) as the analytics counts it (order_report): the margin of the position's sale (at WebMIM's price where
-    there is one) less its share of the order's fixed sums (75 ₽ to the point, 50 ₽ for a client a point handed over), shared by the sum of
+    there is one) less its share of the order's fixed sums (75 ₽ to the point, 50 ₽ for a client a point handed over, 50 ₽ a tyre the point
+    sold from «На ОТХ»), shared by the sum of
     the sale, so the rows add up to the net profit of the order. None before the sale is written and after it is reversed."""
     ids = [i for i in card["sale_ids"] if i > 0]
     if not ids or len(ids) != len(card["sale_ids"]):
@@ -281,6 +282,8 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     from . import oth_swap
     if oth_swap.handed_fee(conn, card["id"]):                                     # never for a client who left (oth_swap)
         fee += order_report.rate_on(rates, "handoff_fee", day)
+    if order_report.oth_sold_orders(conn, [card["id"]]):                          # the point sold them from «На ОТХ»: its bonus per tyre
+        fee += round(order_report.rate_on(rates, "oth_sale_fee", day) * sum(r["pieces"] for r in counted.values()), 2)    # as the report
     total = sum(r["sale_total"] for r in counted.values())
     pairs = _pair(card["items"], [counted[i] for i in ids])
     out = {}

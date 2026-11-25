@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{# «Доход» of a point (ТЗ 80): routes_mypoint.mypoint_income; the body is _mypoint_income.html (the same in «Новый вид»). #}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}pt-ui{% endblock %}
+{% block title %}Доход · Tires Sync{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endblock %}
+{% block content %}
+<div class="pt mp-wrap">
+<header class="pt-top mp-head">
+{% if choose and point %}<a class="btn btn--secondary btn--sm pt-back" href="/my-point?p={{ point.id }}" data-back>← Рабочее место</a>{% endif %}
+<div class="mp-title"><h1>Доход</h1>{% if point %}<span class="mp-sub">{{ point.name }}</span>{% endif %}</div>
+</header>
+{% include "_mypoint_income.html" %}
+</div>
+{% with section="income" %}{% include "_point_nav.html" %}{% endwith %}
+{% endblock %}

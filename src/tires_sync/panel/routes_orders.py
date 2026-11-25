@@ -536,6 +536,21 @@ def register(app) -> None:
         _conn, settings, parsed, ref = context(app)
         return order_offers.item_args(conn, settings, parsed, ref, goods_id, local_now().date().isoformat(), account_id)
 
+    def catalog_row(conn, goods_id):
+        """A row of a new window for a position the office orders though it is not on sale (ТЗ 94, «Заказ» of the catalog): of today's
+        unload or of the permanent base of positions, with the panel's price when it has one, else an empty price to type. None: no such position."""
+        _conn, settings, parsed, ref = context(app)
+        try:
+            found = order_search.locate(conn, parsed, goods_id)
+        except order_search.NotLocated:
+            return None
+        name = found.offer.name_orig or found.offer.name
+        try:
+            shown = _price_text(order_search.located_args(conn, settings, parsed, ref, found, local_now().date().isoformat(), manual_sale="")["sale_unit"])
+        except orders.OrderError:
+            shown = ""
+        return {"goods_id": found.offer.goods_id, "query": name, "name": name, "qty": "1", "sale_unit": shown, "sale_auto": shown}
+
     def typed_goods(conn, code, text, stock=False):
         """(order_search.Located, name when found by the text): the position the manager chose in the list (by its code, else by the supplier's exact
         name the list filled in: the code moves when the supplier rewrites a name), or the one the text names exactly, else the one position of the
@@ -574,8 +589,9 @@ def register(app) -> None:
             return order_offers.point_item_args(conn, text, sale_unit), "", [], ""
         found, by_text = typed_goods(conn, code, text, stock)
         _conn, settings, parsed, ref = context(app)
+        manual = str(sale_unit or "") if own_point() is None else None      # ТЗ 94: the office may type the price the panel has not; never a point
         try:
-            args = order_search.located_args(conn, settings, parsed, ref, found, local_now().date().isoformat(), account_id)
+            args = order_search.located_args(conn, settings, parsed, ref, found, local_now().date().isoformat(), account_id, manual_sale=manual)
         except order_search.NotLocated as err:
             raise orders.OrderError(order_search.first_line(err))
         if str(sale_unit or "").strip() and str(sale_unit).strip() != str(sale_auto or "").strip():
@@ -611,8 +627,10 @@ def register(app) -> None:
         _conn, settings, parsed, ref = context(app)
         query = request.args.get("q", "").strip()
         account = window_account(conn, request.args) if len(query) >= 2 else None
-        items = order_search.suggestions(conn, settings, parsed, ref, query, local_now().date().isoformat(), account_id=account) if len(query) >= 2 else []
-        if items and own_point() is None:                                      # the tyres lying on «На ОТХ» (oth_sale): «на ОТХ: Бета 2 шт»
+        office = own_point() is None                                           # ТЗ 94: the office finds every position of the base, marked
+        items = order_search.suggestions(conn, settings, parsed, ref, query, local_now().date().isoformat(), account_id=account,
+                                         every=office) if len(query) >= 2 else []
+        if items and office:                                                   # the tyres lying on «На ОТХ» (oth_sale): «на ОТХ: Бета 2 шт»
             marks = oth_sale.find_hint(conn, [it["goods_id"] for it in items])
             items = [dict(it, oth=marks[str(it["goods_id"])]) if str(it["goods_id"]) in marks else it for it in items]
         if len(query) >= 2 and request.args.get("deal") == "stock":           # a deal of the point's stock: its tyre may be one the unload has not
@@ -857,6 +875,8 @@ def register(app) -> None:
         return render_template("orders_money.html", rates=rates, today=today, fee=order_report.rate_on(rates, "point_fee", today),
                                owner_share=order_report.rate_on(rates, "owner_share", today), defaults=order_report.DEFAULTS,
                                handoff_fee=order_report.rate_on(rates, "handoff_fee", today), labels=order_report.share_labels(conn),
+                               oth_sale_fee=order_report.rate_on(rates, "oth_sale_fee", today), income_shown=order_report.income_shown(conn),
+                               income_switch=current_user()["role"] == "owner",
                                saved_labels=order_report.saved_share_labels(conn), label_defaults=order_report.SHARE_LABELS,
                                label_max=order_report.SHARE_LABEL_MAX)
 
@@ -875,14 +895,21 @@ def register(app) -> None:
             changed = order_report.set_share_labels(conn, request.form.get("owner_label", ""), request.form.get("partner_label", ""), now_iso(), author())   # UTC: the journal reads it so
             flash("Подписи долей сохранены." if changed else "Подписи не менялись.")
             return redirect(MONEY_PAGE)
+        if request.form.get("what") == "point_income":                  # «Показывать точкам страницу дохода»: the owner's own switch (ТЗ 80)
+            if current_user()["role"] != "owner":
+                abort(403)
+            on = request.form.get("on") == "1"
+            if order_report.set_income_shown(conn, on, now_iso(), author()):
+                flash("Точки видят страницу «Доход»." if on else "Страница «Доход» скрыта от точек.")
+            return redirect(MONEY_PAGE)
         def typed(name):                     # a field left as the form filled it is not sent: it would undo a rate already saved for a later date
             text = request.form.get(name, "").strip()
             return None if text == request.form.get(name + "_was", "").strip() else parse_amount(text)
         try:
-            fee, pct, handoff = typed("point_fee"), typed("owner_pct"), typed("handoff_fee")
+            fee, pct, handoff, oth = typed("point_fee"), typed("owner_pct"), typed("handoff_fee"), typed("oth_sale_fee")
             share = None if pct is None else pct / 100
             changed = order_report.set_rates(conn, request.form.get("valid_from", "").strip()[:10], local_now().date().isoformat(), local_iso(), author(),
-                                             point_fee=fee, owner_share=share, handoff_fee=handoff)
+                                             point_fee=fee, owner_share=share, handoff_fee=handoff, oth_sale_fee=oth)
         except ValueError as err:
             flash(str(err) if str(err) != "not a number" else "Ставка: нужно число.")
             return redirect(MONEY_PAGE)
@@ -923,7 +950,17 @@ def register(app) -> None:
                 shown = _price_text(args["sale_unit"])                     # the main account's: priced again by the window's account if kept
                 rows.append({"goods_id": args["goods_id"], "query": args["name"], "name": args["name"], "qty": "1", "sale_unit": shown, "sale_auto": shown})
             except orders.OrderError as err:
-                flash(str(err), "error")
+                row = catalog_row(conn, goods_id) if own_point() is None else None
+                if row is None:
+                    flash(str(err), "error")
+                else:                                                     # ТЗ 94: out of the feed, without a price or the unload has it no more
+                    rows.append(row)
+                    if row["sale_unit"]:                                  # the base has its price: only its stock is to check
+                        flash("Позиции «%s» нет в выгрузке поставщика сегодня: заказ оформить можно, цена из базы позиций, "
+                              "проверьте наличие у поставщика." % row["name"][:120], "warning")
+                    else:
+                        flash("Позиция «%s» не в продаже (вне фида, без цены или нет в выгрузке): заказ оформить можно, впишите цену за шт. "
+                              "и проверьте наличие у поставщика." % row["name"][:120], "warning")
         return new_page(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, rows)
 
     @app.route("/orders/new", methods=["POST"])

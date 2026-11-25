@@ -652,6 +652,8 @@ a.menu-item{text-decoration:none}
 .suggest .s-meta{font-size:var(--fs-xs);color:var(--gray-500);white-space:nowrap}
 .suggest .s-price{font-weight:600;white-space:nowrap}
 .suggest .s-empty{color:var(--gray-500);cursor:default}
+.suggest li:has(.s-warn){flex-wrap:wrap;row-gap:2px}
+.suggest .s-warn{flex-basis:100%;font-size:var(--fs-xs);color:var(--warn-700)}
 .sb-count--red{background:var(--err-500);color:var(--gray-0)}
 
 /* «Отправить клиенту?»: окно с готовым текстом задачи-сообщения */
