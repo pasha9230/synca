@@ -284,3 +284,37 @@ def test_wheel_feed_refuses_unapproved_and_secret_photo_urls():
     for image in ('', 'https://other.test/a.jpg', 'https://photos.example.test/a.jpg?token=secret'):
         ads, rejected = build_ads([item], rules, {'BRAND'}, photo_for=lambda w: image, **params)
         assert ads == [] and rejected['42'] == ['image']
+
+
+def test_mixed_feed_preserves_tires_and_rejects_duplicate_ids():
+    import xml.etree.ElementTree as ET
+    import pytest
+    from tires_sync.wheel_feed import assemble_mixed_feed
+    tire = b'<Ads formatVersion="3" target="Avito.ru"><Ad><Id>123</Id><Title>Tire</Title></Ad></Ads>'
+    disk = ET.fromstring('<Ad><Id>wheel_abc</Id><Title>Wheel</Title></Ad>')
+    combined = ET.fromstring(assemble_mixed_feed(tire, [disk]))
+    assert [ad.findtext('Id') for ad in combined] == ['123', 'wheel_abc']
+    assert combined[0].findtext('Title') == 'Tire'
+    with pytest.raises(ValueError):
+        assemble_mixed_feed(tire, [disk, disk])
+    with pytest.raises(ValueError):
+        assemble_mixed_feed(b'<Ads><Ad><Id>123</Id></Ad><Ad><Id>123</Id></Ad></Ads>', [])
+
+
+def test_wheel_checks_fail_closed_on_unknown_stock_address_and_id():
+    from pathlib import Path
+    import xml.etree.ElementTree as ET
+    from tires_sync.wheel_feed import build_ads, validate_ads
+    item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
+    rules = {'BRAND': {'pct_small': 10, 'pct_large': 10, 'enabled': True}}
+    ads, _ = build_ads([item], rules, {'BRAND'}, account_id=1, address_id='2', phone='123', category='parts',
+                        product_type='wheels', rim_types={'': 'type'}, photo_for=lambda w: 'https://example.test/a.jpg',
+                        photo_prefix='https://example.test/')
+    tags = {x.tag for x in ET.parse(str(Path(__file__).parents[1] / 'src/tires_sync/data/avito-templates/diski-2026-11-26.xml')).getroot()[0]}
+    aid = ads[0].findtext('Id')
+    facts = dict(template_tags=tags, expected_ids={aid}, stock_by_id={aid: 4}, allowed_addresses={'2'}, expected_phone='123',
+                 allowed_photo_prefix='https://example.test/')
+    assert validate_ads(ads, **facts) == []
+    assert 'address' in validate_ads(ads, **dict(facts, allowed_addresses={'3'}))[0][1]
+    assert 'stock' in validate_ads(ads, **dict(facts, stock_by_id={}))[0][1]
+    assert 'id' in validate_ads(ads, **dict(facts, foreign_ids={aid}))[0][1]

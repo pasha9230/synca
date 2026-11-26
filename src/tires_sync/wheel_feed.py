@@ -62,3 +62,70 @@ def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, c
         ET.SubElement(ET.SubElement(ad, 'Images'), 'Image', url=image_url)
         ads.append(ad)
     return ads, rejected
+
+
+def assemble_mixed_feed(tire_feed: bytes, wheel_ads):
+    """Prepare a mixed candidate in memory, without writing or publishing it.
+
+    Duplicate IDs, unexpected category elements, and an invalid tire feed fail
+    closed before any candidate can replace an existing feed.
+    """
+    try:
+        root = ET.fromstring(tire_feed)
+    except ET.ParseError as err:
+        raise ValueError('Некорректный исходный фид шин.') from err
+    if root.tag != 'Ads' or any(ad.tag != 'Ad' for ad in root):
+        raise ValueError('Неожиданная структура исходного фида шин.')
+    existing = [(ad.findtext('Id') or '').strip() for ad in root]
+    if not all(existing) or len(set(existing)) != len(existing):
+        raise ValueError('В исходном фиде отсутствуют или повторяются идентификаторы.')
+    ids = set(existing)
+    for ad in wheel_ads:
+        if ad.tag != 'Ad':
+            raise ValueError('Некорректное объявление диска.')
+        aid = (ad.findtext('Id') or '').strip()
+        if not aid.startswith('wheel_') or aid in ids:
+            raise ValueError('Идентификатор диска отсутствует или повторяется.')
+        ids.add(aid)
+        root.append(ad)
+    return ET.tostring(root, encoding='utf-8', xml_declaration=True)
+
+
+def validate_ads(ads, *, template_tags, expected_ids, stock_by_id, allowed_addresses,
+                 expected_phone, allowed_photo_prefix, foreign_ids=()):
+    """Check wheel candidates independently from tire-only validation rules.
+
+    Expected identifiers and stocks are constructed from the trusted snapshot,
+    not from the advertisement. An unknown id fails closed.
+    """
+    issues = []
+    seen = set()
+    required = ('Id', 'Category', 'GoodsType', 'AdType', 'ProductType', 'Condition', 'Title', 'Description',
+                'Price', 'RimBrand', 'RimDiameter', 'RimBolts', 'RimBoltsDiameter', 'RimType',
+                'RimDIA', 'RimOffset', 'RimWidth', 'Quantity', 'SellerAddressID', 'ContactPhone')
+    for ad in ads:
+        aid = (ad.findtext('Id') or '').strip()
+        errors = []
+        if not aid or aid in seen or aid in foreign_ids or aid not in expected_ids:
+            errors.append('id')
+        seen.add(aid)
+        if any(child.tag not in template_tags for child in ad):
+            errors.append('template')
+        if any(not (ad.findtext(tag) or '').strip() for tag in required):
+            errors.append('required')
+        price, quantity = (ad.findtext('Price') or '').strip(), (ad.findtext('Quantity') or '').strip()
+        if not price.isascii() or not price.isdigit() or int(price) <= 0:
+            errors.append('price')
+        if not quantity.isascii() or not quantity.isdigit() or int(quantity) <= 0 or int(quantity) > stock_by_id.get(aid, 0):
+            errors.append('stock')
+        if (ad.findtext('SellerAddressID') or '').strip() not in allowed_addresses:
+            errors.append('address')
+        if (ad.findtext('ContactPhone') or '').strip() != expected_phone:
+            errors.append('phone')
+        image = ad.find('Images/Image')
+        image_url = image.get('url', '') if image is not None else ''
+        if not allowed_photo_prefix or not image_url.startswith(allowed_photo_prefix):
+            errors.append('photo')
+        if errors:
+            issues.append((aid, errors))
+    return issues
