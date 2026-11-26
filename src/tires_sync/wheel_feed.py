@@ -29,7 +29,7 @@ def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, c
     ads, rejected = [], {}
     for w in wheels:
         key = brand_key(w.brand)
-        if key not in enabled_brands:
+        if key not in enabled_brands or rules.get(key, {}).get('enabled') is not True:
             continue
         price = price_for(w, rules)
         rim_type = rim_types.get(w.wheel_type, '')

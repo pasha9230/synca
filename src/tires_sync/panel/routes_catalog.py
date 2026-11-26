@@ -623,9 +623,14 @@ def register(app) -> None:
                 {"label": sp["name"], "url": "/catalog?sup=" + str(sp["id"]), "on": False} for sp in suppliers]
             index = next((i for i, tab in enumerate(tabs) if "4точки" in "".join(tab["label"].casefold().split())), len(tabs))
             tabs.insert(index, {"label": "Диски", "url": "/catalog?category=wheels", "on": True})
-            rules = staging.effective_raw(conn).get("wheel_pricing", {})
+            rules = get_active(conn)[1].get("wheel_pricing", {})
             rows = [{"wheel": wheel, "price": wheel_price(wheel, rules)} for wheel in wheels]
-            return render_template("catalog_wheels.html", wheels=rows, supplier_tabs=tabs, q=query, available=snapshot is not None)
+            try:
+                metadata = json.loads(path.with_name(path.name + ".meta.json").read_text(encoding="utf-8"))
+                fetched_at = str(metadata.get("fetched_at") or "")[:40]
+            except (OSError, ValueError, AttributeError):
+                fetched_at = ""
+            return render_template("catalog_wheels.html", wheels=rows, supplier_tabs=tabs, q=query, available=snapshot is not None, fetched_at=fetched_at)
         args = request.args                                                    # «Недавние» of the person (the owner 2026-11-09): the sizes searched
         client_catalog.remember_sizes(get_conn(), current_user()["login"], client_catalog.searched_sizes(
             _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), _view_filters(args)["sizes"]), now_iso())

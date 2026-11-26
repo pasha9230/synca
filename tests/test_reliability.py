@@ -532,3 +532,15 @@ def test_a_success_resets_the_failures_another_process_wrote_while_it_was_in_fli
         return 200, {}, b""
     assert run(attempt, service="tochki")[0][0] == 200
     assert state(bound["path"], "tochki")["fails"] == 0
+
+
+def test_wheel_catalog_breaker_does_not_pause_tire_catalog(bound):
+    from tires_sync.webmim_client import WebmimClient
+    base = 'https://example.test'
+    wheel_service = 'webmim-wheels:example.test'
+    fail(bound, 5, service=wheel_service)
+    assert rests(wheel_service)
+    http = ScriptedHttp((200, '<CATALOG/>'))
+    tires = WebmimClient(base, mode='apikey', api_key='secret', http=http)
+    assert tires.fetch_unload('10') == b'<CATALOG/>'
+    assert len(http.calls) == 1

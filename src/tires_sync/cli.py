@@ -393,6 +393,10 @@ def _build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--out", required=True)
     fetch.add_argument("--supplier", type=int, default=1, help="номер поставщика (по умолчанию первый)")
     fetch.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    wheels = sub.add_parser("fetch-wheels", help="скачать отдельную выгрузку дисков МИМ")
+    wheels.add_argument("--db", required=True)
+    wheels.add_argument("--unload", required=True, help="путь к выгрузке шин, рядом с которой хранится снимок дисков")
+    wheels.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     return parser
 
 
@@ -456,6 +460,20 @@ def _cmd_fetch(args) -> int:
     meta = fetch_for_connection(conn, box, Path(args.out), _now(), http=_http(), supplier_id=args.supplier)
     print("items: %d, fetched_at: %s" % (meta["items"], meta["fetched_at"]))
     return 0
+
+
+def _cmd_fetch_wheels(args) -> int:
+    box = load_box(args.key_file)
+    if box is None:
+        print("error: мастер-ключ недоступен", file=sys.stderr)
+        return 2
+    conn = store.connect(args.db)
+    try:
+        meta = fetch_wheels_for_connection(conn, box, Path(args.unload), _now(), http=_http())
+        print("диски: %d, обновлено: %s" % (meta["items"], meta["fetched_at"]))
+        return 0
+    finally:
+        conn.close()
 
 
 ALERT_PAUSE_SECONDS = 600
@@ -747,16 +765,6 @@ def _fetch_suppliers(conn, box, args, quiet: bool = False) -> list:
             continue
         print("выгрузка скачана: %d товаров" % meta["items"] if sid == 1
               else "выгрузка поставщика «%s» скачана: %d товаров" % (supplier["name"], meta["items"]))
-        if sid == 1 and not quiet:
-            try:
-                wheel_meta = fetch_wheels_for_connection(conn, box, dest, _now(), http=_http())
-                print("выгрузка дисков скачана: %d товаров" % wheel_meta["items"])
-            except (WebmimError, SecretKeyError, OSError, ValueError) as err:
-                # A separate product type must never interrupt tire feed refresh.
-                print("ошибка загрузки дисков МИМ: %s" % err, file=sys.stderr)
-                if not quiet:
-                    _alert(conn, box, "Tires Sync: не удалось скачать выгрузку дисков МИМ. %s" % err, critical=False)
-
     return problems
 
 
@@ -3340,6 +3348,8 @@ def main(argv=None) -> int:
             return _cmd_settings(args)
         if args.command == "fetch-unload":
             return _cmd_fetch(args)
+        if args.command == "fetch-wheels":
+            return _cmd_fetch_wheels(args)
         if args.command == "run-cycle":
             return _cmd_run_cycle(args)
         if args.command == "alert":

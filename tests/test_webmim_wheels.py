@@ -87,7 +87,7 @@ def test_wheel_markup_is_staged_and_does_not_enable_publication(tmp_path):
     xml = ('<CATALOG>' + wheel(territory=territory) + '</CATALOG>').encode()
     wheel_snapshot_path(app.config['UNLOAD_PATH']).write_bytes(xml)
     html = owner.get('/settings/brands').get_data(as_text=True)
-    assert 'Диски: калькуляция и публикация' in html and 'Публиковать' in html
+    assert 'Диски: калькуляция и публикация' in html and 'Подготовить к публикации' in html
     response = post(owner, '/settings/pricing', token, scope='wheel', brand='BRAND', small='10', large='15')
     assert response.status_code == 302
     rules = staging.effective_raw(conn)['wheel_pricing']
@@ -115,7 +115,7 @@ def test_wheel_feed_is_opt_in_and_uses_template_fields():
     wheel_item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
     params = dict(account_id=1, address_id='25', phone='123', category='Запчасти и аксессуары',
                   product_type='Диски', rim_types={'': 'Литые'})
-    rules = {'BRAND': {'pct_small': 10, 'pct_large': 15}}
+    rules = {'BRAND': {'pct_small': 10, 'pct_large': 15, 'enabled': True}}
     assert build_ads([wheel_item], rules, set(), **params) == ([], {})
     ads, rejected = build_ads([wheel_item], rules, {'BRAND'}, **params)
     assert not rejected and len(ads) == 1
@@ -131,7 +131,7 @@ def test_wheel_feed_is_opt_in_and_uses_template_fields():
 def test_wheel_feed_rejects_nonpositive_prices():
     from tires_sync.wheel_feed import build_ads
     item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
-    rules = {'BRAND': {'pct_small': -200, 'pct_large': 0}}
+    rules = {'BRAND': {'pct_small': -200, 'pct_large': 0, 'enabled': True}}
     ads, rejected = build_ads([item], rules, {'BRAND'}, account_id=1, address_id='2', phone='123',
                               category='parts', product_type='wheels', rim_types={'': 'type'})
     assert ads == [] and rejected == {'42': ['price']}
@@ -166,3 +166,110 @@ def test_wheel_account_selection_rejects_address_from_other_account(tmp_path):
     assert staging.effective_raw(conn)['wheel_accounts'] == {str(a): ['123']}
     assert post(owner, '/settings/pricing', token, scope='wheel_account', account=str(b), address='456').status_code == 302
     assert staging.effective_raw(conn)['wheel_accounts'] == {str(a): ['123']}
+
+
+def test_extreme_price_is_rejected_without_losing_valid_rows():
+    result = parse_unload(('<CATALOG>' + wheel() + wheel('43', price='1e999999') + '</CATALOG>').encode(), '10')
+    assert list(result.offers) == ['42'] and result.issues['43'] == 'invalid_stock_or_price'
+
+
+def test_wheel_feed_never_enables_brand_implicitly():
+    from tires_sync.wheel_feed import build_ads
+    item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
+    params = dict(account_id=1, address_id='2', phone='123', category='parts', product_type='wheels', rim_types={'': 'type'})
+    for enabled in (None, False):
+        rule = {'pct_small': 10, 'pct_large': 10}
+        if enabled is not None:
+            rule['enabled'] = enabled
+        assert build_ads([item], {'BRAND': rule}, {'BRAND'}, **params) == ([], {})
+
+
+def test_wrong_category_and_duplicates_preserve_existing_wheel_snapshot(tmp_path):
+    import pytest
+    from tires_sync.webmim_client import download_wheels, WebmimError
+    target = tmp_path / 'wheels.xml'
+    original = ('<CATALOG>' + wheel() + wheel('43') + '</CATALOG>').encode()
+    wrong = b'<CATALOG><COMMODITY><NNOMMODIF>1</NNOMMODIF><TERRITORY_RN>10</TERRITORY_RN><NREST>4</NREST><NPRICE_DELAYED>5</NPRICE_DELAYED></COMMODITY></CATALOG>'
+    duplicate = ('<CATALOG>' + wheel() + wheel() + '</CATALOG>').encode()
+    client = WebmimClient('https://example.test', mode='apikey', api_key='abc', http=ScriptedHttp((200, original), (200, wrong), (200, duplicate)))
+    download_wheels(client, '10', target, '2026-11-27')
+    for _ in range(2):
+        with pytest.raises(WebmimError):
+            download_wheels(client, '10', target, '2026-11-27')
+        assert target.read_bytes() == original
+
+
+def test_wheel_settings_controls_are_in_page_content_not_title(tmp_path):
+    from test_catalog_filters import setup
+    from tires_sync import connections
+    app, owner, _, conn = setup(tmp_path)
+    connections.create_account(conn, 'Основной', '2026-11-27', 'owner')
+    conn.commit()
+    html = owner.get('/settings/brands').get_data(as_text=True)
+    title = html.split('<title>', 1)[1].split('</title>', 1)[0]
+    main = html.split('<main', 1)[1].split('</main>', 1)[0]
+    assert '<section' not in title and 'Диски:' not in title
+    assert html.count('id="pricing-wheels"') == 1
+    assert 'name="scope" value="wheel_account"' in main
+
+
+def test_wheel_settings_reject_stale_draft_edits(tmp_path):
+    import pytest
+    from test_settings_store import fresh, T2
+    from tires_sync import staging
+    conn = fresh(tmp_path)
+    rev = staging.rev(staging.summary(conn)['changes'])
+    staging.set_wheel_pricing(conn, 'BRAND', 10, 10, T2, expect=rev)
+    with pytest.raises(staging.DraftChangedError):
+        staging.set_wheel_account(conn, 1, ['loc'], T2, expect=rev)
+
+
+def test_independent_wheel_fetch_command(tmp_path, monkeypatch):
+    from test_cycle import fetch_setup
+    from tires_sync import cli
+    key_file = fetch_setup(tmp_path)
+    body = ('<CATALOG>' + wheel(territory='103261489424') + '</CATALOG>').encode()
+    http = ScriptedHttp((200, {'result': True, 'authKey': 'A'}), (200, '"%s"' % ('D' * 32)),
+                        (200, {'result': True}), (200, body))
+    monkeypatch.setattr(cli, '_http', lambda: http)
+    code = cli.main(['fetch-wheels', '--db', str(tmp_path / 't.db'), '--unload', str(tmp_path / 'unload.xml'), '--key-file', str(key_file)])
+    assert code == 0
+    assert (tmp_path / 'unload.xml.wheels.xml').read_bytes() == body
+    assert 'types=2' in http.calls[-1][1]
+
+
+def test_wheel_reliability_identity_is_separate_from_tires(monkeypatch):
+    from tires_sync import reliability
+    seen = []
+    def call(fn, **kw):
+        seen.append(kw['service'])
+        return fn()
+    monkeypatch.setattr(reliability, 'call', call)
+    http = ScriptedHttp((200, '<CATALOG/>'), (200, '<CATALOG/>'))
+    WebmimClient('https://example.test', mode='apikey', api_key='abc', http=http).fetch_unload('10')
+    WebmimClient('https://example.test', mode='apikey', api_key='abc', http=http,
+                 service_id='webmim-wheels:example.test').fetch_wheels('10')
+    assert seen == ['webmim:example.test', 'webmim-wheels:example.test']
+
+
+def test_many_missing_ids_cannot_replace_snapshot(tmp_path):
+    import pytest
+    from tires_sync.webmim_client import download_wheels, WebmimError
+    target = tmp_path / 'wheels.xml'
+    original = ('<CATALOG>' + wheel() + '</CATALOG>').encode()
+    broken = ('<CATALOG>' + wheel() + wheel(gid='') * 100 + '</CATALOG>').encode()
+    client = WebmimClient('https://example.test', mode='apikey', api_key='abc', http=ScriptedHttp((200, broken), (200, original), (200, broken)))
+    with pytest.raises(WebmimError):
+        download_wheels(client, '10', target, '2026-11-27')
+    assert not target.exists()
+    download_wheels(client, '10', target, '2026-11-27')
+    with pytest.raises(WebmimError):
+        download_wheels(client, '10', target, '2026-11-27')
+    assert target.read_bytes() == original
+
+
+def test_wheel_feed_rejects_non_primary_account():
+    import pytest
+    from tires_sync.wheel_feed import build_ads
+    with pytest.raises(ValueError):
+        build_ads([], {}, set(), account_id=2, address_id='1', phone='123', category='parts', product_type='wheels', rim_types={})

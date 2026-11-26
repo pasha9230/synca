@@ -54,7 +54,7 @@ def parse_unload(data: bytes, territory: str) -> WheelCatalog:
         try:
             stock = int(text('NREST'))
             price = Decimal(text('NPRICE_DELAYED').replace(',', '.'))
-            if stock < 0 or not price.is_finite() or price < 0:
+            if not 0 <= stock <= 1000000 or not price.is_finite() or not Decimal(0) <= price <= Decimal('100000000'):
                 raise ValueError('invalid stock or price')
         except (ValueError, InvalidOperation):
             result.issues[gid] = 'invalid_stock_or_price'

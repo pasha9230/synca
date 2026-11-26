@@ -118,16 +118,12 @@ def test_run_cycle_with_fetch_downloads_first_and_then_runs(tmp_path, monkeypatc
     key_file = fetch_setup(tmp_path)
     xml = catalog_xml(commodity_xml(TERRITORY_RN="103261489424"))
     script = ScriptedHttp((200, {"result": True, "authKey": "A"}), (200, '"%s"' % ("D" * 32)),
-                          (200, {"result": True}), (200, xml),
-                          (200, {"result": True, "authKey": "A"}), (200, '"%s"' % ("D" * 32)),
                           (200, {"result": True}), (200, xml))
     monkeypatch.setattr(cli, "_http", lambda: script)
     args = files(tmp_path, b"<CATALOG><COMMODITIES></COMMODITIES></CATALOG>") + ["--fetch", "--key-file", str(key_file)]
     code = main(["run-cycle"] + args)
     assert code == 0 and "Основной: ok" in capsys.readouterr().out
     assert (tmp_path / "unload.xml").read_bytes() == xml
-    assert (tmp_path / "unload.xml.wheels.xml").read_bytes() == xml
-    assert "types=2" in script.calls[-1][1]
 
 
 def test_run_cycle_with_failed_fetch_does_not_run_on_stale_data(tmp_path, monkeypatch, capsys):
@@ -205,14 +201,3 @@ def test_publish_flag_does_not_publish_when_the_cycle_itself_refused_a_shrink(tm
     code = main(["run-cycle", "--publish"] + files(tmp_path, few))
     out = capsys.readouterr().out
     assert code == 3 and "shrank" in out and "опубликован, объявлений: 1 " not in out
-
-
-def test_failed_wheel_download_does_not_stop_tire_cycle(tmp_path, monkeypatch, capsys):
-    key_file = fetch_setup(tmp_path)
-    xml = catalog_xml(commodity_xml(TERRITORY_RN="103261489424"))
-    script = ScriptedHttp((200, {"result": True, "authKey": "A"}), (200, '"%s"' % ("D" * 32)),
-                          (200, {"result": True}), (200, xml), (401, "no"))
-    monkeypatch.setattr(cli, "_http", lambda: script)
-    args = files(tmp_path) + ["--fetch", "--key-file", str(key_file)]
-    assert main(["run-cycle"] + args) == 0
-    assert "ошибка загрузки дисков" in capsys.readouterr().err

@@ -36,8 +36,11 @@ def fetch_wheels_for_connection(conn, box: Optional[SecretBox], dest: Path, now:
     config = connections.get_config(conn, "webmim", owner)
     if not config.get("base_url") or not config.get("mode"):
         raise WebmimError("Подключение WebMIM не настроено.")
+    from urllib.parse import urlsplit
+    wheel_service = "webmim-wheels:" + (urlsplit(config["base_url"]).hostname or "unknown")
     client = WebmimClient(config["base_url"], mode=config["mode"], login=config.get("login", ""),
                           password=connections.get_secret(conn, box, "webmim", owner, "password") or "",
-                          api_key=connections.get_secret(conn, box, "webmim", owner, "api_key") or "", http=http)
+                          api_key=connections.get_secret(conn, box, "webmim", owner, "api_key") or "", http=http,
+                          service_id=wheel_service)
     territory = connections.supplier_territory(conn, 1, active_settings(conn))
     return download_wheels(client, territory, wheel_snapshot_path(dest), now)

@@ -1331,7 +1331,7 @@ def describe_changes(raw: dict, changes: dict, offers=None, min_stock=None) -> l
                     brand, _pct(old_rule.get("pct_small")), _pct(new_rule["pct_small"]),
                     _pct(old_rule.get("pct_large")), _pct(new_rule["pct_large"])))
                 if bool(old_rule.get("enabled")) != bool(new_rule.get("enabled")):
-                    lines.append("Диски %s: публикация %s" % (brand, "включена" if new_rule.get("enabled") else "выключена"))
+                    lines.append("Диски %s: подготовка к публикации %s" % (brand, "включена" if new_rule.get("enabled") else "выключена"))
     if "wheel_accounts" in changes:
         old_accounts, new_accounts = raw.get("wheel_accounts") or {}, changes["wheel_accounts"] or {}
         for account in sorted(set(old_accounts) | set(new_accounts)):

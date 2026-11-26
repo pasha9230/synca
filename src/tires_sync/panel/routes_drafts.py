@@ -232,7 +232,7 @@ def register(app) -> None:
                            "addresses": connections.list_addresses(conn, a["id"]),
                            "selected": wheel_settings.get("wheel_accounts", {}).get(str(a["id"]), [])}
                           for a in connections.list_feed_accounts(conn) if a["id"] == connections.PRIMARY_ACCOUNT]
-        return render_template("settings_brands.html", wheel_brands=wheel_brands, wheel_rules=wheel_rules, wheel_accounts=wheel_accounts,
+        return render_template("settings_brands.html", wheel_brands=wheel_brands, wheel_rules=wheel_rules, wheel_accounts=wheel_accounts, wheel_rev=staging.rev(staging.summary(conn)["changes"]),
                                raw=get_active(conn)[1], pricing_tables=[
             {"supplier": sp, "rows": service.pricing_table(conn, sp["id"], app.config["UNLOAD_PATH"], load_reference(app.config["REFERENCE_PATH"])),
              "stale": service.supplier_stale_text(conn, sp["id"], app.config["UNLOAD_PATH"]),
@@ -299,8 +299,8 @@ def register(app) -> None:
                 addresses = form.getlist("address")
                 if any(a not in valid for a in addresses):
                     raise ValueError("Адрес отсутствует в выбранном аккаунте.")
-                staging.set_wheel_account(conn, account_id, addresses, now_iso())
-            except (ValueError, StaleDraftError) as err:
+                staging.set_wheel_account(conn, account_id, addresses, now_iso(), expect=form.get("rev"))
+            except (ValueError, StaleDraftError, staging.DraftChangedError) as err:
                 flash(str(err), "error")
                 return redirect("/settings/brands#pricing-wheels")
             return review_or_back(conn, "/settings/brands#pricing-wheels")
@@ -312,8 +312,8 @@ def register(app) -> None:
                     raise ValueError("Бренд отсутствует в выгрузке дисков МИМ.")
                 small = float(form.get("small", "").strip().replace(",", "."))
                 large = float(form.get("large", "").strip().replace(",", "."))
-                staging.set_wheel_pricing(conn, brand, small, large, now_iso(), enabled=form.get("enabled") == "1")
-            except (ValueError, StaleDraftError) as err:
+                staging.set_wheel_pricing(conn, brand, small, large, now_iso(), enabled=form.get("enabled") == "1", expect=form.get("rev"))
+            except (ValueError, StaleDraftError, staging.DraftChangedError) as err:
                 flash(str(err), "error")
                 return redirect("/settings/brands#pricing-wheels")
             return review_or_back(conn, "/settings/brands#pricing-wheels")

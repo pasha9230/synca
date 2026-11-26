@@ -31,7 +31,12 @@ def price_for(wheel, rules):
         diameter = int(wheel.diameter)
     except ValueError:
         return None
-    return final_price(wheel.price, PricingRule(rule['pct_small'], rule['pct_large']), diameter, step=FEED_STEP)
+    if not 8 <= diameter <= 40:
+        return None
+    try:
+        return final_price(wheel.price, PricingRule(rule['pct_small'], rule['pct_large']), diameter, step=FEED_STEP)
+    except (ArithmeticError, OverflowError, ValueError):
+        return None
 
 
 def validate_accounts(accounts):

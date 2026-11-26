@@ -377,16 +377,16 @@ def cancel_all(conn, now: str, author: str) -> None:
     store.set_state(conn, KEY, "")
 
 
-def set_wheel_pricing(conn, brand: str, small: float, large: float, now: str, enabled: bool = False) -> None:
+def set_wheel_pricing(conn, brand: str, small: float, large: float, now: str, enabled: bool = False, expect: Optional[str] = None) -> None:
     if not isinstance(brand, str) or not brand.strip() or len(brand) > 120:
         raise ValueError("Некорректный бренд дисков.")
     rule = {"pct_small": _pct(small, "до R17"), "pct_large": _pct(large, "от R18"), "enabled": bool(enabled)}
     def fn(eff):
         eff["wheel_pricing"][brand] = rule
-    _mutate(conn, fn, now)
+    _mutate(conn, fn, now, expect)
 
 
-def set_wheel_account(conn, account_id: int, addresses, now: str) -> None:
+def set_wheel_account(conn, account_id: int, addresses, now: str, expect: Optional[str] = None) -> None:
     from .connections import PRIMARY_ACCOUNT
     if isinstance(account_id, bool) or account_id != PRIMARY_ACCOUNT:
         raise ValueError("Диски разрешены только для основного аккаунта.")
@@ -398,4 +398,4 @@ def set_wheel_account(conn, account_id: int, addresses, now: str) -> None:
             eff["wheel_accounts"][str(account_id)] = clean
         else:
             eff["wheel_accounts"].pop(str(account_id), None)
-    _mutate(conn, fn, now)
+    _mutate(conn, fn, now, expect)

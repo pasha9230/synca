@@ -34,7 +34,7 @@ def _key_from(raw: bytes) -> str:
 
 class WebmimClient:
     def __init__(self, base_url: str, *, mode: str, login: str = "", password: str = "",
-                 api_key: str = "", http: Transport = urllib_transport):
+                 api_key: str = "", http: Transport = urllib_transport, service_id: Optional[str] = None):
         if not base_url.startswith("https://"):
             raise ValueError("base_url must use https")
         if mode not in MODES:
@@ -45,6 +45,7 @@ class WebmimClient:
         self._password = password
         self._api_key = api_key
         self._http = http
+        self._service_id = service_id or reliability.webmim_service(self._base)
 
     def __repr__(self) -> str:
         return "WebmimClient(mode=%s)" % self._mode
@@ -56,7 +57,7 @@ class WebmimClient:
         if params:
             url += "?" + urllib.parse.urlencode(params)
         status, _, raw = reliability.call(lambda: self._http(method, url, headers or {}, body), safe=safe, policy=reliability.WEBMIM,
-                                          service=reliability.webmim_service(self._base), read=method == "GET" or path == "/api/v3/auth/login")
+                                          service=self._service_id, read=method == "GET" or path == "/api/v3/auth/login")
         return status, raw
 
     def api_key(self) -> str:
@@ -154,7 +155,27 @@ def download_unload(client: WebmimClient, territory_id: str, dest: Path, now: st
 
 
 def download_wheels(client: WebmimClient, territory_id: str, dest: Path, now: str, min_ratio: float = 0.5) -> dict:
-    return _download_catalog(client.fetch_wheels(territory_id), territory_id, dest, now, min_ratio)
+    from .webmim_wheels import parse_unload as parse_wheels
+    body = client.fetch_wheels(territory_id)
+    path = Path(dest)
+    try:
+        current = parse_wheels(body, territory_id)
+    except ET.ParseError:
+        raise WebmimError("Выгрузка дисков не является корректным XML.") from None
+    def eligible(result):
+        return {k: w for k, w in result.offers.items() if w.name and w.brand and w.diameter and w.width and w.holes and w.pcd}
+    usable = eligible(current)
+    total = _count_items(body, territory_id)
+    if not usable or current.issues or len(usable) < total * 0.95:
+        raise WebmimError("Выгрузка дисков неполна или содержит ошибки; прежний файл сохранён.")
+    if path.exists():
+        try:
+            previous = len(eligible(parse_wheels(path.read_bytes(), territory_id)))
+        except (ET.ParseError, OSError):
+            previous = 0
+        if previous and len(usable) < previous * min_ratio:
+            raise WebmimError("Выгрузка дисков сократилась с %d до %d; прежний файл сохранён." % (previous, len(usable)))
+    return _download_catalog(body, territory_id, dest, now, min_ratio)
 
 
 def _download_catalog(body: bytes, territory_id: str, dest: Path, now: str, min_ratio: float) -> dict:

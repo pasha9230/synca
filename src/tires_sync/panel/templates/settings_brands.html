@@ -1,20 +1,6 @@
 {% extends "base.html" %}
 {% from "_ui.html" import icon %}
-{% block title %}Бренды и наценки · Tires Sync<section class="card" id="pricing-wheels">
-<div class="card-head"><h3>Диски: калькуляция и публикация</h3><span class="sub">Наценка к цене МИМ по бренду и диаметру; изменения сохраняются в черновик. Публикация дисков пока не включена.</span></div>
-<div class="card-body"><div class="table-wrap"><table class="table"><thead><tr><th>Бренд</th><th>Позиций</th><th>До R17, %</th><th>От R18, %</th><th>Публикация</th><th></th></tr></thead><tbody>
-{% for key, brand in (wheel_brands or {})|dictsort %}{% set rule = wheel_rules.get(key, {}) %}
-<tr><td>{{ brand.label }}</td><td>{{ brand.count }}</td><td><input class="input input--num" type="number" step="any" name="small" form="wheel-{{ loop.index }}" value="{{ rule.get('pct_small', '') }}" aria-label="{{ brand.label }}, до R17" required></td>
-<td><input class="input input--num" type="number" step="any" name="large" form="wheel-{{ loop.index }}" value="{{ rule.get('pct_large', '') }}" aria-label="{{ brand.label }}, от R18" required></td><td><label class="check"><input type="checkbox" name="enabled" value="1" form="wheel-{{ loop.index }}"{% if rule.get("enabled") %} checked{% endif %}> Публиковать</label></td>
-<td>{% if can_post("settings_pricing") %}<form id="wheel-{{ loop.index }}" method="post" action="/settings/pricing"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="wheel"><input type="hidden" name="brand" value="{{ key }}"><button class="btn btn--secondary btn--xs">В черновик</button></form>{% endif %}</td></tr>
-{% else %}<tr><td colspan="6" class="muted">{% if wheel_brands is none %}Выгрузка дисков ещё не загружена.{% else %}Нет брендов в выгрузке дисков.{% endif %}</td></tr>{% endfor %}
-</tbody></table></div>
-<h4>Аккаунты и адреса для дисков</h4><p class="muted">Диски размещаются только на основном аккаунте. Выберите адреса отдельно от шин; без выбора адреса диски не размещаются.</p>
-{% for account in wheel_accounts %}<form method="post" action="/settings/pricing"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="wheel_account"><input type="hidden" name="account" value="{{ account.id }}"><strong>{{ account.name }}</strong>
-{% for address in account.addresses if address.address_id %}<label class="check"><input type="checkbox" name="address" value="{{ address.address_id }}"{% if address.address_id in account.selected %} checked{% endif %}> {{ address.name or address.address_text or address.address_id }}</label>{% else %}<p class="muted">Нет адресов с идентификатором Авито.</p>{% endfor %}
-{% if can_post("settings_pricing") %}<button class="btn btn--secondary btn--xs">В черновик</button>{% endif %}</form>{% else %}<p class="muted">Нет подключённых аккаунтов с фидом.</p>{% endfor %}
-</div></section>
-{% endblock %}
+{% block title %}Бренды и наценки · Tires Sync{% endblock %}
 {% block content %}
 {% set tab = "brands" %}{% include "_settings_head.html" %}
 {% for pt in pricing_tables %}{% with supplier=pt.supplier, rows=pt.rows, stale=pt.stale, tochki_off=pt.tochki_off, multi=pricing_tables|length > 1 %}{% include "_pricing.html" %}{% endwith %}{% endfor %}
@@ -23,8 +9,13 @@
 <div class="card-body"><div class="table-wrap"><table class="table"><thead><tr><th>Бренд</th><th>Позиций</th><th>До R17, %</th><th>От R18, %</th><th>Публикация</th><th></th></tr></thead><tbody>
 {% for key, brand in (wheel_brands or {})|dictsort %}{% set rule = wheel_rules.get(key, {}) %}
 <tr><td>{{ brand.label }}</td><td>{{ brand.count }}</td><td><input class="input input--num" type="number" step="any" name="small" form="wheel-{{ loop.index }}" value="{{ rule.get('pct_small', '') }}" aria-label="{{ brand.label }}, до R17" required></td>
-<td><input class="input input--num" type="number" step="any" name="large" form="wheel-{{ loop.index }}" value="{{ rule.get('pct_large', '') }}" aria-label="{{ brand.label }}, от R18" required></td><td><label class="check"><input type="checkbox" name="enabled" value="1" form="wheel-{{ loop.index }}"{% if rule.get("enabled") %} checked{% endif %}> Публиковать</label></td>
-<td>{% if can_post("settings_pricing") %}<form id="wheel-{{ loop.index }}" method="post" action="/settings/pricing"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="wheel"><input type="hidden" name="brand" value="{{ key }}"><button class="btn btn--secondary btn--xs">В черновик</button></form>{% endif %}</td></tr>
+<td><input class="input input--num" type="number" step="any" name="large" form="wheel-{{ loop.index }}" value="{{ rule.get('pct_large', '') }}" aria-label="{{ brand.label }}, от R18" required></td><td><label class="check"><input type="checkbox" name="enabled" value="1" form="wheel-{{ loop.index }}"{% if rule.get("enabled") %} checked{% endif %}> Подготовить к публикации</label></td>
+<td>{% if can_post("settings_pricing") %}<form id="wheel-{{ loop.index }}" method="post" action="/settings/pricing"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="wheel"><input type="hidden" name="rev" value="{{ wheel_rev }}"><input type="hidden" name="brand" value="{{ key }}"><button class="btn btn--secondary btn--xs">В черновик</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="6" class="muted">{% if wheel_brands is none %}Выгрузка дисков ещё не загружена.{% else %}Нет брендов в выгрузке дисков.{% endif %}</td></tr>{% endfor %}
-</tbody></table></div></div></section>
+</tbody></table></div>
+<h4>Аккаунты и адреса для дисков</h4><p class="muted">Диски размещаются только на основном аккаунте. Выберите адреса отдельно от шин; без выбора адреса диски не размещаются.</p>
+{% for account in wheel_accounts %}<form method="post" action="/settings/pricing"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="wheel_account"><input type="hidden" name="rev" value="{{ wheel_rev }}"><input type="hidden" name="account" value="{{ account.id }}"><strong>{{ account.name }}</strong>
+{% for address in account.addresses if address.address_id %}<label class="check"><input type="checkbox" name="address" value="{{ address.address_id }}"{% if address.address_id in account.selected %} checked{% endif %}> {{ address.name or address.address_text or address.address_id }}</label>{% else %}<p class="muted">Нет адресов с идентификатором Авито.</p>{% endfor %}
+{% if can_post("settings_pricing") %}<button class="btn btn--secondary btn--xs">В черновик</button>{% endif %}</form>{% else %}<p class="muted">Нет подключённых аккаунтов с фидом.</p>{% endfor %}
+</div></section>
 {% endblock %}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the WebMIM wheels catalog independently every hour
+
+[Timer]
+OnCalendar=*-*-* *:25:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
