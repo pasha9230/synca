@@ -24,6 +24,7 @@ from datetime import date, timedelta
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
+from .. import point_notify
 from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_point_sale, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, point_payouts, users
 from . import income_view
 from .common import author, current_user, get_conn, has_right, login_required, own_point
@@ -729,6 +730,7 @@ def register(app) -> None:
                                return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK, not_taken_next=oth_point_return.NOT_TAKEN_NEXT,
                                buyer_ask=oth_point_return.BUYER_ASK, comment_max=oth_point_return.COMMENT_MAX,
                                undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL,
+                               notify=point_notify.state(conn, point_id) if point_id is not None else None,     # «Уведомления точек» (2026-11-25)
                                rev=point_rev(conn, loaded, point_id, today) if own_point() is not None and point_id is not None else "")    # the feed's own point only
 
     def _undo(card_id):
@@ -1053,4 +1055,8 @@ def register(app) -> None:
         answer = {"who": who, "items": items + calls}
         if own_point() is not None:                                             # the page of the point's own person reloads on a change (point_rev)
             answer["rev"] = point_rev(conn, cards + oth_cards, point_id, now[:10])
+            # «Уведомления точек» (the owner 2026-11-25): off — no sound nor notification (the page still refreshes); «ask» — the asks
+            # «Разрешите уведомления» left today, the point's own person only (never the owner working as it)
+            on = point_notify.enabled(conn, point_id)
+            answer["notify"] = {"on": on, "ask": point_notify.asks_left(conn, who, now) if on and current_user()["as_point"] is None else 0}
         return jsonify(answer)

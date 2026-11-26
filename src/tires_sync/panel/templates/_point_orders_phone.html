@@ -3,7 +3,7 @@
 {% set ost = request.args.get("ost") if request.args.get("ost") in ("new", "placed", "done", "cancel") else "new" %}
 <div class="pt pt-phone" data-point-orders>
 <header class="pt-top mp-head"><div class="mp-title"><h1>Заказы</h1><span class="mp-sub">Продажи точки из своего наличия</span></div>
-<div class="pt-top-actions"><a class="btn btn--secondary btn--sm" href="/my-point?notes=1" aria-label="Оповещения">{{ icon("alert", "i-sm") }}</a></div></header>
+<div class="pt-top-actions"><a class="btn btn--secondary btn--sm" href="/my-point/notices" aria-label="Оповещения">{{ icon("alert", "i-sm") }}</a></div></header>
 <form method="get" action="/orders" class="mp-search" role="search"><label class="field"><span class="label">Найти заказ</span><span class="mp-search-row"><input class="input" type="search" name="q" maxlength="80" value="{{ query }}" placeholder="Номер, телефон или имя" autocomplete="off"><button class="btn btn--secondary">Найти</button></span></label><input type="hidden" name="ost" value="{{ ost }}"></form>
 <nav class="pt-chips" aria-label="Этапы">{% for col in data.columns %}<a class="pt-chip{% if col.stage.code == ost %} is-active{% endif %}" href="/orders?ost={{ col.stage.code }}{% if query %}&amp;q={{ query|urlencode }}{% endif %}"{% if col.stage.code == ost %} aria-current="page"{% endif %} data-ost="{{ col.stage.code }}">{{ col.stage.name }}<b>{{ col.count }}</b></a>{% endfor %}</nav>
 {% for col in data.columns if col.stage.code == ost %}{% for c in col.cards %}<div class="mp-card pt-ocard" data-pcard="{{ c.id }}"><a class="pt-ocard-link" href="/orders/{{ c.id }}">

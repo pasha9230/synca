@@ -649,6 +649,26 @@ CREATE TABLE IF NOT EXISTS market_listing (
 );
 CREATE INDEX IF NOT EXISTS market_listing_snapshot ON market_listing (snapshot_id);
 CREATE INDEX IF NOT EXISTS market_listing_run ON market_listing (run_at);
+-- the notifications of a point (point_notify, the owner 2026-11-25): on unless a row says off; who switched them and why
+CREATE TABLE IF NOT EXISTS point_notify (
+    point_id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1, at TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '',
+    who TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT ''
+);
+-- the asks «Разрешите уведомления» shown to a person of a point: per login and calendar day (at most point_notify.ASKS_A_DAY)
+CREATE TABLE IF NOT EXISTS point_notify_ask (
+    login TEXT NOT NULL, day TEXT NOT NULL, shown INTEGER NOT NULL DEFAULT 0, last_at TEXT NOT NULL DEFAULT '', PRIMARY KEY (login, day)
+);
+-- what the points and the office did with the notifications and «Оповещение» (point_notify.record): the history the office reads
+CREATE TABLE IF NOT EXISTS point_event (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, point_id INTEGER NOT NULL, kind TEXT NOT NULL, author TEXT NOT NULL DEFAULT '',
+    who TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', task_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS point_event_point ON point_event (point_id, at);
+CREATE INDEX IF NOT EXISTS point_event_at ON point_event (at);
+-- a task of the office read by the point on «Оповещение» (the owner 2026-11-25): once per task
+CREATE TABLE IF NOT EXISTS point_task_read (
+    task_id INTEGER PRIMARY KEY, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL DEFAULT ''
+);
 """
 
 
