@@ -157,6 +157,8 @@ def test_the_point_sees_the_button_on_the_plaque_and_in_todays_notice(tmp_path, 
     page = mine.get("/my-point?tab=return").get_data(as_text=True)
     link = 'href="/my-point/return-act/%d"' % act
     assert page.count(link) == 1 and page.count("Скачать акт") == 1                   # the plaque of the order in «На возврат»
+    assert page.count("прикреплен ") == 1 and "Файл: «act.pdf»" in page                # the owner 2026-11-26: the file and when it was attached
+    assert NOW[8:10] + "." + NOW[5:7] + "." + NOW[:4] + " в " + NOW[11:16] in page
     landing = mine.get("/my-point").get_data(as_text=True)
     assert landing.count(link) == 1 and 'data-return="%d"' % card not in landing      # the notice of today, no plaque over the tabs
     assert mine.get("/my-point?tab=here").get_data(as_text=True).count(link) == 0     # a tab chosen: neither the notice nor the plaque

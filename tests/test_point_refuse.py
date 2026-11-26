@@ -50,6 +50,7 @@ def test_the_card_at_the_point_has_refuse_with_three_reasons_and_no_client_did_n
 def test_the_button_sends_the_order_to_oth_with_the_reason_and_the_client_hears_nothing(tmp_path, value, other, reason):
     app, _client, conn, pid, card = at_point(tmp_path)
     assert linked(conn, card)
+    client_id = conn.execute("SELECT client_id FROM client_order WHERE order_id = ?", (card,)).fetchone()[0]
     mine = manager(app, conn, pid)
     _t, page = refuse(mine, card, value, other)
     got = orders.get_card(conn, card)
@@ -59,6 +60,7 @@ def test_the_button_sends_the_order_to_oth_with_the_reason_and_the_client_hears_
     assert len(red) == 1 and reason in red[0] and "Отказ клиента" in red[0]
     assert not linked(conn, card)                                             # unlinked on the way to «На ОТХ» (order_oth.detach)
     assert to_client(app) == []
+    assert conn.execute("SELECT 1 FROM client_tag WHERE client_id = ? AND tag = ?", (client_id, "Неблагонадёжный")).fetchone()
     [row] = [r for r in point_log.history(conn, pid) if r["kind"] == "refuse"]
     assert row["order_id"] == card
 

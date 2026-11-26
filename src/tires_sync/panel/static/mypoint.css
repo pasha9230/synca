@@ -136,3 +136,4 @@ body.mp{min-width:0;max-width:560px;margin:0 auto;padding:var(--s-4) var(--s-4) 
 .inc-banner-ico{font-size:2.5rem;line-height:1}
 .inc-banner h2,.inc-banner h3{margin:0 0 var(--s-1)}
 .inc-banner p{margin:0 0 var(--s-1)}
+.mp-act-links .mp-act-meta{flex:0 0 100%}

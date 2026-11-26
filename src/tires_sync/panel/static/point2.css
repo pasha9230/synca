@@ -307,3 +307,4 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .inc-banner-ico{font-size:2.5rem;line-height:1}
 .inc-banner h2,.inc-banner h3{margin:0 0 var(--s-1)}
 .inc-banner p{margin:0 0 var(--s-1)}
+.mp-act-links .mp-act-meta{flex:0 0 100%}
