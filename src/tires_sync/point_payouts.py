@@ -88,7 +88,7 @@ def items(conn, start: str, end: str, point_id: Optional[int] = None, report: Op
     out, seen = [], set()
     counted = set()                                           # every item of the count, whatever its day: «still in the report»
     for key in wanted:
-        counted |= {(key[1], "order:%d" % e["order"]) for e in report["payouts"].get(key, []) if e["order"]}
+        counted |= {(key[1], e["item"]) for e in report["payouts"].get(key, []) if e["item"]}     # «order:N», «arrival:N»
         counted |= {(key[1], p["item"]) for p in report["kpi"]["premiums"].get(key, [])}
 
     def add(pid: int, item: str, day: str, total: float, **parts) -> None:
@@ -107,8 +107,8 @@ def items(conn, start: str, end: str, point_id: Optional[int] = None, report: Op
     for key in wanted:
         pid = key[1]
         for e in report["payouts"].get(key, []):
-            if e["order"] and start <= e["day"] <= end:
-                add(pid, "order:%d" % e["order"], e["day"], e["issue"] + e["handoff"] + e["oth"], issue=e["issue"],
+            if e["item"] and start <= e["day"] <= end:
+                add(pid, e["item"], e["day"], e["issue"] + e["handoff"] + e["oth"], issue=e["issue"],
                     issue_pieces=e.get("issue_pieces", 0), handoff=e["handoff"], handoff_pieces=e.get("handoff_pieces", 0), oth=e["oth"],
                     oth_pieces=e["oth_pieces"], arrived=bool(e.get("arrived")), fixed=e.get("fixed") or {}, counted=e.get("counted") or {})
         for p in report["kpi"]["premiums"].get(key, []):

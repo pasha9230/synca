@@ -278,13 +278,14 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
     oth_lines: Dict[tuple, dict] = {}
     payouts: Dict[tuple, Dict[str, dict]] = {}                                          # point → order → what it is paid for it (point_income)
     oth_sold = oth_sold_orders(conn, {_order_id(r["note"]) for items in grouped.values() for r in items} - {None})
+    apart = point_arrival.apart(conn)                                                   # sold from «На ОТХ» the old way: the sale «sale:N»
     fixed = fixes(conn)
     point_names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
     issues: Dict[tuple, List[tuple]] = {}                                               # point → (share, sum) of its fees for the issue
     adjs: Dict[tuple, List[tuple]] = {}                                                 # point → (share, sum) of the office's corrections
 
     def fixed_parts(key: tuple, note: str, entry: dict, parts) -> Dict[str, float]:
-        return _fix(entry, fixed.get((key[1], "order:%d" % entry["order"])) if key[0] == "id" and entry["order"] else None, parts)
+        return _fix(entry, fixed.get((key[1], entry["item"])) if key[0] == "id" and entry["item"] else None, parts)
     for key, items in grouped.items():
         for r in items:
             per_point[key].setdefault(r["note"], []).append(r)
@@ -293,18 +294,21 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
             day = min(r["day"] for r in parts)
             got = fee_parts(rates, by_point, key, day, sum(r["pieces"] for r in parts), order_id in handed, handed.get(order_id),
                             order_id in oth_sold)
-            mine = _payout(payouts, key, note, day)
+            mine = _payout(payouts, key, note, day, item=item_of(order_id, apart) if order_id else "")
             mine["issue"], mine["issue_pieces"], mine["oth"], mine["oth_pieces"] = got["issue"], got["issue_pieces"], got["oth"], got["oth_pieces"]
             mine["oth_sold"] = order_id in oth_sold
             if got["handoff_to"] is not None:
-                theirs = _payout(payouts, got["handoff_to"], note, day)
+                theirs = _payout(payouts, got["handoff_to"], note, day, item=item_of(order_id, apart) if order_id else "")
                 theirs["handoff"], theirs["handoff_pieces"], theirs["handed"] = got["handoff"], got["handoff_pieces"], True
     for found in point_arrival.unsold(conn, start, end):                               # the tyres the point got, no sale (point_arrival)
         if not kept_order(found["order"]):
             continue
         key = ("id", found["point_id"])
         names.setdefault(key, point_names.get(found["point_id"]) or NO_POINT)
-        mine = _payout(payouts, key, "Заказ №%d" % found["order"], found["day"])
+        if found.get("sold"):                                                          # sold from «На ОТХ» the old way: the arrival
+            mine = _payout(payouts, key, ARRIVAL_NOTE % found["order"], found["day"], found["order"])     # keeps «order:N»
+        else:
+            mine = _payout(payouts, key, "Заказ №%d" % found["order"], found["day"])
         mine["issue"], mine["issue_pieces"] = issue_fee(rates, by_point, key, found["day"], found["pieces"])
         mine["arrived"] = True
     for key, found in payouts.items():                                                  # the sums the office set, then the lines of the count
@@ -587,11 +591,24 @@ def _kpi(conn, handed: dict, rates: List[dict], by_point: Dict[int, List[dict]],
     return premiums, progress
 
 
-def _payout(payouts: Dict[tuple, Dict[str, dict]], key: tuple, note: str, day: str) -> dict:
-    """The line of the order `note` in what the point `key` is paid (made empty: no sum yet)."""
-    return payouts.setdefault(key, {}).setdefault(note, {"order": _order_id(note), "day": day, "issue": 0.0, "issue_pieces": 0, "handoff": 0.0,
-                                                         "handoff_pieces": 0,
-                                                         "oth": 0.0, "oth_pieces": 0})
+# an order sold from «На ОТХ» itself (the old way, point_arrival.apart): its arrival keeps the item of the order («order:N» — what the
+# office settled stays settled), its sale is an item of its own
+ARRIVAL_NOTE = "Приезд №%d"
+SALE_ITEM = "sale:%d"
+
+
+def item_of(order_id: int, apart: set) -> str:
+    """The item of the sale of the order in the ledger and the office's sums (point_item_fix): «order:N», «sale:N» when apart."""
+    return (SALE_ITEM if order_id in apart else "order:%d") % order_id
+
+
+def _payout(payouts: Dict[tuple, Dict[str, dict]], key: tuple, note: str, day: str, order: Optional[int] = None, item: str = "") -> dict:
+    """The line of the order `note` in what the point `key` is paid (made empty: no sum yet); `item`: its name in the ledger and the office's
+    sums («order:N» by default)."""
+    order = order if order is not None else _order_id(note)
+    item = item or ("order:%d" % order if order else "")
+    return payouts.setdefault(key, {}).setdefault(note, {"order": order, "item": item, "day": day, "issue": 0.0, "issue_pieces": 0,
+                                                         "handoff": 0.0, "handoff_pieces": 0, "oth": 0.0, "oth_pieces": 0})
 
 
 def oth_sold_orders(conn, order_ids, acting: bool = False) -> set:
@@ -637,8 +654,7 @@ def point_income(conn, start: str, end: str, point_id: int) -> dict:
     and the sums only: nothing of the purchase, the profit or the prices."""
     report = build(conn, start, end)
     key = ("id", int(point_id))
-    entries = [dict(e, total=round(e["issue"] + e["handoff"] + e["oth"], 2), item="order:%d" % e["order"] if e["order"] else "")
-               for e in report["payouts"].get(key, [])]
+    entries = [dict(e, total=round(e["issue"] + e["handoff"] + e["oth"], 2)) for e in report["payouts"].get(key, [])]
     out = {"orders": entries, "premiums": report["kpi"]["premiums"].get(key, []), "progress": report["kpi"]["progress"].get(key, {})}
     for name in ("issue", "handoff", "oth"):
         out[name] = round(sum(e[name] for e in entries), 2)

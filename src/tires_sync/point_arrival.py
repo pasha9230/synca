@@ -170,19 +170,55 @@ def unsold(conn, start: str, end: str) -> List[dict]:
     """The orders the point got and that left it without a sale (ARRIVAL_FROM on), by the day they left (a cancel, «На ОТХ», a return) in
     start..end: cancelled after they came, on «На ОТХ» / «На возврат», given back to the supplier, finished without a sale. Not those
     still on «На точке» (in work: the sale or the cancel says what they are), not a record of storage (its tyres are the cancelled order's),
-    not an order with a sale (the sale counts it, order_report), never the tyres taken from «На ОТХ» (paid by their own arrival). The point
-    and the tyres are those of the arrival. [{order, point_id, day, pieces}]."""
+    not an order with a sale (the sale counts it, order_report) but one sold from «На ОТХ» itself (sold_from_oth: «sold», its arrival and
+    its sale are two items), never the tyres taken from «На ОТХ» (paid by their own arrival). The point and the tyres are those of the
+    arrival. [{order, point_id, day, pieces, sold?}]."""
     from . import orders
     paid = _paid(conn)
     if not paid:
         return []
     stages = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT c.id, g.code, g.kind FROM order_card c JOIN order_stage g ON g.id = c.stage_id")}
-    sold = {r[0] for r in conn.execute("SELECT DISTINCT note FROM sale WHERE source = 'order' AND reversed_at IS NULL")}
+    sold = _sold_notes(conn)
+    from_oth = _apart(conn, paid, sold)
     out = []
     for order_id, found in sorted(paid.items()):
         code, kind = stages.get(order_id, ("", ""))
-        if not (start <= found["day"] <= end) or code == HERE or (kind == "open" and code not in orders.RETURN_STAGES) or not code \
-                or "Заказ №%d" % order_id in sold:
+        if not (start <= found["day"] <= end) or code == HERE or (kind == "open" and code not in orders.RETURN_STAGES) or not code:
             continue
+        if "Заказ №%d" % order_id in sold:
+            if order_id not in from_oth:
+                continue
+            found = dict(found, sold=True)                # the old way (no record of storage): the arrival stays, the sale is the issue
         out.append(dict(found, order=order_id))
     return out
+
+
+def _sold_notes(conn) -> set:
+    return {r[0] for r in conn.execute("SELECT DISTINCT note FROM sale WHERE source = 'order' AND reversed_at IS NULL")}
+
+
+def _apart(conn, paid: Dict[int, dict], sold: set) -> set:
+    return sold_from_oth(conn, [o for o in paid if "Заказ №%d" % o in sold])
+
+
+def apart(conn) -> set:
+    """The orders whose paid arrival and sale are two items (sold from «На ОТХ» themselves, the old way): the arrival keeps the item of the
+    order («order:N», what the office may have settled already), the sale is an item of its own (order_report.SALE_ITEM)."""
+    paid = _paid(conn)
+    return _apart(conn, paid, _sold_notes(conn)) if paid else set()
+
+
+def sold_from_oth(conn, order_ids: Iterable[int]) -> set:
+    """Those of `order_ids` sold from «На ОТХ» themselves (the old way, no record of storage: order_oth.sell, by the point or the office):
+    their arrival left the point unsold (the client refused) and stays paid on the day it left; the sale is another issue (the owner
+    2026-11-26) — as the way through a record of storage, where the arrival is the cancelled order's and the sale another order's."""
+    from . import order_oth
+    ids = sorted({int(i) for i in order_ids})
+    found = set()
+    for chunk in range(0, len(ids), 500):
+        part = ids[chunk:chunk + 500]
+        found |= {r[0] for r in conn.execute(
+            "SELECT DISTINCT order_id FROM order_event WHERE order_id IN (%s) AND ((kind = 'point' AND (text = ? OR text LIKE ?)) "
+            "OR (kind = 'field' AND text = ?))" % ",".join("?" * len(part)),
+            part + [order_oth.POINT_SOLD, order_oth.POINT_SOLD + ":%", order_oth.OFFICE_SOLD])}
+    return found

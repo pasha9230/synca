@@ -506,6 +506,30 @@ def test_the_office_sold_from_oth_gets_the_point_the_issue_without_the_bonus(tmp
     assert (got[other], got[y]) == ((300, 0), (300, 0))
 
 
+def test_the_old_way_pays_as_the_record_and_keeps_the_closed_period(tmp_path):
+    """An order on «На ОТХ» itself (no record of storage: a merged order, a second number of WebMIM, no client) sold by «Продать»: its
+    arrival stays paid on the day it left, «Рассчитан» stays as it was; the sale is an issue of its own — as the way of the record."""
+    from tires_sync import order_oth
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    cid = card(conn, a)
+    go(conn, cid, "placed", "moving", "at_point", "oth")                       # the old way: the order itself on «На ОТХ»
+    assert _income(conn, a, START, "2026-12-10") == {cid: (300, 0)}
+    point_payouts.settle(conn, [(a, "order:%d" % cid)], START, "2026-12-10", NOW, "owner")
+    outcome, answer, done = order_oth.sell(conn, orders.get_card(conn, cid), "менеджер Альфа", "2026-12-12T15:00:00")
+    assert done, answer
+    orders.record_sales(conn, cid, "2026-12-12", NOW, "owner", "2026-12-12")
+    closed = point_payouts.items(conn, START, "2026-12-10", a)
+    assert [(e["item"], e["day"], e["total"], e["status"]) for e in closed] == [("order:%d" % cid, "2026-12-10", 300, "paid")]   # as settled
+    got = order_report.point_income(conn, START, END, a)["orders"]
+    assert sorted((e["item"], e["day"], e["issue"], e["oth"]) for e in got) == [
+        ("order:%d" % cid, "2026-12-10", 300, 0), ("sale:%d" % cid, "2026-12-12", 300, 200)]       # 800, as the record's way
+    assert order_report.build(conn, START, END)["fees"]["issue"] == 600
+    profit, margin = _sheet_matches(conn, cid, START, END)
+    assert profit == round(margin - 300 - 200, 2)                                 # the row of the table: the sale's sums only
+    assert [e["status"] for e in point_payouts.items(conn, START, END, a) if e["item"] == "sale:%d" % cid] == ["unpaid"]
+
+
 def test_the_tyres_that_came_and_went_back_are_paid_once(tmp_path, monkeypatch):
     conn = order_db(tmp_path)
     a = point(conn, "Альфа")
