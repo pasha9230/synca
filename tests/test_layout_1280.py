@@ -49,7 +49,7 @@ def test_the_orders_head_keeps_the_view_and_the_main_button_and_folds_the_rest_i
     assert re.search(r'<a class="menu-item" href="/orders/export\.xlsx\?[^"]*"[^>]*>Выгрузить в Excel</a>', menu)
     assert "export.xlsx" not in page.replace(menu, "")                                          # Excel left the filters row
     assert 'class="seg" role="group" aria-label="Вид"' in outside and '>Доска</a>' in outside and '>Список</a>' in outside
-    assert re.search(r'<a class="btn btn--primary" href="/orders/new">.*Новый заказ</a>', outside)
+    assert re.search(r'<form method="post" action="/orders/blank".*<button class="btn btn--primary" data-new-order[^>]*>.*Новый заказ</button>', outside)   # the card at once (2026-11-26)
     assert '<div class="page page--wide">' in page and '<div class="tiles tiles--row">' in page
     assert len(re.findall(r'<div class="tile[ "]', page)) == 5                                     # the five tiles, one row
 

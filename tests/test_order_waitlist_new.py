@@ -1,5 +1,5 @@
 """The owner 2026-11-26: «Добавить заказ» is on view in the order's card again (both views, the office only, one button), and the window of a
-new order has «Лист ожидания»: the client's wishes in words, «подойдут аналоги», «Поставить в ожидание» makes the order on «Ожидает наличие»."""
+new order has «Лист ожидания»: the client's wishes in words, «можно другие бренды», «можно другие размеры», «Поставить в ожидание» makes the order on «Ожидает наличие»."""
 from __future__ import annotations
 
 import pytest
@@ -55,7 +55,7 @@ def test_put_into_waiting_makes_the_order_on_the_wait_stage_with_its_journal(w):
     assert card["stage"]["code"] == "wait" and card["wait_wish"] == WISH and card["wait_analogs"] == 1
     texts = [e["text"] for e in orders.list_events(conn, card_id)]
     assert any("Ожидает наличие" in t for t in texts)
-    assert any(t.startswith("Поставлен в лист ожидания. Ждёт: %s" % WISH) and "аналоги: да" in t for t in texts)
+    assert any(t.startswith("Поставлен в лист ожидания. Ждёт: %s" % WISH) and "Можно другие бренды: да" in t and "Можно другие размеры: нет" in t for t in texts)
     page = w["owner"].get("/orders/%d" % card_id).get_data(as_text=True)
     assert "data-waitlist" in page and "205/55 R16 зима, шипы" in page and "data-wait-analogs" in page
     board = w["owner"].get("/orders").get_data(as_text=True)
@@ -78,7 +78,7 @@ def test_the_wishes_hold_the_stage_and_are_edited_in_the_card(w):
     card_id = int(reply.headers["Location"].rsplit("/", 1)[1])
     orders.update_card(conn, card_id, {"wait_wish": WISH + " Nokian", "wait_analogs": "1"}, NOW, "o")
     texts = [e["text"] for e in orders.list_events(conn, card_id)]
-    assert "Подойдут аналоги: да" in texts and any(t.startswith("Пожелания клиента (лист ожидания): ") for t in texts)
+    assert "Можно другие бренды: да" in texts and any(t.startswith("Пожелания клиента (лист ожидания): ") for t in texts)
     with pytest.raises(orders.OrderError, match="что нужно клиенту"):              # «Ожидает наличие» keeps what the client waits for
         orders.update_card(conn, card_id, {"wait_wish": ""}, NOW, "o")
     line = order_wait.add_want(conn, card_id, {"width": "205", "profile": "55", "radius": "16", "qty": "4"}, NOW, "o")
@@ -140,3 +140,46 @@ def test_the_new_order_is_the_same_window_as_the_card(w, view):
     page = w["owner"].get("/orders/new").get_data(as_text=True)
     assert ("o2c-body" in page) == (view == "all") and "data-waitlist" in page       # «Новый вид»: the card's three columns
     assert 'name="webmim_id"' in page and 'name="reserve_until"' in page and 'name="avito_chat"' in page
+
+
+def test_new_order_of_orders_opens_the_same_card_empty_on_the_first_stage(w):
+    conn = w["conn"]
+    board = w["owner"].get("/orders").get_data(as_text=True)
+    assert 'action="/orders/blank"' in board and 'href="/orders/new"' not in board
+    reply = post(w["owner"], "/orders/blank", w["tok"])
+    card_id = int(reply.headers["Location"].rsplit("/", 1)[1])
+    card = orders.get_card(conn, card_id)
+    assert card["stage"]["code"] == "new" and card["client_name"] == "" and card["items"] == []
+    again = post(w["owner"], "/orders/blank", w["tok"])                             # a double press: the same empty order
+    assert again.headers["Location"].endswith("/orders/%d" % card_id)
+    page = w["owner"].get("/orders/%d" % card_id).get_data(as_text=True)
+    assert 'id="ow-main"' in page and "data-waitlist" in page and 'name="want_width"' in page and "data-order-actions" in page
+
+
+def test_other_sizes_is_a_tick_of_its_own(w):
+    conn = w["conn"]
+    card_id = _waiting(w, wait_other_sizes="1")
+    card = orders.get_card(conn, card_id)
+    assert card["wait_other_sizes"] == 1 and card["wait_analogs"] == 0
+    order_wait.add_want(conn, card_id, {"width": "205", "profile": "55", "radius": "16", "qty": "4"}, NOW, "o")
+    line = order_wait.list_wants(conn, card_id)[0]
+    assert line["any_size"] is True and line["any_brand"] is False
+    page = w["owner"].get("/orders/%d" % card_id).get_data(as_text=True)
+    assert "data-wait-sizes" in page and 'name="wait_other_sizes"' in page
+
+
+def test_a_line_typed_in_the_card_is_saved_with_the_window(w):
+    import html
+    import re
+    conn = w["conn"]
+    card_id = _card(conn)
+    page = w["owner"].get("/orders/%d" % card_id).get_data(as_text=True)
+    assert 'form="ow-main" name="want_add"' in page
+    was = html.unescape(re.search(r'name="was" value="([^"]*)"', page).group(1))
+    reply = post(w["owner"], "/orders/%d/save" % card_id, w["tok"], was=was, want_width="205", want_profile="55", want_radius="16",
+                 want_qty="4", want_season="winter", wait_on="1")                    # «Сохранить» with a line typed and «Поставить в ожидание»
+    assert reply.status_code == 302
+    card = orders.get_card(conn, card_id)
+    assert [(x["width"], x["season"]) for x in card["wants"]] == [(205, "winter")] and card["stage"]["code"] == "wait"
+    post(w["owner"], "/orders/%d/save" % card_id, w["tok"], was=was, want_add="1", want_width="195", want_profile="65", want_radius="15", want_qty="4")   # «Добавить строку»
+    assert len(order_wait.list_wants(conn, card_id)) == 2

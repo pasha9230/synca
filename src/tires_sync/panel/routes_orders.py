@@ -1026,19 +1026,38 @@ def register(app) -> None:
                               "и проверьте наличие у поставщика." % row["name"][:120], "warning")
         return new_page(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, rows)
 
-    def wait_stage(conn, fields: dict) -> tuple:
+    def wait_stage(conn, fields: dict, lines: int = 0) -> tuple:
         """«Лист ожидания» of the new order's window (the owner 2026-11-26): «Поставить в ожидание» makes the order right on «Ожидает
         наличие». It needs the client (a name or a phone) and the wishes in words; the journal names them. (stage, events) or OrderError."""
         stage = next((s for s in orders.list_stages(conn) if s["code"] == "wait"), None)
         if stage is None:
             raise orders.OrderError("В воронке нет этапа «Ожидает наличие».")
         wish = orders._clean("wait_wish", fields.get("wait_wish"), conn)
-        if not wish:
-            raise orders.OrderError("Лист ожидания: опишите, что ждёт клиент (размер, бренд, сезон, бюджет).")
+        if not wish and not lines:
+            raise orders.OrderError("Лист ожидания: опишите, что ждёт клиент (размер, бренд, сезон, бюджет), или добавьте строку «Что нужно клиенту».")
         if not (str(fields.get("client_name") or "").strip() or str(fields.get("client_phone") or "").strip()):
             raise orders.OrderError("Лист ожидания: укажите имя или телефон клиента.")
-        analogs = "да" if orders._clean("wait_analogs", fields.get("wait_analogs"), conn) else "нет"
-        return stage, (("want", "Поставлен в лист ожидания. Ждёт: %s. Подойдут аналоги: %s." % (wish[:300], analogs)),)
+        yes = lambda key: "да" if orders._clean(key, fields.get(key), conn) else "нет"
+        return stage, (("want", "Поставлен в лист ожидания. Ждёт: %s. Можно другие бренды: %s. Можно другие размеры: %s." % (
+            wish[:300] or "строки «Что нужно клиенту»", yes("wait_analogs"), yes("wait_other_sizes"))),)
+
+    @app.route("/orders/blank", methods=["POST"])
+    @login_required
+    def order_blank():
+        """«Новый заказ» of «Заказы» (the owner 2026-11-26: one card of an order whatever it comes from): an empty order on the first stage,
+        made at once like «Создать заказ» of a chat and «Добавить заказ» of CRM, and its card opens — the same card, fields and settings.
+        A double press within a minute opens the same empty order (no second one)."""
+        conn = get_conn()
+        stamp = local_iso()
+        orders.ensure_pipeline(conn, stamp)
+        twin = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.created_by = ? AND s.code = 'new' "
+                            "AND c.client_name = '' AND c.client_phone = '' AND c.avito_chat = '' AND c.created_at >= ? AND NOT EXISTS "
+                            "(SELECT 1 FROM order_item i WHERE i.order_id = c.id) ORDER BY c.id DESC LIMIT 1",
+                            (author(), (local_now() - timedelta(seconds=order_chain.TWIN_SECONDS)).isoformat(timespec="seconds"))).fetchone()
+        if twin:
+            return redirect("/orders/%d" % twin[0])
+        card_id = orders.create_card(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, stamp, author(), require_contact=False)
+        return redirect("/orders/%d" % card_id)
 
     @app.route("/orders/new", methods=["POST"])
     @login_required
@@ -1753,6 +1772,9 @@ def register(app) -> None:
             if "stage_id" in request.form:
                 flash("Заказ не перенесён: позиция не добавлена.", "error")
             return card_page(conn, card_or_404(conn, card_id), typed_row)
+        new_want = typed_want(conn, card_id)                              # the line «Что нужно клиенту» typed in the card: saved with the window
+        if new_want == "refused" and "stage_id" in request.form:
+            return back(card_id, "wants")                                 # no move without the line the press meant
         if "stage_id" in request.form:                                    # a stage of the window: the fields are saved first, then the move
             asked = oth_offer(conn, card_or_404(conn, card_id), _int(request.form.get("stage_id")))
             if asked is not None:                                         # the fields are saved (the reason too); the move asks first
@@ -1781,14 +1803,34 @@ def register(app) -> None:
             put_waiting(conn, card_id)                                    # «Лист ожидания» of the card: the same tick as in a new order
         if typed_number:                                                  # after the move: the messages its rules made can go with the number
             cabinet_after_save(conn, card_id, number_before)
-        part = part or request.form.get("tab", "")
+        part = part or request.form.get("tab", "") or ("wants" if new_want or request.form.get("want_add") else "")
         return back(card_id, part if part in ORDER_PARTS else "")
+
+    def typed_want(conn, card_id):
+        """The new line of «Что нужно клиенту» is in the window's form (want_…, the owner 2026-11-26: a line typed and not added was lost):
+        any size, brand, model or code typed adds it with «Сохранить» or «Добавить строку». Returns "added", "refused" (a red flash) or ""."""
+        form = request.form
+        if not any(form.get("want_" + k, "").strip() for k in ("width", "profile", "radius", "brand", "model", "code")):
+            if form.get("want_add"):
+                flash("Строка не добавлена: укажите размер, бренд, модель или артикул.", "error")
+            return ""
+        if not can_post("order_want_add"):
+            return ""
+        data = {key: form.get("want_" + key, "") for key in ("brand", "model", "width", "profile", "radius", "season", "studded", "qty", "code")}
+        data["any_brand"] = "1" if form.get("want_any_brand") else "0"
+        data["any_size"] = "1" if form.get("want_any_size") else "0"
+        try:
+            order_wait.add_want(conn, card_id, data, local_iso(), author())
+        except orders.OrderError as err:
+            flash("Строка «Что нужно клиенту» не добавлена: %s" % err, "error")
+            return "refused"
+        return "added"
 
     def put_waiting(conn, card_id) -> None:
         """«Поставить в ожидание» ticked in the card (the owner 2026-11-26: the same block whatever the order came from, a chat among them):
         the fields are saved, the order goes to «Ожидает наличие» (what it lacks for it: a red flash, the order stays)."""
         try:
-            stage, events = wait_stage(conn, orders._row(conn, card_id))
+            stage, events = wait_stage(conn, orders._row(conn, card_id), len(order_wait.list_wants(conn, card_id)))
             stamp = local_iso()
             if orders.move_card(conn, card_id, stage["id"], stamp, author()):
                 for kind, text in events:
