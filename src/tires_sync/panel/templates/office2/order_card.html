@@ -93,7 +93,7 @@
 {% else %}<p class="muted">Строк пока нет.</p>{% endfor %}
 {% if can_post("order_want_add") %}<form method="post" action="/orders/{{ c.id }}/wants/add" class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <div class="strong">Добавить строку</div>
-{% set w = {"brand": "", "model": "", "width": "", "profile": "", "radius": "", "season": "", "studded": "", "qty": 4, "code": "", "any_brand": false, "any_size": false} %}
+{% set w = {"brand": "", "model": "", "width": "", "profile": "", "radius": "", "season": "", "studded": "", "qty": 4, "code": "", "any_brand": c.wait_analogs == 1, "any_size": false} %}
 {% include "_order_want_fields.html" %}
 <div><button class="btn btn--primary btn--sm">{{ icon("plus") }}Добавить строку</button></div></form>{% endif %}
 </div></details>

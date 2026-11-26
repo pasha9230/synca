@@ -763,6 +763,8 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
         else:
             shown = "(пусто)" if value in ("", None, 0, 0.0) else str(value)[:80]
         add_event(conn, card_id, now, author, "field", "%s: %s" % (LABELS[key], shown))
+    if changed.get("wait_analogs") == 1:
+        analogs_to_wants(conn, card_id, now, author)
     try:
         _guard_stage(conn, card_id, before)
     except OrderError:
@@ -777,6 +779,15 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
     if commit:
         conn.commit()
     return list(changed)
+
+
+def analogs_to_wants(conn, card_id, now: str, author: str) -> int:
+    """«Подойдут аналоги» ticked (the owner 2026-11-26): every line of «Что нужно клиенту» gets «можно другие бренды»; saved with the caller's
+    change. Unticked, the lines stay as they are (a tick set by hand is the manager's). Returns the lines changed."""
+    cur = conn.execute("UPDATE order_want SET any_brand = 1 WHERE order_id = ? AND any_brand = 0", (card_id,))
+    if cur.rowcount:
+        add_event(conn, card_id, now, author, "want", "Подойдут аналоги: в строках «Что нужно клиенту» отмечено «можно другие бренды» (%d)" % cur.rowcount)
+    return cur.rowcount
 
 
 def _attach_client(conn, card_id, now: str, author: str) -> None:

@@ -19,7 +19,7 @@ def _card(conn, phone="+7 900 555-01-02"):
 
 
 @pytest.mark.parametrize("view", ["off", "all"])
-def test_the_card_has_one_add_order_button_in_its_head_for_the_office(w, view):
+def test_the_card_has_one_add_order_button_beside_merge_for_the_office(w, view):
     flag(w, view)
     card_id = _card(w["conn"])
     for client in (w["owner"], person(w, "chat1")):
@@ -27,7 +27,10 @@ def test_the_card_has_one_add_order_button_in_its_head_for_the_office(w, view):
         assert ("o2-card" in page) == (view == "all")                              # «Новый вид» draws office2/order_card.html
         assert page.count("data-chain-again") == 1 and "Добавить заказ</button>" in page
         assert "Новый заказ этому клиенту</button>" not in page                   # no second button in «Другие заказы клиента»
-        assert page.index("data-chain-again") < page.index('<div class="owin-body">') < page.index('id="ow-again"')
+        row = page[page.index("data-order-actions"):]
+        row = row[:row.index("</div>")]                                            # the owner 26.11: the two buttons side by side
+        assert 'class="btn btn--secondary btn--sm" href="/orders/%d/merge" data-merge-open' % card_id in row and "data-chain-again" in row
+        assert page.index("data-order-actions") < page.index('id="ow-again"')
     reply = post(w["owner"], "/orders/%d/again" % card_id, w["tok"])
     assert reply.status_code == 302 and "/orders/" in reply.headers["Location"]
 
@@ -82,3 +85,58 @@ def test_the_wishes_hold_the_stage_and_are_edited_in_the_card(w):
     want_id = line if isinstance(line, int) else order_wait.list_wants(conn, card_id)[0]["id"]
     order_wait.remove_want(conn, want_id, NOW, "o")                                 # the words hold the stage: the last line may go
     assert orders.get_card(conn, card_id)["wants"] == []
+
+
+def _waiting(w, **extra):
+    reply = _new(w, wait_on="1", wait_wish=WISH, **extra)
+    return int(reply.headers["Location"].rsplit("/", 1)[1])
+
+
+def test_analogs_tick_other_brands_in_the_lines(w):
+    conn = w["conn"]
+    card_id = _waiting(w)
+    order_wait.add_want(conn, card_id, {"width": "205", "profile": "55", "radius": "16", "qty": "4", "brand": "Ikon"}, NOW, "o")
+    assert order_wait.list_wants(conn, card_id)[0]["any_brand"] is False
+    orders.update_card(conn, card_id, {"wait_analogs": "1"}, NOW, "o")                 # ticked in the card: the line allows other brands
+    assert order_wait.list_wants(conn, card_id)[0]["any_brand"] is True
+    assert any("можно другие бренды" in e["text"] for e in orders.list_events(conn, card_id))
+    order_wait.add_want(conn, card_id, {"width": "195", "profile": "65", "radius": "15", "qty": "4"}, NOW, "o")
+    assert [x["any_brand"] for x in order_wait.list_wants(conn, card_id)] == [True, True]     # a later line too
+    other = _waiting(w, client_phone="+7 900 555-07-08", wait_analogs="1")              # ticked when the order is made
+    order_wait.add_want(conn, other, {"width": "205", "profile": "55", "radius": "16", "qty": "4"}, NOW, "o")
+    assert order_wait.list_wants(conn, other)[0]["any_brand"] is True
+
+
+def test_the_card_of_a_chat_order_puts_it_waiting_with_the_same_block(w):
+    conn = w["conn"]
+    card_id = _card(conn)                                                           # made like «Создать заказ» of a chat: no form before
+    page = w["owner"].get("/orders/%d" % card_id).get_data(as_text=True)
+    assert "data-waitlist" in page and 'name="wait_on"' in page
+    was = __import__("re").search(r'name="was" value="([^"]*)"', page).group(1)
+    import html
+    reply = post(w["owner"], "/orders/%d/save" % card_id, w["tok"], was=html.unescape(was), wait_on="1", wait_wish=WISH)
+    assert reply.status_code == 302
+    card = orders.get_card(conn, card_id)
+    assert card["stage"]["code"] == "wait" and card["wait_wish"] == WISH
+    assert any(e["text"].startswith("Поставлен в лист ожидания") for e in orders.list_events(conn, card_id))
+
+
+def test_matching_variants_open_the_catalog_search_on_the_wait_stage(w):
+    conn = w["conn"]
+    card_id = _waiting(w)
+    page = w["owner"].get("/orders/%d" % card_id).get_data(as_text=True)
+    assert 'href="/catalog?size=205%2F55R16&amp;s=winter"' in page and "data-match-open" in page
+    order_wait.add_want(conn, card_id, {"width": "195", "profile": "65", "radius": "15", "qty": "4", "season": "winter"}, NOW, "o")
+    page = w["owner"].get("/orders/%d" % card_id).get_data(as_text=True)
+    assert 'href="/catalog?size=195%2F65R15+205%2F55R16&amp;s=winter"' in page
+    assert w["owner"].get("/catalog?size=205%2F55R16&s=winter").status_code == 200
+    plain = _card(conn, phone="+7 900 555-09-10")                                   # not waiting: no button
+    assert "data-match-open" not in w["owner"].get("/orders/%d" % plain).get_data(as_text=True)
+
+
+@pytest.mark.parametrize("view", ["off", "all"])
+def test_the_new_order_is_the_same_window_as_the_card(w, view):
+    flag(w, view)
+    page = w["owner"].get("/orders/new").get_data(as_text=True)
+    assert ("o2c-body" in page) == (view == "all") and "data-waitlist" in page       # «Новый вид»: the card's three columns
+    assert 'name="webmim_id"' in page and 'name="reserve_until"' in page and 'name="avito_chat"' in page
