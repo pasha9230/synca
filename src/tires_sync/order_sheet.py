@@ -290,10 +290,11 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     handed, _names = order_report.handed_points(conn)                             # «чей клиент»: the report's one rule (a handoff, «Откуда
     key = ("id", issued) if issued is not None else ("name", "")                  # клиент», the merge, the swap on «На ОТХ»)
     oth_sold = bool(order_report.oth_sold_orders(conn, [card["id"]]))
-    got = order_report.fee_parts(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]), oth_sold)   # the report's formula
+    whole, taken = order_report.oth_pieces(conn, [card["id"]])
+    got = order_report.fee_parts(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]), oth_sold,
+                                 order_report.from_oth(card["id"], key, pieces, whole, taken))       # the report's formula
     fixed = order_report.fixes(conn)                                              # the sums the office set (point_item_fix), as the report
-    from . import point_arrival
-    item = order_report.item_of(card["id"], point_arrival.apart(conn))           # as the report: «sale:N» apart from its arrival
+    item = "order:%d" % card["id"]
     theirs = got["handoff_to"][1] if got["handoff_to"] is not None and got["handoff_to"][0] == "id" else None
     if day < KEEPS_BEFORE and not fixed.get((issued, item)) and not fixed.get((theirs, item)):
         # the rows of the orders sold before the bonuses moved to 2026-12-01 keep the sums they were written with (the review 2026-11-26:

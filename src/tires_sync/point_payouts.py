@@ -88,7 +88,7 @@ def items(conn, start: str, end: str, point_id: Optional[int] = None, report: Op
     out, seen = [], set()
     counted = set()                                           # every item of the count, whatever its day: «still in the report»
     for key in wanted:
-        counted |= {(key[1], e["item"]) for e in report["payouts"].get(key, []) if e["item"]}     # «order:N», «arrival:N»
+        counted |= {(key[1], e["item"]) for e in report["payouts"].get(key, []) if e["item"]}     # «order:N»
         counted |= {(key[1], p["item"]) for p in report["kpi"]["premiums"].get(key, [])}
 
     def add(pid: int, item: str, day: str, total: float, **parts) -> None:

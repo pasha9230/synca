@@ -277,8 +277,9 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
     handoff_lines: Dict[tuple, dict] = {}
     oth_lines: Dict[tuple, dict] = {}
     payouts: Dict[tuple, Dict[str, dict]] = {}                                          # point → order → what it is paid for it (point_income)
-    oth_sold = oth_sold_orders(conn, {_order_id(r["note"]) for items in grouped.values() for r in items} - {None})
-    apart = point_arrival.apart(conn)                                                   # sold from «На ОТХ» the old way: the sale «sale:N»
+    sold_ids = {_order_id(r["note"]) for items in grouped.values() for r in items} - {None}
+    oth_sold = oth_sold_orders(conn, sold_ids)
+    whole, taken = oth_pieces(conn, sold_ids)                                           # the tyres of a sale from «На ОТХ», by its point
     fixed = fixes(conn)
     point_names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
     issues: Dict[tuple, List[tuple]] = {}                                               # point → (share, sum) of its fees for the issue
@@ -292,23 +293,21 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
         for note, parts in per_point[key].items():
             order_id = _order_id(note)
             day = min(r["day"] for r in parts)
-            got = fee_parts(rates, by_point, key, day, sum(r["pieces"] for r in parts), order_id in handed, handed.get(order_id),
-                            order_id in oth_sold)
-            mine = _payout(payouts, key, note, day, item=item_of(order_id, apart) if order_id else "")
+            pieces = sum(r["pieces"] for r in parts)
+            got = fee_parts(rates, by_point, key, day, pieces, order_id in handed, handed.get(order_id), order_id in oth_sold,
+                            from_oth(order_id, key, pieces, whole, taken))
+            mine = _payout(payouts, key, note, day)
             mine["issue"], mine["issue_pieces"], mine["oth"], mine["oth_pieces"] = got["issue"], got["issue_pieces"], got["oth"], got["oth_pieces"]
             mine["oth_sold"] = order_id in oth_sold
             if got["handoff_to"] is not None:
-                theirs = _payout(payouts, got["handoff_to"], note, day, item=item_of(order_id, apart) if order_id else "")
+                theirs = _payout(payouts, got["handoff_to"], note, day)
                 theirs["handoff"], theirs["handoff_pieces"], theirs["handed"] = got["handoff"], got["handoff_pieces"], True
-    for found in point_arrival.unsold(conn, start, end):                               # the tyres the point got, no sale (point_arrival)
+    for found in point_arrival.unsold(conn, start, end):                               # a chain ended with no sale: the arrival pays
         if not kept_order(found["order"]):
             continue
         key = ("id", found["point_id"])
         names.setdefault(key, point_names.get(found["point_id"]) or NO_POINT)
-        if found.get("sold"):                                                          # sold from «На ОТХ» the old way: the arrival
-            mine = _payout(payouts, key, ARRIVAL_NOTE % found["order"], found["day"], found["order"])     # keeps «order:N»
-        else:
-            mine = _payout(payouts, key, "Заказ №%d" % found["order"], found["day"])
+        mine = _payout(payouts, key, "Заказ №%d" % found["order"], found["day"])
         mine["issue"], mine["issue_pieces"] = issue_fee(rates, by_point, key, found["day"], found["pieces"])
         mine["arrived"] = True
     for key, found in payouts.items():                                                  # the sums the office set, then the lines of the count
@@ -457,21 +456,50 @@ def oth_fee(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str, p
 
 
 def fee_parts(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str, pieces: int, handed: bool = False, handed_to=None,
-              oth_sold: bool = False) -> dict:
+              oth_sold: bool = False, from_oth: Optional[Dict[int, int]] = None) -> dict:
     """What the points get for one order issued by `key` on `day` with `pieces` tyres — the one formula of the report, the ledger and the
     row of the Google table: {issue, issue_pieces (to `key`), oth, oth_pieces (to `key`, a sale from «На ОТХ»), handoff, handoff_pieces,
     handoff_to (the point of a handed-over client, bonus_point; None — none)}.
-    The owner 2026-11-26: a sale of tyres from «На ОТХ» is an issue like any other — the fee of the issue for every tyre sold, whoever
-    sold (the arrival that brought them was paid once on its own, point_arrival.unsold); the bonus of «На ОТХ» on top of it when the point
-    itself sold (`oth_sold`, oth_sold_orders), from BONUS_FROM."""
+    The owner 2026-11-26, one fee a chain: the sale is the end of the way of its tyres — the fee of the issue for every tyre sold, whoever
+    sold, also from «На ОТХ» (the arrival that brought them pays nothing then, point_arrival.unsold); the bonus of «На ОТХ» on top of it
+    only when the point itself sold (`oth_sold`, oth_sold_orders), from BONUS_FROM. The bonuses never add up: the tyres that came from
+    «На ОТХ» of the point that handed the client over (`from_oth`: point id → tyres, oth_pieces) give it no bonus of the handed client."""
     out = {"handoff": 0.0, "handoff_pieces": 0, "handoff_to": None, "oth": 0.0, "oth_pieces": 0}
     out["issue"], out["issue_pieces"] = issue_fee(rates, by_point, key, day, pieces)
     if oth_sold:
         out["oth"], out["oth_pieces"] = oth_fee(rates, by_point, key, day, pieces)
     if handed:                                                  # handed_to None: the point is gone, the issuing one gets it (bonus_point)
-        out["handoff_to"] = bonus_point(key, handed_to)
-        out["handoff"], out["handoff_pieces"] = handoff_fee(rates, by_point, out["handoff_to"], day, pieces)
+        to = bonus_point(key, handed_to)
+        rest = pieces - ((from_oth or {}).get(to[1], 0) if isinstance(to, tuple) and to and to[0] == "id" else 0)
+        if rest > 0:
+            out["handoff_to"] = to
+            out["handoff"], out["handoff_pieces"] = handoff_fee(rates, by_point, to, day, rest)
     return out
+
+
+def oth_pieces(conn, order_ids) -> tuple:
+    """(the orders sold from «На ОТХ» whole — the order or the record itself by «Продать», the order of the point's sale of a record:
+    point_arrival.sold_from_oth; {order: {point id: tyres}} taken from «На ОТХ» by «Взять с ОТХ», not given back, by the point of the
+    order they lay in)."""
+    ids = sorted({int(i) for i in order_ids})
+    whole = point_arrival.sold_from_oth(conn, ids)
+    taken: Dict[int, Dict[int, int]] = {}
+    for chunk in range(0, len(ids), 500):
+        part = ids[chunk:chunk + 500]
+        for order_id, point_id, qty in conn.execute(
+                "SELECT t.order_id, c.point_id, SUM(t.qty) FROM order_item_oth t JOIN order_card c ON c.id = t.from_order WHERE t.undone_at = '' "
+                "AND c.point_id IS NOT NULL AND t.order_id IN (%s) GROUP BY t.order_id, c.point_id" % ",".join("?" * len(part)), part):
+            taken.setdefault(order_id, {})[point_id] = int(qty)
+    return whole, taken
+
+
+def from_oth(order_id: Optional[int], key, pieces: int, whole: set, taken: Dict[int, Dict[int, int]]) -> Dict[int, int]:
+    """Point id → the tyres of the order's sale that came from «На ОТХ» of that point (fee_parts)."""
+    if order_id is None:
+        return {}
+    if order_id in whole and isinstance(key, tuple) and key[0] == "id":
+        return {key[1]: pieces}
+    return taken.get(order_id, {})
 
 
 LEGACY_STARTS = {"handoff_fee": "2026-10-24", "oth_sale_fee": "2026-11-25"}     # the starts of the bonuses before the owner's 2026-11-25
@@ -589,17 +617,6 @@ def _kpi(conn, handed: dict, rates: List[dict], by_point: Dict[int, List[dict]],
             count["fee"] = round(count["cycles"] * bonus, 2)
             progress.setdefault(to, {})[month] = count
     return premiums, progress
-
-
-# an order sold from «На ОТХ» itself (the old way, point_arrival.apart): its arrival keeps the item of the order («order:N» — what the
-# office settled stays settled), its sale is an item of its own
-ARRIVAL_NOTE = "Приезд №%d"
-SALE_ITEM = "sale:%d"
-
-
-def item_of(order_id: int, apart: set) -> str:
-    """The item of the sale of the order in the ledger and the office's sums (point_item_fix): «order:N», «sale:N» when apart."""
-    return (SALE_ITEM if order_id in apart else "order:%d") % order_id
 
 
 def _payout(payouts: Dict[tuple, Dict[str, dict]], key: tuple, note: str, day: str, order: Optional[int] = None, item: str = "") -> dict:

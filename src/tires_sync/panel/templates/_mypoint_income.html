@@ -16,9 +16,11 @@
 <section class="inc-about" data-income-about><input type="checkbox" id="inc-about-more" class="inc-more-box" hidden>
 <div class="inc-clamp"><h3>💰 За что платим точке</h3>
 <p><b>Главное:</b> мы платим за шины, которые ваша точка <b>физически получила</b> под заказ — шины приехали, вы их приняли и нажали «На точке». {% if v.debt_day >= v.issue_per_tyre_from %}Ставка — <b>{{ v.rates.point_fee|money }} за каждую шину</b> (комплект из 4 шин — {{ (v.rates.point_fee * 4)|money }}){% else %}Ставка — <b>{{ v.rates.point_fee|money }} за заказ</b>, с {{ v.issue_per_tyre_from|short_dt }} — за каждую шину{% endif %}.</p>
-<p>✅ <b>Входит в выплату:</b> выданные заказы; заказы, от которых клиент отказался уже после приезда шин; возвраты — шины приехали, хранились у вас и ушли водителю. Всё это оплачивается как выполненная работа. Приезд шин оплачивается один раз; если потом вы продали эти шины с ОТХ, продажа оплачивается как выдача, и сверху — бонус за продажу с ОТХ.</p>
+<p>🔗 <b>Платим за итог, один раз:</b> путь шин — приехали на точку → … → итог: <b>продали</b> («Выполнено») или <b>вернули поставщику</b>. За весь путь — одна выплата за выдачу.</p>
+<p>✅ <b>Входит в выплату:</b> выданные заказы; шины, от которых клиент отказался после приезда, — когда их продали с ОТХ новому клиенту (продали вы или офис) или они ушли поставщику возвратом; заказ отменили, а шины на ОТХ не оставались. Пока шины лежат на ОТХ — выплата ждёт итога.</p>
+<p>🎁 <b>Бонусы (с {{ v.bonus_from|short_dt }}):</b> вы сами продали шины с ОТХ — сверху бонус за каждую шину. Шины продал офис — только выплата за выдачу. Бонусы не складываются: продали своему переданному клиенту шины со своей ОТХ — только бонус за ОТХ, без бонуса за переданного клиента.</p>
 <p>⛔ <b>Не входит:</b> шины физически не приезжали — выплаты нет. «На точке» нажали по ошибке и потом отменили — выплата снимается.</p>
-<p>📅 <b>Когда считается:</b> выданный заказ — по дню выдачи, заказ без выдачи — по дню приезда шин. Рассчитанные офисом заказы скрыты из списка: выберите в фильтрах «Выплата: Рассчитан» или «Все».</p></div>
+<p>📅 <b>Когда считается:</b> по дню итога — продажи или возврата поставщику (заказ отменён без ОТХ — по дню отмены). Рассчитанные офисом заказы скрыты из списка: выберите в фильтрах «Выплата: Рассчитан» или «Все».</p></div>
 <label for="inc-about-more" class="btn btn--link btn--sm inc-more-btn"><span class="inc-more-show">показать полностью</span><span class="inc-more-hide">скрыть</span></label></section>
 {% endif %}
 {% if v.adjust %}<p class="mp-hint" data-adjust>{% for a in v.adjust %}Корректировка {{ a.day|short_dt }}: {{ "+" if a.adj > 0 else "" }}{{ a.adj|money }} — {{ a.reason }} ({{ a.status_name }}){% if not loop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
@@ -64,7 +66,7 @@
 <td>{% if r.deal != "done" or not r.amount or not r.entry %}—{% else %}<span class="badge {{ {'unpaid': 'badge--warn', 'paid': 'badge--ok', 'extra': 'badge--warn', 'over': 'badge--err'}[r.entry.status] }}" data-paid="{{ r.entry.status }}">{{ r.entry.status_name }}</span>{% endif %}</td></tr>{% endfor %}
 </tbody></table></div>
 {% else %}<p class="mp-empty">За период переданных клиентов и продаж с ОТХ нет.</p>{% endif %}
-<p class="mp-hint">За каждую шину выданного заказа клиента, которого вы передали, +{{ v.rates.handoff_fee|money }}{% if v.rates.oth_sale_fee %}; за каждую шину, проданную с ОТХ, +{{ v.rates.oth_sale_fee|money }}{% endif %}. Бонус начисляется, когда заказ выдан (этап «Выполнено»), за заказы с {{ v.bonus_from|short_dt }}; у сделки в работе показан ожидаемый бонус.</p>
+<p class="mp-hint">За каждую шину выданного заказа клиента, которого вы передали, +{{ v.rates.handoff_fee|money }}{% if v.rates.oth_sale_fee %}; за каждую шину, проданную с ОТХ, +{{ v.rates.oth_sale_fee|money }}, если продали вы сами (шины с вашей ОТХ — только этот бонус, без бонуса за переданного клиента){% endif %}. Бонус начисляется, когда заказ выдан (этап «Выполнено»), за заказы с {{ v.bonus_from|short_dt }}; у сделки в работе показан ожидаемый бонус.</p>
 {% else %}{% set k = v.kpi %}
 <form method="get" action="/my-point/income" class="mp-choose" data-autosubmit><input type="hidden" name="tab" value="kpi">{% if choose %}<input type="hidden" name="p" value="{{ point.id }}">{% endif %}
 <label class="field"><span class="label">Месяц</span><input class="input" type="month" name="km" value="{{ k.month }}" max="{{ v.today[:7] }}"></label><button class="btn btn--secondary">Показать</button></form>
