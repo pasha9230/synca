@@ -37,8 +37,9 @@ def price_for(wheel, rules):
 def validate_accounts(accounts):
     if not isinstance(accounts, dict):
         raise ValueError('wheel_accounts: нужна таблица аккаунтов')
+    from .connections import PRIMARY_ACCOUNT
     for account, addresses in accounts.items():
-        if not isinstance(account, str) or not account.isascii() or not account.isdigit() or int(account) <= 0:
+        if not isinstance(account, str) or account != str(PRIMARY_ACCOUNT):
             raise ValueError('wheel_accounts: некорректный аккаунт')
         if not isinstance(addresses, list) or any(not isinstance(a, str) or not a.strip() or len(a) > 128 for a in addresses):
             raise ValueError('wheel_accounts: некорректные адреса')

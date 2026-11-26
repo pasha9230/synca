@@ -9,7 +9,7 @@
 <td>{% if can_post("settings_pricing") %}<form id="wheel-{{ loop.index }}" method="post" action="/settings/pricing"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="wheel"><input type="hidden" name="brand" value="{{ key }}"><button class="btn btn--secondary btn--xs">В черновик</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="6" class="muted">{% if wheel_brands is none %}Выгрузка дисков ещё не загружена.{% else %}Нет брендов в выгрузке дисков.{% endif %}</td></tr>{% endfor %}
 </tbody></table></div>
-<h4>Аккаунты и адреса для дисков</h4><p class="muted">Выберите адреса отдельно для каждого аккаунта; без выбора адреса диски не размещаются.</p>
+<h4>Аккаунты и адреса для дисков</h4><p class="muted">Диски размещаются только на основном аккаунте. Выберите адреса отдельно от шин; без выбора адреса диски не размещаются.</p>
 {% for account in wheel_accounts %}<form method="post" action="/settings/pricing"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="wheel_account"><input type="hidden" name="account" value="{{ account.id }}"><strong>{{ account.name }}</strong>
 {% for address in account.addresses if address.address_id %}<label class="check"><input type="checkbox" name="address" value="{{ address.address_id }}"{% if address.address_id in account.selected %} checked{% endif %}> {{ address.name or address.address_text or address.address_id }}</label>{% else %}<p class="muted">Нет адресов с идентификатором Авито.</p>{% endfor %}
 {% if can_post("settings_pricing") %}<button class="btn btn--secondary btn--xs">В черновик</button>{% endif %}</form>{% else %}<p class="muted">Нет подключённых аккаунтов с фидом.</p>{% endfor %}

@@ -10,7 +10,7 @@ def wheel(gid='42', territory='10', price='1234,50', stock='4'):
     return ('<COMMODITY><NNOMMODIF>' + gid + '</NNOMMODIF><TERRITORY_RN>' + territory +
             '</TERRITORY_RN><SMODIFNAME>Disk</SMODIFNAME><SMARKA>Brand</SMARKA>'
             '<SDIAMETR>16</SDIAMETR><SWIDTH>6,5</SWIDTH><SHOLESQUANT>5</SHOLESQUANT>'
-            '<SPCD>114,3</SPCD><SWHEELOFFSET>40</SWHEELOFFSET><SDIA>66,1</SDIA>'
+            '<SPCD>114,3</SPCD><SWHEELOFFSET>40</SWHEELOFFSET><SDIA>66,1</SDIA><SPICTURE>https://example.test/image.jpg</SPICTURE>'
             '<NPRICE_DELAYED>' + price + '</NPRICE_DELAYED><NREST>' + stock + '</NREST></COMMODITY>')
 
 
@@ -64,7 +64,8 @@ def test_office_catalog_displays_wheels_without_leaking_into_tires(tmp_path):
     assert page.status_code == 200
     html = page.get_data(as_text=True)
     assert 'Disk' in html and '114,3' in html and 'Диски' in html
-    assert 'Disk' not in owner.get('/catalog').get_data(as_text=True)
+    tire_page = owner.get('/catalog').get_data(as_text=True)
+    assert 'Disk' not in tire_page and '/catalog?category=wheels' in tire_page
 
 
 def test_client_cannot_open_office_wheel_catalog(tmp_path):
@@ -112,7 +113,7 @@ def test_wheel_feed_is_opt_in_and_uses_template_fields():
     from pathlib import Path
     from tires_sync.wheel_feed import build_ads
     wheel_item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
-    params = dict(account_id=10, address_id='25', phone='123', category='Запчасти и аксессуары',
+    params = dict(account_id=1, address_id='25', phone='123', category='Запчасти и аксессуары',
                   product_type='Диски', rim_types={'': 'Литые'})
     rules = {'BRAND': {'pct_small': 10, 'pct_large': 15}}
     assert build_ads([wheel_item], rules, set(), **params) == ([], {})
@@ -123,8 +124,8 @@ def test_wheel_feed_is_opt_in_and_uses_template_fields():
     template = __import__('xml.etree.ElementTree', fromlist=['parse']).parse(str(
         Path(__file__).parents[1] / 'src/tires_sync/data/avito-templates/diski-2026-11-26.xml')).getroot()[0]
     assert {e.tag for e in ad} <= {e.tag for e in template}
-    other, _ = build_ads([wheel_item], rules, {'BRAND'}, **dict(params, account_id=11))
-    assert ad.findtext('Id') != other[0].findtext('Id')
+    from tires_sync.wheel_feed import ad_id
+    assert ad.findtext('Id') != ad_id('42', 2, '25')
 
 
 def test_wheel_feed_rejects_nonpositive_prices():
@@ -141,9 +142,9 @@ def test_wheel_account_settings_staged_per_account_and_validate_inputs(tmp_path)
     from test_settings_store import fresh, T2
     from tires_sync import staging
     conn = fresh(tmp_path)
-    staging.set_wheel_account(conn, 12, ['loc1', 'loc2'], T2)
-    assert staging.effective_raw(conn)['wheel_accounts'] == {'12': ['loc1', 'loc2']}
-    staging.set_wheel_account(conn, 12, [], T2)
+    staging.set_wheel_account(conn, 1, ['loc1', 'loc2'], T2)
+    assert staging.effective_raw(conn)['wheel_accounts'] == {'1': ['loc1', 'loc2']}
+    staging.set_wheel_account(conn, 1, [], T2)
     assert not staging.effective_raw(conn).get('wheel_accounts')
     with pytest.raises(ValueError):
         staging.set_wheel_account(conn, -1, ['loc1'], T2)
@@ -162,4 +163,6 @@ def test_wheel_account_selection_rejects_address_from_other_account(tmp_path):
     assert post(owner, '/settings/pricing', token, scope='wheel_account', account=str(a), address='456').status_code == 302
     assert not staging.effective_raw(conn).get('wheel_accounts')
     assert post(owner, '/settings/pricing', token, scope='wheel_account', account=str(a), address='123').status_code == 302
+    assert staging.effective_raw(conn)['wheel_accounts'] == {str(a): ['123']}
+    assert post(owner, '/settings/pricing', token, scope='wheel_account', account=str(b), address='456').status_code == 302
     assert staging.effective_raw(conn)['wheel_accounts'] == {str(a): ['123']}

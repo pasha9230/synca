@@ -231,7 +231,7 @@ def register(app) -> None:
         wheel_accounts = [{"id": a["id"], "name": connections.display_name(conn, a["id"]),
                            "addresses": connections.list_addresses(conn, a["id"]),
                            "selected": wheel_settings.get("wheel_accounts", {}).get(str(a["id"]), [])}
-                          for a in connections.list_feed_accounts(conn)]
+                          for a in connections.list_feed_accounts(conn) if a["id"] == connections.PRIMARY_ACCOUNT]
         return render_template("settings_brands.html", wheel_brands=wheel_brands, wheel_rules=wheel_rules, wheel_accounts=wheel_accounts,
                                raw=get_active(conn)[1], pricing_tables=[
             {"supplier": sp, "rows": service.pricing_table(conn, sp["id"], app.config["UNLOAD_PATH"], load_reference(app.config["REFERENCE_PATH"])),
@@ -293,8 +293,8 @@ def register(app) -> None:
             try:
                 account_id = int(form.get("account", ""))
                 account = connections.get_account(conn, account_id)
-                if account is None or not account["feed_enabled"]:
-                    raise ValueError("Аккаунт не подключён к фиду.")
+                if account_id != connections.PRIMARY_ACCOUNT or account is None or not account["feed_enabled"]:
+                    raise ValueError("Диски можно публиковать только на основном аккаунте с фидом.")
                 valid = {a["address_id"] for a in connections.list_addresses(conn, account_id) if a["address_id"]}
                 addresses = form.getlist("address")
                 if any(a not in valid for a in addresses):

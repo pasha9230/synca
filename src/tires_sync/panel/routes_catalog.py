@@ -526,9 +526,10 @@ def register(app) -> None:
             supplier_tabs = [{"label": "Все", "on": sup is None, "url": "/catalog?" + urlencode(plain), "count": sum(counts.values())}] + [
                 {"label": sp["name"], "on": sup == sp["id"], "url": "/catalog?" + urlencode(plain + [("sup", sp["id"])]),
                  "count": counts.get(sp["id"], 0)} for sp in suppliers]
-        if supplier_tabs:
-            index = next((i for i, tab in enumerate(supplier_tabs) if "4точки" in tab["label"].casefold()), len(supplier_tabs))
-            supplier_tabs.insert(index, {"label": "Диски", "on": False, "url": "/catalog?category=wheels", "count": None})
+        if not supplier_tabs:
+            supplier_tabs = [{"label": "Все", "on": True, "url": "/catalog", "count": b["total"]}]
+        index = next((i for i, tab in enumerate(supplier_tabs) if "4точки" in "".join(tab["label"].casefold().split())), len(supplier_tabs))
+        supplier_tabs.insert(index, {"label": "Диски", "on": False, "url": "/catalog?category=wheels", "count": None})
         view = _view_filters(args)
         counts = {}
         for offer in b["parsed"].offers.values():                            # the brands on view (after the owner's exclusions), before the filters
@@ -620,7 +621,7 @@ def register(app) -> None:
             suppliers = connections.list_suppliers(conn)
             tabs = [{"label": "Все", "url": "/catalog", "on": False}] + [
                 {"label": sp["name"], "url": "/catalog?sup=" + str(sp["id"]), "on": False} for sp in suppliers]
-            index = next((i for i, tab in enumerate(tabs) if "4точки" in tab["label"].casefold()), len(tabs))
+            index = next((i for i, tab in enumerate(tabs) if "4точки" in "".join(tab["label"].casefold().split())), len(tabs))
             tabs.insert(index, {"label": "Диски", "url": "/catalog?category=wheels", "on": True})
             rules = staging.effective_raw(conn).get("wheel_pricing", {})
             rows = [{"wheel": wheel, "price": wheel_price(wheel, rules)} for wheel in wheels]

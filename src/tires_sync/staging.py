@@ -387,8 +387,9 @@ def set_wheel_pricing(conn, brand: str, small: float, large: float, now: str, en
 
 
 def set_wheel_account(conn, account_id: int, addresses, now: str) -> None:
-    if isinstance(account_id, bool) or not isinstance(account_id, int) or account_id <= 0:
-        raise ValueError("Некорректный аккаунт.")
+    from .connections import PRIMARY_ACCOUNT
+    if isinstance(account_id, bool) or account_id != PRIMARY_ACCOUNT:
+        raise ValueError("Диски разрешены только для основного аккаунта.")
     if not isinstance(addresses, list) or any(not isinstance(a, str) or not a.strip() or len(a) > 128 for a in addresses):
         raise ValueError("Некорректные адреса дисков.")
     clean = list(dict.fromkeys(addresses))
