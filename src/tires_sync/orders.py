@@ -1231,6 +1231,11 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     if _needs_placed(stage, placed) and not _needs_placed(card["stage"], placed):
         from . import order_sheet
         order_sheet.enroll(conn, card_id, now)            # placed now (not a later move of an order placed before): its rows go to the Google table
+    reason = (changes or {}).get("cancel_reason") or ""
+    refusal_kind = str(reason).partition(":")[0].strip().casefold()
+    if stage["code"] in ("cancel", "oth") and refusal_kind in ("отменил клиент", "отказ клиента", "отказ клиента на точке"):
+        from . import clients
+        clients.mark_order_refusal(conn, card_id, now, author)
     if not commit:                                         # in the caller's transaction (order_merge): it saves, no rule wakes
         return True
     conn.commit()

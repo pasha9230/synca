@@ -898,12 +898,21 @@ def set_tag(conn, client_id, tag: str, on: bool, now: str, author: str) -> None:
     if on:
         if tag in tags_of(conn, client["id"]):
             return
-        if len(tags_of(conn, client["id"])) >= TAGS_MAX:
+        if len(tags_of(conn, client["id"])) >= TAGS_MAX and tag.casefold() != REFUSED_ORDER_TAG.casefold():
             raise ClientError("У клиента уже %d тегов: уберите лишний." % TAGS_MAX)
         conn.execute("INSERT INTO client_tag (client_id, tag, at, author) VALUES (?, ?, ?, ?)", (client["id"], tag, now, author))
     elif not conn.execute("DELETE FROM client_tag WHERE client_id = ? AND tag = ?", (client["id"], tag)).rowcount:
         return
     store.write_audit(conn, now, author, "client_tagged", {"client": client["id"], "tag": tag, "on": bool(on)})
+
+
+REFUSED_ORDER_TAG = "Неблагонадёжный"
+
+
+def mark_order_refusal(conn, order_id, now: str, author: str) -> None:
+    client = client_of_order(conn, order_id)
+    if client is not None:
+        set_tag(conn, client["id"], REFUSED_ORDER_TAG, True, now, author)
 
 
 def _not_same(conn, one: int, two: int, now: str, author: str) -> None:
