@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Диски · Каталог{% endblock %}
+{% block page_class %} page--wide{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Каталог</h1><p class="sub">Диски поставщика МИМ</p></div></header>
+<nav class="tabs">{% for t in supplier_tabs %}<a href="{{ t.url }}"{% if t.on %} class="is-active" aria-current="page"{% endif %}>{{ t.label }}</a>{% endfor %}</nav>
+<section class="card"><div class="card-body">
+<form method="get" action="/catalog" class="row"><input type="hidden" name="category" value="wheels"><input class="input" name="q" value="{{ q }}" placeholder="Бренд, модель, артикул"><button class="btn btn--primary">Найти</button></form>
+{% if not available %}<p class="muted">Выгрузка дисков ещё не загружена.</p>{% else %}
+<p class="muted">Найдено {{ wheels|length }} позиций</p>
+<div class="table-wrap"><table class="table"><thead><tr><th>Бренд</th><th>Название</th><th>Артикул</th><th>Диаметр</th><th>Ширина</th><th>Разболтовка</th><th>Вылет</th><th>DIA</th><th>Цвет</th><th>Остаток</th><th>Цена поставщика</th></tr></thead><tbody>
+{% for w in wheels %}<tr><td>{{ w.brand }}</td><td>{{ w.name }}</td><td>{{ w.code }}</td><td>{{ w.diameter }}</td><td>{{ w.width }}</td><td>{{ w.holes }} × {{ w.pcd }}</td><td>{{ w.offset }}</td><td>{{ w.center_bore }}</td><td>{{ w.color }}</td><td>{{ w.stock }}</td><td>{{ w.price }}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}</div></section>
+{% endblock %}

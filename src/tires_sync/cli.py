@@ -25,7 +25,7 @@ from .backup import BackupError, backup_db, verify_backup
 from . import offsite
 from . import notify
 from .notify import NotifyError, notifier_for
-from .fetcher import fetch_for_connection
+from .fetcher import fetch_for_connection, fetch_wheels_for_connection
 from .publish import PublishError, count_ads, ensure_feed, plan_feed, promote_feed, status_report, upload_now
 from .publishing import clear_expected, expected_for, feed_lock
 from .mappings import MappingError, auto_mappings, confirm_mapping, pending_mappings
@@ -747,6 +747,16 @@ def _fetch_suppliers(conn, box, args, quiet: bool = False) -> list:
             continue
         print("выгрузка скачана: %d товаров" % meta["items"] if sid == 1
               else "выгрузка поставщика «%s» скачана: %d товаров" % (supplier["name"], meta["items"]))
+        if sid == 1 and not quiet:
+            try:
+                wheel_meta = fetch_wheels_for_connection(conn, box, dest, _now(), http=_http())
+                print("выгрузка дисков скачана: %d товаров" % wheel_meta["items"])
+            except (WebmimError, SecretKeyError, OSError, ValueError) as err:
+                # A separate product type must never interrupt tire feed refresh.
+                print("ошибка загрузки дисков МИМ: %s" % err, file=sys.stderr)
+                if not quiet:
+                    _alert(conn, box, "Tires Sync: не удалось скачать выгрузку дисков МИМ. %s" % err, critical=False)
+
     return problems
 
 

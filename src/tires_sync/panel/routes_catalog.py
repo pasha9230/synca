@@ -4,6 +4,8 @@ import dataclasses
 import json
 import re
 import sqlite3
+from pathlib import Path
+import xml.etree.ElementTree as ET
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request
@@ -11,6 +13,8 @@ from werkzeug.datastructures import MultiDict
 
 from .. import catalog_archive, connections, market, own_bulk, order_oth, order_points, order_wait, orders, staging, store, tochki_feed
 from ..config import own_price_value, settings_from_dict
+from ..fetcher import wheel_snapshot_path
+from ..webmim_wheels import parse_unload as parse_wheels
 from ..pricing import position_price
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
@@ -521,6 +525,9 @@ def register(app) -> None:
             supplier_tabs = [{"label": "Все", "on": sup is None, "url": "/catalog?" + urlencode(plain), "count": sum(counts.values())}] + [
                 {"label": sp["name"], "on": sup == sp["id"], "url": "/catalog?" + urlencode(plain + [("sup", sp["id"])]),
                  "count": counts.get(sp["id"], 0)} for sp in suppliers]
+        if supplier_tabs:
+            index = next((i for i, tab in enumerate(supplier_tabs) if "4точки" in tab["label"].casefold()), len(supplier_tabs))
+            supplier_tabs.insert(index, {"label": "Диски", "on": False, "url": "/catalog?category=wheels", "count": None})
         view = _view_filters(args)
         counts = {}
         for offer in b["parsed"].offers.values():                            # the brands on view (after the owner's exclusions), before the filters
@@ -595,6 +602,26 @@ def register(app) -> None:
     @app.route("/catalog")
     @login_required
     def catalog():
+        if request.args.get("category") == "wheels":
+            conn = get_conn()
+            settings = active_settings(conn)
+            territory = connections.supplier_territory(conn, 1, settings)
+            path = wheel_snapshot_path(Path(app.config["UNLOAD_PATH"]))
+            try:
+                snapshot = parse_wheels(path.read_bytes(), territory)
+            except (OSError, ET.ParseError):
+                snapshot = None
+            query = request.args.get("q", "").strip()[:120]
+            wheels = sorted(snapshot.offers.values(), key=lambda w: (w.brand.casefold(), w.name.casefold())) if snapshot else []
+            if query:
+                words = query.casefold().split()
+                wheels = [w for w in wheels if all(word in " ".join((w.name, w.brand, w.model, w.code)).casefold() for word in words)]
+            suppliers = connections.list_suppliers(conn)
+            tabs = [{"label": "Все", "url": "/catalog", "on": False}] + [
+                {"label": sp["name"], "url": "/catalog?sup=" + str(sp["id"]), "on": False} for sp in suppliers]
+            index = next((i for i, tab in enumerate(tabs) if "4точки" in tab["label"].casefold()), len(tabs))
+            tabs.insert(index, {"label": "Диски", "url": "/catalog?category=wheels", "on": True})
+            return render_template("catalog_wheels.html", wheels=wheels, supplier_tabs=tabs, q=query, available=snapshot is not None)
         args = request.args                                                    # «Недавние» of the person (the owner 2026-11-09): the sizes searched
         client_catalog.remember_sizes(get_conn(), current_user()["login"], client_catalog.searched_sizes(
             _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), _view_filters(args)["sizes"]), now_iso())

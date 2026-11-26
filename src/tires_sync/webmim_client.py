@@ -108,12 +108,19 @@ class WebmimClient:
         return "ключ получен"
 
     def fetch_unload(self, territory_id: str) -> bytes:
+        return self._fetch_catalog(territory_id, "1")
+
+    def fetch_wheels(self, territory_id: str) -> bytes:
+        """Request rims separately so tire snapshots and feeds are unaffected."""
+        return self._fetch_catalog(territory_id, "2")
+
+    def _fetch_catalog(self, territory_id: str, product_type: str) -> bytes:
         if not (str(territory_id).isascii() and str(territory_id).isdigit()):
             raise WebmimError("Идентификатор территории должен состоять из цифр.")
         key = self.api_key()
         status, raw = self._call(
             "GET", "/api/v1/catalog/unload",
-            {"access-token": key, "format": "xml", "types": "1", "sterritoryid": territory_id}, safe=True,
+            {"access-token": key, "format": "xml", "types": product_type, "sterritoryid": territory_id}, safe=True,
         )
         if status != 200:
             raise WebmimError("Выгрузка недоступна (код %s)." % status)
@@ -143,8 +150,15 @@ def _write_atomic(path: Path, data: bytes) -> None:
 
 
 def download_unload(client: WebmimClient, territory_id: str, dest: Path, now: str, min_ratio: float = 0.5) -> dict:
+    return _download_catalog(client.fetch_unload(territory_id), territory_id, dest, now, min_ratio)
+
+
+def download_wheels(client: WebmimClient, territory_id: str, dest: Path, now: str, min_ratio: float = 0.5) -> dict:
+    return _download_catalog(client.fetch_wheels(territory_id), territory_id, dest, now, min_ratio)
+
+
+def _download_catalog(body: bytes, territory_id: str, dest: Path, now: str, min_ratio: float) -> dict:
     dest = Path(dest)
-    body = client.fetch_unload(territory_id)
     try:
         count = _count_items(body, territory_id)
     except ET.ParseError:
