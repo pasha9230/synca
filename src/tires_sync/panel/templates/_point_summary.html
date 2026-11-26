@@ -1,5 +1,5 @@
 {# The blocks of «Сводки» of a point (routes_point_notify.mypoint_notices, point_summary; the owner 2026-11-26), both views: `p2` — «Новый вид».
-   «Требует действия сейчас», the one block of counts (the last week beside this month, the KPI of the month), «Другие точки». The rubles
+   «Требует действия сейчас» (a return today, «Едут» past the delivery day), the one block of counts (the last week beside this month, the KPI of the month), «Другие точки». The rubles
    only with `rubles` (the point may see «Доход»); nothing of the purchase or the prices. #}
 {% macro open(p2, id, data) %}{% if p2 %}<section class="p2-box" aria-labelledby="{{ id }}" {{ data }}><div class="p2-section">{% else %}<section class="mp-handoff" aria-labelledby="{{ id }}" {{ data }}>{% endif %}{% endmacro %}
 {% macro close(p2) %}{% if p2 %}</div></section>{% else %}</section>{% endif %}{% endmacro %}
@@ -8,22 +8,20 @@
 <a class="mp-tab{% if tab == 'mine' %} is-active{% endif %}" href="/my-point/notices{{ pq }}"{% if tab == 'mine' %} aria-current="page"{% endif %} data-tab="mine">Наша точка</a>
 <a class="mp-tab{% if tab == 'others' %} is-active{% endif %}" href="/my-point/notices?tab=others{{ pq|replace('?', '&') }}"{% if tab == 'others' %} aria-current="page"{% endif %} data-tab="others">Другие точки</a></nav>{% endif %}{% endmacro %}
 
-{% macro act_block(p2, point, choose, returns, act, notify, late_days, stale_days) %}{% set sub = "p2-sub" if p2 else "mp-sub" %}{% set pp = ('&p=%d'|format(point.id)) if choose else '' %}
+{% macro act_block(p2, point, choose, returns, act, notify) %}{% set sub = "p2-sub" if p2 else "mp-sub" %}{% set pp = ('&p=%d'|format(point.id)) if choose else '' %}
 {{ open(p2, "nt-today-h", "data-notices-today") }}<h2 id="nt-today-h">⚡ Требует действия сейчас</h2>
 {% if returns %}<p data-notices-returns><span class="badge badge--err p2-tag p2-tag--err">{{ returns_mark }}</span> <b>Возврат поставщику сегодня: {{ returns|length }} {{ plural(returns|length, "заказ", "заказа", "заказов") }}</b> <span class="{{ sub }}">№ {{ returns|join(", № ") }}</span>
 <a class="btn btn--secondary btn--sm" href="/my-point?tab=return{{ pp }}">Перейти к возвратам</a></p>{% endif %}
-{% if act.late %}<p data-act="late"><b>🚚 Должны были приехать — отметьте «Приехал»: {{ act.late|length }}</b><br><span class="{{ sub }}">Дата доставки прошла. Шины уже у нас — нажмите «Приехал»; ещё не приехали — напишите в офис.</span></p>
-<ul class="{{ 'p2-list' if p2 else 'mp-handed-list' }}">{% for o in act.late %}<li{% if not p2 %} class="mp-handed-item"{% endif %} data-act-late="{{ o.id }}"><a href="/my-point?tab=moving{{ pp }}#order-{{ o.id }}">№ {{ o.label }}</a> <span class="{{ sub }}">доставка {{ o.day|day }} · {{ o.days }} {{ plural(o.days, "день", "дня", "дней") }} назад{% if o.client %} · {{ o.client }}{% endif %}</span></li>{% endfor %}</ul>{% endif %}
-{% if act.stale %}<p data-act="stale"><b>⏳ Ждут клиента {{ stale_days }}+ дней: {{ act.stale|length }}</b><br><span class="{{ sub }}">Напомните клиенту или отметьте, что с заказом: «Выдал», «Отказ».</span></p>
-<ul class="{{ 'p2-list' if p2 else 'mp-handed-list' }}">{% for o in act.stale %}<li{% if not p2 %} class="mp-handed-item"{% endif %} data-act-stale="{{ o.id }}"><a href="/my-point?tab=here{{ pp }}#order-{{ o.id }}">№ {{ o.label }}</a> <span class="{{ sub }}">на точке с {{ o.day|day }} · {{ o.days }} {{ plural(o.days, "день", "дня", "дней") }}{% if o.client %} · {{ o.client }}{% endif %}</span></li>{% endfor %}</ul>{% endif %}
-{% if not returns and not act.late and not act.stale %}<p class="{{ sub }}" data-notices-no-returns>Срочных дел нет: возвратов сегодня нет, все приезды отмечены. 👍</p>{% endif %}
+{% if act %}<p data-act="late"><b>🚚 Должны были приехать — отметьте «Приехал»: {{ act|length }}</b><br><span class="{{ sub }}">Срок доставки прошёл. Шины уже на точке — нажмите «Приехал»; ещё не приехали — напишите в офис.</span></p>
+<ul class="{{ 'p2-list' if p2 else 'mp-handed-list' }}">{% for o in act %}<li{% if not p2 %} class="mp-handed-item"{% endif %} data-act-late="{{ o.id }}"><a href="/my-point?tab=moving{{ pp }}#order-{{ o.id }}">№ {{ o.label }}</a> <span class="{{ sub }}">{% if o.day %}доставка {{ o.day|day }} · {{ o.days }} {{ plural(o.days, "день", "дня", "дней") }} назад{% else %}в пути {{ o.hours }} {{ plural(o.hours, "час", "часа", "часов") }}, даты доставки нет{% endif %}{% if o.client %} · {{ o.client }}{% endif %}</span></li>{% endfor %}</ul>{% endif %}
+{% if not returns and not act %}<p class="{{ sub }}" data-notices-no-returns>Срочных дел нет: возвратов сегодня нет, все приезды отмечены. 👍</p>{% endif %}
 {% if not notify.enabled %}<p class="{{ sub }}" data-notices-off>Уведомления точки выключены{% if notify.who %} ({{ notify.who }}{% if notify.at %}, {{ notify.at|short_dt }}{% endif %}){% endif %}: звука и уведомлений браузера нет.</p>{% endif %}
 {{ close(p2) }}{% endmacro %}
 
 {% macro totals(p2, week, month, kpi, kpi_from, rubles, point, choose) %}{% set sub = "p2-sub" if p2 else "mp-sub" %}
 {{ open(p2, "nt-week-h", "data-notices-week") }}<h2 id="nt-week-h">📊 Итоги</h2>
 <div style="overflow-x:auto"><table class="table" data-summary>
-<thead><tr><th></th><th>Прошлая неделя<br><span class="{{ sub }}">{{ week.start|day }}–{{ week.end|day }}</span></th><th>{{ month.name|capitalize }}<br><span class="{{ sub }}">с {{ month.start|day }}</span></th></tr></thead>
+<thead><tr><th></th><th>Прошлая неделя<br><span class="{{ sub }}">{{ week.start|day }}–{{ week.end|day }}</span></th><th>{{ month.name|capitalize }}<br><span class="{{ sub }}">с {{ month.start|day }}, {{ month.start[11:16] }}</span></th></tr></thead>
 <tbody>
 <tr><td>Приехало на точку</td><td><b data-week="received">{{ week.received }}</b></td><td><b data-month="received">{{ month.received }}</b></td></tr>
 <tr><td>Выдано клиентам</td><td><b data-week="issued">{{ week.issued }}</b></td><td><b data-month="issued">{{ month.issued }}</b></td></tr>

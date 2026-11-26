@@ -4,31 +4,47 @@
   (routes_mypoint._issued, the rule of «Выдано»), the clients handed over, the orders sold from «На ОТХ» by the point itself (the event of
   order_report.OTH_SOLD_EVENT, never the office working as the point — order_report.oth_sold_orders' rule) and the month's KPI
   (income_view's own count). The sums in rubles only while the point may see «Доход» (the caller says so); never a purchase or a price.
-- «Требует действия сейчас»: the orders on the way whose delivery day has passed and no «Приехал» yet, the orders waiting at the point
-  for STALE_DAYS and more (beside the returns of today, point_notify.returns_today), each with its link to «Рабочее место».
+- «Требует действия сейчас» (the owner 2026-11-26): beside the returns of today (point_notify.returns_today), the orders on the way and no
+  «Приехал» yet whose delivery day (WebMIM's) was LATE_DAYS and more ago, or — with no delivery day — on «Перемещение на точку» for
+  MOVING_HOURS and more; each with its link to «Рабочее место». Not the orders waiting at the point: the panel has its own rule for them
+  (they go to the return's agreement / «На ОТХ» by themselves).
+- «Текущий период»: the month from its 1st day MONTH_HOUR:00 (the owner 2026-11-26); the KPI and the rubles stay those of the calendar
+  month and days (order_report's own count).
 - «Другие точки»: every point's counts (came, handed out, the share of «Приехал» marked in time) — names and numbers only, no money, no
-  client; the owner switches the tab off (COMPARE_OFF_KEY, on by default).
+  client; the owner, the partner or the chats' manager switches the tab off (COMPARE_OFF_KEY, on by default).
 
 Nothing here sends anything or changes an order; nothing of the purchase or the prices is read."""
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
 LATE_DAYS = 1          # «Едут»: the delivery day was this many days ago (yesterday) and no «Приехал»
-STALE_DAYS = 5         # «На точке»: the client has not come for this many days
+MOVING_HOURS = 30      # «Перемещение на точку» with no delivery day: this many hours on the stage and no «Приехал»
+MONTH_HOUR = 8         # «текущий период»: the month starts on its 1st day at 08:00
 ON_TIME_DAYS = 1       # «Приехал» marked on the delivery day or the next one counts as in time
 SHOWN = 20             # the rows of each list of «Требует действия сейчас»
 COMPARE_OFF_KEY = "point_compare_off"      # app_state «1»: the tab «Другие точки» is hidden (the owner's switch; on by default)
 MONTHS = ("январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь")
 
 
-def month_start(today: str) -> str:
-    return today[:8] + "01"
+def month_start(now: str) -> str:
+    """The start of the current period: the 1st day of the month at MONTH_HOUR:00; before it, of the month before."""
+    start = "%s01T%02d:00:00" % (now[:8], MONTH_HOUR)
+    if now[:19] >= start:
+        return start
+    first = date.fromisoformat(now[:8] + "01") - timedelta(days=1)
+    return "%s01T%02d:00:00" % (first.isoformat()[:8], MONTH_HOUR)
 
 
-def month_name(today: str) -> str:
-    return MONTHS[int(today[5:7]) - 1]
+def month_name(start: str) -> str:
+    return MONTHS[int(start[5:7]) - 1]
+
+
+def _within(at, start: str, end: str) -> bool:
+    """`at` from `start` (a day or a moment) to the day `end` included."""
+    at = str(at or "")
+    return at >= start and at[:10] <= end[:10]
 
 
 def _after(day: str) -> str:
@@ -36,21 +52,21 @@ def _after(day: str) -> str:
 
 
 def oth_sold(conn, point_id, start: str, end: str) -> int:
-    """The orders of the point it sold itself from «На ОТХ» from `start` to `end` (days, both included): the point's event of the sale,
+    """The orders of the point it sold itself from «На ОТХ» from `start` (a day or a moment) to the day `end`: the point's event of the sale,
     the office working as the point not counted (order_report.oth_sold_orders' rule)."""
     from . import order_report
     from .orders import ACTING_MARK
     return int(conn.execute(
         "SELECT COUNT(DISTINCT e.order_id) FROM order_event e JOIN order_card c ON c.id = e.order_id WHERE c.point_id = ? AND e.kind = 'point' "
         "AND (e.text = ? OR e.text LIKE ?) AND instr(e.author, ?) = 0 AND e.at >= ? AND e.at < ?",
-        (point_id, order_report.OTH_SOLD_EVENT, order_report.OTH_SOLD_EVENT + ":%", ACTING_MARK, start[:10], _after(end))).fetchone()[0])
+        (point_id, order_report.OTH_SOLD_EVENT, order_report.OTH_SOLD_EVENT + ":%", ACTING_MARK, start, _after(end))).fetchone()[0])
 
 
 def counts(conn, point_id, start: str, end: str, issued: List[dict]) -> Dict[str, int]:
     """{received, issued, handed, oth} of the point from `start` to `end`; `issued` — the rows of «Выдано» (their «at»)."""
     from . import point_notify
     out = point_notify.week_counts(conn, point_id, start, end)
-    out["issued"] = sum(1 for r in issued if start <= str(r["at"])[:10] <= end)
+    out["issued"] = sum(1 for r in issued if _within(r["at"], start, end))
     out["oth"] = oth_sold(conn, point_id, start, end)
     return out
 
@@ -60,7 +76,7 @@ def on_time(conn, point_id, start: str, end: str) -> Dict[str, int]:
     a delivery day, those marked on that day or within ON_TIME_DAYS after it (an earlier mark is in time too)."""
     rows = conn.execute("SELECT a.arrived_at, c.delivery_date FROM order_arrival a JOIN order_card c ON c.id = a.order_id "
                         "WHERE COALESCE(a.point_id, c.point_id) = ? AND a.arrived_at >= ? AND a.arrived_at < ? AND a.undone_at IS NULL "
-                        "AND a.none_at IS NULL AND c.delivery_date != ''", (point_id, start[:10], _after(end))).fetchall()
+                        "AND a.none_at IS NULL AND c.delivery_date != ''", (point_id, start, _after(end))).fetchall()
     dated = in_time = 0
     for arrived, planned in rows:
         try:
@@ -76,30 +92,36 @@ def _label(number, card_id) -> str:
     return str(number or card_id)
 
 
-def to_act(conn, point_id, today: str) -> Dict[str, List[dict]]:
-    """«Требует действия сейчас»: {"late": the orders on «Заказ оформлен» / «Перемещение на точку» whose delivery day was LATE_DAYS and more
-    ago, «stale»: those on «Товар на точке» for STALE_DAYS and more}, the oldest first; the point's own sales are not of «Рабочее место»."""
+def to_act(conn, point_id, now: str) -> List[dict]:
+    """«Требует действия сейчас»: the orders on «Заказ оформлен» / «Перемещение на точку» whose delivery day was LATE_DAYS and more ago,
+    and those on «Перемещение на точку» with no delivery day for MOVING_HOURS and more — the oldest first; the point's own sales are not
+    of «Рабочее место»."""
     from . import order_points
-    late_day = (date.fromisoformat(today[:10]) - timedelta(days=LATE_DAYS)).isoformat()
-    stale_day = (date.fromisoformat(today[:10]) - timedelta(days=STALE_DAYS - 1)).isoformat()
-    late = conn.execute("SELECT c.id, c.webmim_number, c.client_name, c.delivery_date FROM order_card c JOIN order_stage s ON s.id = c.stage_id "
-                        "WHERE c.point_id = ? AND s.code IN ('placed', 'moving') AND c.delivery_date != '' AND c.delivery_date <= ? "
-                        "ORDER BY c.delivery_date, c.id", (point_id, late_day)).fetchall()
-    stale = conn.execute("SELECT c.id, c.webmim_number, c.client_name, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id "
-                         "WHERE c.point_id = ? AND s.code = 'at_point' AND c.entered_at != '' AND c.entered_at < ? ORDER BY c.entered_at, c.id",
-                         (point_id, stale_day)).fetchall()
-    mine = order_points.own_sales(conn, point_id) if late or stale else set()
-    day = date.fromisoformat(today[:10])
-
-    def days(text) -> int:
-        try:
-            return (day - date.fromisoformat(str(text)[:10])).days
-        except ValueError:
-            return 0
-    return {"late": [{"id": r[0], "label": _label(r[1], r[0]), "client": r[2] or "", "day": r[3], "days": days(r[3])}
-                     for r in late if r[0] not in mine][:SHOWN],
-            "stale": [{"id": r[0], "label": _label(r[1], r[0]), "client": r[2] or "", "day": str(r[3])[:10], "days": days(r[3])}
-                      for r in stale if r[0] not in mine][:SHOWN]}
+    today = date.fromisoformat(now[:10])
+    late_day = (today - timedelta(days=LATE_DAYS)).isoformat()
+    moving_since = (datetime.fromisoformat(now[:19]) - timedelta(hours=MOVING_HOURS)).isoformat(timespec="seconds")
+    rows = conn.execute("SELECT c.id, c.webmim_number, c.client_name, c.delivery_date, c.entered_at FROM order_card c "
+                        "JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND ((s.code IN ('placed', 'moving') AND c.delivery_date != '' "
+                        "AND c.delivery_date <= ?) OR (s.code = 'moving' AND c.delivery_date = '' AND c.entered_at != '' AND c.entered_at <= ?)) "
+                        "ORDER BY COALESCE(NULLIF(c.delivery_date, ''), c.entered_at), c.id", (point_id, late_day, moving_since)).fetchall()
+    mine = order_points.own_sales(conn, point_id) if rows else set()
+    found = []
+    for cid, number, client, planned, entered in rows:
+        if cid in mine:
+            continue
+        if planned:
+            try:
+                days = (today - date.fromisoformat(str(planned)[:10])).days
+            except ValueError:
+                continue
+            found.append({"id": cid, "label": _label(number, cid), "client": client or "", "day": planned, "days": days, "hours": None})
+        else:
+            try:
+                hours = int((datetime.fromisoformat(now[:19]) - datetime.fromisoformat(str(entered)[:19])).total_seconds() // 3600)
+            except ValueError:
+                hours = MOVING_HOURS
+            found.append({"id": cid, "label": _label(number, cid), "client": client or "", "day": "", "days": None, "hours": hours})
+    return found[:SHOWN]
 
 
 def money(conn, point_id: int, periods: Dict[str, tuple], report: dict) -> Dict[str, float]:
@@ -138,5 +160,5 @@ def compare(conn, known: List[dict], start: str, end: str, issued_of, mine: Opti
     for p in known:
         came = point_notify.week_counts(conn, p["id"], start, end)
         rows.append(dict(on_time(conn, p["id"], start, end), id=p["id"], name=p["name"], received=came["received"],
-                         issued=sum(1 for r in issued_of(p["id"]) if start <= str(r["at"])[:10] <= end), mine=p["id"] == mine))
+                         issued=sum(1 for r in issued_of(p["id"]) if _within(r["at"], start, end)), mine=p["id"] == mine))
     return rows

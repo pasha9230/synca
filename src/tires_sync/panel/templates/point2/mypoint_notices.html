@@ -20,7 +20,7 @@
 {{ tabs(tab, compare_on, pq) }}
 {% if tab == "others" %}{{ others(True, period, cmp_start, cmp_end, cmp_rows, month_name, on_time_days, point, choose) }}
 {% else %}
-{{ act_block(True, point, choose, returns, act, notify, late_days, stale_days) }}
+{{ act_block(True, point, choose, returns, act, notify) }}
 <section class="p2-box" aria-labelledby="nt-tasks-h" data-notices-tasks><div class="p2-section"><h2 id="nt-tasks-h">Задачи офиса{% if office_tasks %} <span class="p2-count">{{ office_tasks|length }}</span>{% endif %}</h2>
 {% if office_tasks %}<ul class="p2-list">{% for t in office_tasks %}<li data-office-task="{{ t.id }}"><div class="p2-grow">
 <span><b>{{ t.kind_label }}{% if t.title %}: {{ t.title }}{% endif %}</b>{% if t.urgent %} <span class="p2-tag p2-tag--err" data-task-urgent>!</span>{% endif %}</span>

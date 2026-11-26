@@ -328,23 +328,27 @@ def test_the_page_is_called_summaries_everywhere_and_keeps_its_marks(tmp_path, c
     assert 'aria-label="Сводки' in head and "Оповещения точки" not in work
 
 
-def test_what_needs_an_action_now_links_the_late_and_the_long_waiting_orders(tmp_path, clock, view):
+def test_what_needs_an_action_now_links_the_late_orders_only(tmp_path, clock, view):
     app, owner, tok, conn, a, b, mine = env(tmp_path, view)
     late = staged(conn, a, "moving", "5100001", delivery="2026-11-24")
     staged(conn, a, "moving", "5100002", delivery="2026-11-26")                      # today: not late yet
-    stale = staged(conn, a, "at_point", "5100003", entered="2026-11-20T09:00:00")
-    staged(conn, a, "at_point", "5100004", entered="2026-11-24T09:00:00")            # two days: not yet
+    long_way = staged(conn, a, "moving", "5100006", entered="2026-11-25T03:00:00")   # no delivery day: 31 hours on the way
+    staged(conn, a, "moving", "5100007", entered="2026-11-25T06:00:00")              # 28 hours: not yet
+    staged(conn, a, "placed", "5100008", entered="2026-11-10T06:00:00")              # «Заказ оформлен» with no day: the supplier's, not late
+    staged(conn, a, "at_point", "5100003", entered="2026-11-10T09:00:00")            # waiting at the point: the panel's own rule, not here
     staged(conn, b, "moving", "5100005", delivery="2026-11-20")                      # another point's
     page = mine.get("/my-point/notices").get_data(as_text=True)
-    assert 'data-act-late="%d"' % late in page and "5100002" not in page and "5100005" not in page
-    assert 'href="/my-point?tab=moving#order-%d"' % late in page and "2 дня назад" in page
-    assert 'data-act-stale="%d"' % stale in page and 'href="/my-point?tab=here#order-%d"' % stale in page and "5100004" not in page
-    assert "data-notices-no-returns" not in page
+    assert 'data-act-late="%d"' % late in page and 'href="/my-point?tab=moving#order-%d"' % late in page and "2 дня назад" in page
+    assert 'data-act-late="%d"' % long_way in page and "31 час" in page
+    for other in ("5100002", "5100007", "5100008", "5100003", "5100005"):
+        assert other not in page, other
+    assert "data-act-stale" not in page and "data-notices-no-returns" not in page
 
 
 def test_one_block_of_counts_the_week_and_the_month_without_rubles_while_the_income_is_hidden(tmp_path, clock, view):
     app, owner, tok, conn, a, b, mine = env(tmp_path, view)
-    for order, at in ((1, "2026-11-17T10:00:00"), (2, "2026-11-25T10:00:00"), (3, "2026-11-02T10:00:00")):
+    for order, at in ((1, "2026-11-17T10:00:00"), (2, "2026-11-25T10:00:00"), (3, "2026-11-02T10:00:00"),
+                      (4, "2026-11-01T09:00:00"), (6, "2026-11-01T07:59:00"), (9, "2026-10-31T10:00:00")):   # the month from the 1st, 08:00
         conn.execute("INSERT INTO order_arrival (order_id, arrived_at, point_id, pieces) VALUES (?,?,?,4)", (order, at, a))
     sold = staged(conn, a, "done", "5100010")
     conn.execute("INSERT INTO order_event (order_id, at, author, kind, text) VALUES (?,?,?,?,?)", (sold, "2026-11-18T10:00:00", "gamma", "point", pn_sold()))
@@ -353,7 +357,7 @@ def test_one_block_of_counts_the_week_and_the_month_without_rubles_while_the_inc
                  (acting, "2026-11-18T10:00:00", "Владелец за точку «Альфа»", "point", pn_sold()))
     conn.commit()
     page = mine.get("/my-point/notices").get_data(as_text=True)
-    assert 'data-week="received">1<' in page and 'data-month="received">3<' in page
+    assert 'data-week="received">1<' in page and 'data-month="received">4<' in page and "08:00" in page
     assert 'data-week="oth">1<' in page and 'data-month="oth">1<' in page
     assert "data-summary-money" not in page and "₽" not in page.split("data-notices-week")[1].split("</section>")[0]
     assert "считается с 01.12" in page
@@ -388,9 +392,43 @@ def test_other_points_show_names_and_counts_only_and_the_owner_hides_the_tab(tmp
     assert "Секретный" not in page and "5100020" not in page and "₽" not in page.split("data-compare")[1]
     week = mine.get("/my-point/notices?tab=others&period=week").get_data(as_text=True)
     assert "16.11–22.11" in week
-    assert post(mine, "/points/notify", "tok", what="compare", on="0").status_code == 403    # the owner's switch only
+    assert post(mine, "/points/notify", "tok", what="compare", on="0").status_code == 403    # never the point
     post(owner, "/points/notify", tok, what="compare", on="")
     hidden = mine.get("/my-point/notices?tab=others").get_data(as_text=True)
     assert "data-compare-table" not in hidden and "data-summary-tabs" not in hidden and "<h1>Сводки</h1>" in hidden
     post(owner, "/points/notify", tok, what="compare", on="1")
     assert "data-compare-table" in mine.get("/my-point/notices?tab=others").get_data(as_text=True)
+
+
+def staff(app, conn, login_, role):
+    users.add_user(conn, login_, "pw-12345678", "2026-10-13T12:00:00", role=role)
+    conn.commit()
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["user"] = login_
+        session["epoch"] = store.get_session_epoch(conn, login_)
+        session["csrf"] = "tok"
+    return client
+
+
+def test_the_admin_and_the_operator_switch_other_points_and_the_income_the_viewer_does_not(tmp_path, clock):
+    from tires_sync import order_report
+    from tires_sync.point_summary import compare_shown
+    app, owner, tok, conn, a, b, mine = env(tmp_path)
+    for login_, role in (("pavel", "partner"), ("chatty", "chats")):
+        client = staff(app, conn, login_, role)
+        page = client.get("/points/notify").get_data(as_text=True)
+        assert "data-switch-compare" in page and "data-switch-income" in page, role
+        post(client, "/points/notify", "tok", what="compare", on="")
+        assert not compare_shown(conn), role
+        post(client, "/points/notify", "tok", what="compare", on="1")
+        assert compare_shown(conn), role
+        post(client, "/points/notify", "tok", what="income", on="1")
+        assert order_report.income_shown(conn), role
+        post(client, "/points/notify", "tok", what="income", on="")
+        assert not order_report.income_shown(conn), role
+    looker = staff(app, conn, "vera", "viewer")
+    assert "data-switch-compare" not in looker.get("/points/notify").get_data(as_text=True)
+    assert post(looker, "/points/notify", "tok", what="income", on="1").status_code == 403
+    assert post(mine, "/points/notify", "tok", what="income", on="1").status_code == 403
+    assert not order_report.income_shown(conn) and compare_shown(conn)
