@@ -17,6 +17,7 @@ here too: «Выдан» is «выдал», «На точке» is «на точ
 question of the seventh day on «На ОТХ» («Выдали» / «На точке», order_oth), and «Отменить» of a press that moved an order (point_log.undo)."""
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 import sqlite3
@@ -74,6 +75,18 @@ def _cards(conn, point_id) -> list:
         % (",".join("?" * len(STAGES)), RAISE), (point_id,) + STAGES)]
     mine = points.own_sales(conn, point_id) if ids else set()                  # its own sales are «Заказы»'s (the owner 2026-10-30)
     return [orders.get_card(conn, card_id) for card_id in ids if card_id not in mine]
+
+
+def _arrival(conn, point_id, now: str):
+    """«Заказ должен был приехать — отметьте» (arrival_remind, the owner 2026-11-27): the point's own person makes the showing, the office
+    working as the point only sees the last one. Never raises: a busy base shows no reminder."""
+    from .. import arrival_remind
+    try:
+        return arrival_remind.current(conn, point_id, now, record=own_point() is not None and current_user()["as_point"] is None)
+    except Exception:                                                           # noqa: BLE001 - a hint; the page itself opens
+        conn.rollback()
+        logging.getLogger("tires_sync.panel").exception("the arrival reminder of point %s", point_id)
+        return None
 
 
 def _own_card(conn, card_id, point_id) -> dict:
@@ -727,6 +740,7 @@ def register(app) -> None:
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
                                returns=returns, return_groups=groups,
+                               arrival=_arrival(conn, point_id, now),
                                return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK, not_taken_next=oth_point_return.NOT_TAKEN_NEXT,
                                buyer_ask=oth_point_return.BUYER_ASK, comment_max=oth_point_return.COMMENT_MAX,
                                undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL,
@@ -1051,6 +1065,9 @@ def register(app) -> None:
             items.append({"key": "return-day-%s-%s" % (today["date"].replace("-", ""), today["sound"]), "title": order_oth.RETURN_DAY_TITLE,
                           "text": "%s Заказы: %s." % (order_oth.RETURN_DAY_BODY, ", ".join("№ %s" % n for n in today["orders"])),
                           "href": "/my-point?tab=return"})
+        late = _arrival(conn, point_id, now)                                    # «Заказ должен был приехать — отметьте» (2026-11-27)
+        if late:
+            items.append({k: late[k] for k in ("key", "title", "text", "href")})
         items += [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"
                    else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "",
                    "href": HERE if card["stage"]["code"] == "at_point" else "/my-point"} for card in cards]     # «Едут» is the page itself

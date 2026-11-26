@@ -23,7 +23,8 @@ ASK_GAP_MINUTES = 120              # not three asks in a row: two hours apart at
 WHO_MAX, REASON_MAX = 60, 200
 HISTORY_SHOWN = 500
 KINDS = {"notify_off": "Выключил уведомления", "notify_on": "Включил уведомления", "task_read": "Прочитал задачу офиса",
-         "task_done": "Выполнил задачу офиса", "allowed": "Разрешил уведомления в браузере", "refused": "Запретил уведомления в браузере"}
+         "task_done": "Выполнил задачу офиса", "allowed": "Разрешил уведомления в браузере", "refused": "Запретил уведомления в браузере",
+         "arrival_remind": "Напоминание: отметить приезд"}     # arrival_remind (the owner 2026-11-27): a showing of the reminder
 RETURNS_MARK = "Есть возвраты!"
 
 log = logging.getLogger("tires_sync.point_notify")
