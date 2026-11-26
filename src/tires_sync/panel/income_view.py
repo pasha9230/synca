@@ -146,10 +146,7 @@ def build(conn, point_id: int, args, today: str) -> dict:
                       "kpi": round(sum(e["kpi"] for e in entries), 2), "adj": round(sum(e["adj"] for e in entries), 2), "orders": []}
     view["income"]["total"] = round(sum(view["income"][k] for k in ("issue", "bonus", "kpi", "adj")), 2)
     view["adjust"] = [e for e in entries if e["kind"] == "adj"]
-    by_order: Dict[int, dict] = {}
-    for e in entries:                                     # an order sold apart from its arrival (order_report.SALE_ITEM): the sale
-        if e["order"] and (e["order"] not in by_order or not e.get("arrived")):
-            by_order[e["order"]] = e
+    by_order = {e["order"]: e for e in entries if e["order"]}     # one item an order: the end of the chain of its tyres
     if f["tab"] == "income":
         cards = _cards(conn, [e["order"] for e in entries if e["kind"] == "order"])
         rows = []
@@ -160,6 +157,10 @@ def build(conn, point_id: int, args, today: str) -> dict:
             if _matches(f["q"], card):
                 rows.append(dict(e, card=card))
         view["rows"] = _sorted(rows, f, "issue")
+        waiting = order_report.waiting(conn, today, point_id)           # «к начислению»: shown apart, not in the sums above
+        cards = _cards(conn, [w["order"] for w in waiting])
+        view["waiting"] = [dict(w, card=_card(cards, w["order"])) for w in waiting]
+        view["waiting_sum"] = round(sum(w["expected"] for w in waiting), 2)
     elif f["tab"] == "bonus":
         view["rows"] = _bonus_rows(conn, point_id, f, by_order, rates)
     else:
@@ -179,6 +180,7 @@ def _bonus_rows(conn, point_id: int, f: dict, by_order: Dict[int, dict], rates: 
     bonus = {oid for oid, e in by_order.items() if e["handoff"] or e["oth"]}
     cards = _cards(conn, handed | bonus)
     per_tyre = f["to"] >= order_report.HANDOFF_PER_TYRE_FROM
+    whole, taken = order_report.oth_pieces(conn, handed | bonus)            # the tyres from its own «На ОТХ»: no bonus of a handed client
     rows = []
     for oid in handed | bonus:
         card = _card(cards, oid)
@@ -193,7 +195,9 @@ def _bonus_rows(conn, point_id: int, f: dict, by_order: Dict[int, dict], rates: 
             deal, amount, expected = "done", None, False             # closed outside the period: its bonus is in that period
         else:
             deal, expected = "work", True
-            amount = round(rates["handoff_fee"] * card["pieces"], 2) if per_tyre else rates["handoff_fee"]
+            own = order_report.from_oth(oid, ("id", int(point_id)), card["pieces"], whole, taken).get(int(point_id), 0)
+            rest = max(card["pieces"] - own, 0)
+            amount = round(rates["handoff_fee"] * rest, 2) if per_tyre else (rates["handoff_fee"] if rest else 0.0)
         if f["deal"] != "all" and deal != f["deal"]:
             continue
         if deal == "done" and amount and not _pay_ok(entry, f) or deal != "done" and f["pay"] == "paid":

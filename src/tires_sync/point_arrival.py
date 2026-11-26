@@ -8,20 +8,26 @@ driver («На возврат», «Вернули поставщику») — al
 answers «Шины физически не приезжали?» (no by default; the answer «да» is of the money right): «да» takes the fee of the order off (the
 order's journal says so), «Вернуть отметку» gives it back.
 
-An arrival is paid once (the review 2026-11-26): the tyres an order took from «На ОТХ» are not its own arrival (their first order's
-arrival paid them, or they lay at the point already), so an order that takes them and is refused again pays nothing. A sale of them is an
-issue (the owner 2026-11-26): the order that sells them gets the fee of the issue like any sold order, and the bonus of «На ОТХ» on top of
-it when the point itself sold (order_report.fee_parts) — the arrival that brought them stays paid as it was.
+One fee a chain (the owner 2026-11-26, it replaces «приезд + продажа с ОТХ»): the point is paid for the END of the way of the tyres,
+not for the arrival. Came → … → sold («Выполнено»: the sale pays, order_report) or given back to the supplier («На возврат» /
+«Вернули поставщику»: the arrival pays, on that day). Tyres lying on «На ОТХ» (the order itself, its record of storage, «Согласование
+возврата») wait: nothing is paid until they are sold or go back. Sold from «На ОТХ» — by the office, by the point, to a new client
+(oth_swap) — the sale is the one fee of the chain (and the bonus of «На ОТХ» when the point itself sold); the arrival that brought
+them pays nothing. A part sold, the rest given back: the rest is paid by the arrival. The tyres an order took from «На ОТХ» are not its
+own arrival. A cancel with no tyres on «На ОТХ» (no record of storage) ends the chain: paid on its day, as before.
 
 One row an order (order_arrival): the moment it came (the first of this stay), the point and the tyres of its own at that moment, the
 moment it left the point without a sale (the day of the fee), the undo, the «не приезжали» of the office. Written by orders.move_card
 (and orders.create_card on «На точке»), so the office's board, the card, the bulk move, the chats and the point's «Рабочее место»
-(also «Работать как точка») give the same result. Counted from ARRIVAL_FROM: earlier arrivals are never recounted."""
+(also «Работать как точка») give the same result. Counted from ARRIVAL_FROM (every arrival written)."""
 from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional
 
-ARRIVAL_FROM = "2026-11-27"          # the first day the arrival pays (with POINT_FEE_PER_TYRE_FROM): a past report is never recounted
+# the owner 2026-11-26: «с самого начала сотрудничества» — every arrival the panel wrote pays by the rule of the chain: order_arrival is
+# written from this day (the deploy of #74), nothing earlier exists; a day the office settled before the rule gets no new item
+# (order_report.OLD_RULE_BEFORE)
+ARRIVAL_FROM = "2026-11-26"
 HERE = "at_point"
 BEFORE = ("new", "talk", "wait", "placed", "moving", "from_point")     # the stages before the tyres come: a move back there is an undo
 UNDONE = "Начисление точке за выдачу снято: этап «На точке» отменён (шины не считаются полученными)"
@@ -95,26 +101,63 @@ def merged(conn, order_id: int, sources: Iterable[int]) -> None:
 def back_from_merge(conn, order_id: int, code: str, kind: str) -> None:
     """A source given back by «Разъединить» stands on its stage again (no commit): on an open stage before «На ОТХ» it has not left the
     point — its day of the fee goes."""
-    from . import orders
-    if kind == "open" and code not in orders.RETURN_STAGES:
+    if kind == "open" and code not in GONE_BACK:                   # «На ОТХ» too: the tyres wait there, no end of the chain
         conn.execute("UPDATE order_arrival SET left_at = NULL WHERE order_id = ?", (int(order_id),))
 
 
+GONE_BACK = ("return_given", "return")    # «На возврат», «Вернули поставщику»: the tyres go back to the supplier — the end of the chain
+WAITING = ("oth", "return_agree")          # «На ОТХ», «Согласование возврата»: the tyres lie at the point, the chain goes on
+
+
+def _gone_back(was_code: str, code: str) -> bool:
+    """The move gives the tyres back to the supplier now (from «На ОТХ» / «Согласование возврата», or straight)."""
+    return code in GONE_BACK and was_code not in GONE_BACK
+
+
 def moved(conn, order_id: int, was_code: str, code: str, now: str, author: str, kind: str = "") -> None:
-    """orders.move_card, in its transaction: «На точке» — came; back from «На точке» to a stage before it — undone (the journal says so);
-    to «Отмена», a closed stage or «На ОТХ» / «На возврат» — the order left the point: the day of its fee without a sale."""
-    from . import orders
+    """orders.move_card, in its transaction: «На точке» — came; back from «На точке» to a stage before it — undone (the journal says so).
+    The end of the chain without a sale — the day of the fee (left_at): «На возврат» / «Вернули поставщику» (of the order, or of its record
+    of storage: the arrival is the cancelled order's), «Отмена» with no record of storage, another closed stage, «Выполнено». «На ОТХ»,
+    «Согласование возврата» and the cancel of the split (the tyres are the record's now) are no end: the tyres wait (the owner 2026-11-26).
+    A day written by the rule before (on «На ОТХ») gives way to the day of the return. The end of a holder of tyres of other arrivals (a
+    record of storage, an order that took them from «На ОТХ», its record…) is written to those arrivals too, back along the chain
+    (_upstream): a return at the end of the chain pays the first arrival (the review 2026-11-26)."""
+    from . import oth_storage
     if code == HERE:
         came(conn, order_id, now, author)
         return
+    back = _gone_back(was_code, code)
+    end = back or kind in ("closed", "won") or (kind == "lost" and oth_storage.record_of(conn, order_id) is None)
     row = _row(conn, order_id)
-    if not _active(row):
-        return
-    if was_code == HERE and code in BEFORE:
-        conn.execute("UPDATE order_arrival SET undone_at = ?, undone_by = ? WHERE order_id = ?", (now, author, int(order_id)))
-        orders.add_event(conn, int(order_id), now, author, "field", UNDONE)
-    elif not row["left_at"] and (kind in ("lost", "closed", "won") or code in orders.RETURN_STAGES):
-        conn.execute("UPDATE order_arrival SET left_at = ? WHERE order_id = ?", (now, int(order_id)))
+    if _active(row):
+        if was_code == HERE and code in BEFORE:
+            from . import orders
+            conn.execute("UPDATE order_arrival SET undone_at = ?, undone_by = ? WHERE order_id = ?", (now, author, int(order_id)))
+            orders.add_event(conn, int(order_id), now, author, "field", UNDONE)
+            return
+        if (back and was_code in WAITING) or (end and not row["left_at"]):
+            conn.execute("UPDATE order_arrival SET left_at = ? WHERE order_id = ?", (now, int(order_id)))
+    if end:
+        for up in _upstream(conn, int(order_id)):
+            if back:                                                    # the return: its day, whatever was written
+                conn.execute("UPDATE order_arrival SET left_at = ? WHERE order_id = ? AND undone_at IS NULL", (now, up))
+            else:
+                conn.execute("UPDATE order_arrival SET left_at = ? WHERE order_id = ? AND left_at IS NULL AND undone_at IS NULL", (now, up))
+
+
+def _upstream(conn, order_id: int, seen: Optional[set] = None) -> List[int]:
+    """The orders whose tyres `order_id` holds: the order of a record of storage, the orders it took tyres from «На ОТХ» of (not given
+    back), and theirs, back to the first arrival."""
+    from . import oth_storage
+    seen = seen if seen is not None else {order_id}
+    found = [oth_storage.source_of(conn, order_id)]
+    found += [r[0] for r in conn.execute("SELECT DISTINCT from_order FROM order_item_oth WHERE order_id = ? AND undone_at = ''", (order_id,))]
+    out: List[int] = []
+    for up in found:
+        if up is not None and up not in seen:
+            seen.add(up)
+            out += [up] + _upstream(conn, up, seen)
+    return out
 
 
 def mark_none(conn, order_id: int, now: str, author: str) -> bool:
@@ -162,56 +205,135 @@ def _paid(conn) -> Dict[int, dict]:
             "SELECT order_id, point_id, arrived_at, left_at, pieces FROM order_arrival WHERE arrived_at != '' AND undone_at IS NULL "
             "AND none_at IS NULL AND substr(arrived_at, 1, 10) >= ? AND point_id IS NOT NULL AND pieces > 0", (ARRIVAL_FROM,)):
         if order_id not in records:
-            out[order_id] = {"point_id": point_id, "day": str(left_at or arrived_at)[:10], "pieces": int(pieces)}
+            out[order_id] = {"point_id": point_id, "day": str(left_at or arrived_at)[:10], "pieces": int(pieces), "left": bool(left_at),
+                             "arrived": str(arrived_at)[:10]}
     return out
 
 
 def unsold(conn, start: str, end: str) -> List[dict]:
-    """The orders the point got and that left it without a sale (ARRIVAL_FROM on), by the day they left (a cancel, «На ОТХ», a return) in
-    start..end: cancelled after they came, on «На ОТХ» / «На возврат», given back to the supplier, finished without a sale. Not those
-    still on «На точке» (in work: the sale or the cancel says what they are), not a record of storage (its tyres are the cancelled order's),
-    not an order with a sale (the sale counts it, order_report) but one sold from «На ОТХ» itself (sold_from_oth: «sold», its arrival and
-    its sale are two items), never the tyres taken from «На ОТХ» (paid by their own arrival). The point and the tyres are those of the
-    arrival. [{order, point_id, day, pieces, sold?}]."""
-    from . import orders
+    """The arrivals (ARRIVAL_FROM on) whose chain ended without a sale of their tyres, by the day it ended (left_at) in start..end: given
+    back to the supplier (the order or its record of storage on «На возврат» / «Вернули поставщику»), cancelled with no record, closed.
+    Not those still on «На точке» or waiting on «На ОТХ» / «Согласование возврата» (the order or its record: the chain goes on), not a
+    record of storage (its tyres are the cancelled order's), not an order with a sale of its own (the sale is the fee of the chain,
+    order_report). The tyres sold from «На ОТХ» by another order (taken from the order or its record, the sale not reversed) and the
+    sale of the record itself are that sale's: the arrival pays the rest only. The point is the arrival's. [{order, point_id, day, pieces}]."""
+    return [dict(found, order=order_id) for order_id, found, ended in _chains(conn) if ended and start <= found["day"] <= end]
+
+
+def waiting(conn) -> List[dict]:
+    """The chains with no end yet (the owner 2026-11-26: «к начислению», shown apart, never in the sums): the tyres came (ARRIVAL_FROM
+    on) and are still at the point — on «На точке», on «На ОТХ», agreeing the return, in the record of storage of the cancelled order,
+    taken by an order not sold yet. The tyres a sale took already are that sale's. [{order, point_id, arrived (its day), pieces, record}]."""
+    return [dict(found, order=order_id) for order_id, found, ended in _chains(conn) if not ended]
+
+
+def _chains(conn) -> List[tuple]:
+    """(order, {point_id, day, pieces (not sold further down the chain), arrived, record}, ended) of every arrival that pays, with no
+    sale of its own. The chain is followed to its end (the review 2026-11-26): the record of storage of a cancelled order, the orders that
+    took tyres from «На ОТХ» (of the order or a record), their own records, and so on. It ends when nothing of it waits any more: no
+    holder on «На точке» / «На ОТХ» / agreeing the return, no taker in work. The tyres a sale took are that sale's; the day is the last
+    end of the chain (the return written by `moved`, the last sale)."""
     paid = _paid(conn)
     if not paid:
         return []
     stages = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT c.id, g.code, g.kind FROM order_card c JOIN order_stage g ON g.id = c.stage_id")}
-    sold = _sold_notes(conn)
-    from_oth = _apart(conn, paid, sold)
+    sold: Dict[int, tuple] = {}                                           # order → (tyres, the day of its first sale)
+    for note, pieces, day in conn.execute("SELECT note, SUM(pieces), MIN(day) FROM sale WHERE source = 'order' AND reversed_at IS NULL "
+                                          "AND note LIKE 'Заказ №%' GROUP BY note"):
+        digits = str(note)[len("Заказ №"):]
+        if digits.isdigit():
+            sold[int(digits)] = (int(pieces), str(day))
+    takers: Dict[int, List[tuple]] = {}
+    for order_id, source, qty in conn.execute("SELECT order_id, from_order, SUM(qty) FROM order_item_oth WHERE undone_at = '' "
+                                              "GROUP BY order_id, from_order"):
+        takers.setdefault(source, []).append((order_id, int(qty)))
+    from .oth_storage import OF, record_ids
+    records = record_ids(conn)
+    record_of: Dict[int, int] = {}
+    for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE ?", (OF.replace("%d", "%"),)):
+        digits = key.rsplit(":", 1)[1]
+        if digits.isdigit() and str(value).strip().isdigit():
+            record_of[int(digits)] = int(str(value).strip())
+
+    source_of = {x: a for a, x in record_of.items()}
+    parents: Dict[int, List[tuple]] = {}                                  # holder → [(where its tyres came from, how many; None — all)]
+    for x, a in source_of.items():
+        parents.setdefault(x, []).append((a, None))
+    for source, found in takers.items():
+        for order_id, qty in found:
+            parents.setdefault(order_id, []).append((source, qty))
+
+    def nexts(holder: int) -> List[tuple]:
+        kind = stages.get(holder, ("", ""))[1]
+        return ([(record_of[holder], None)] if kind == "lost" and holder in record_of else []) + takers.get(holder, [])
+
+    below: Dict[int, int] = {}
+    shares: Dict[int, Dict[int, int]] = {}
+
+    def sold_below(holder: int, path: frozenset) -> int:
+        """The tyres a sale took from what `holder` held (further down the chain included), each sold tyre counted once."""
+        if holder in below:
+            return below[holder]
+        got = sold[holder][0] if holder in records and holder in sold else 0  # the record sold itself («Выполнено» by the office)
+        for nxt, qty in nexts(holder):
+            if nxt in path:
+                continue
+            if qty is not None and nxt in sold:                           # the taker sold: those tyres are its sale's
+                got += qty
+            else:
+                got += share(nxt, path | {holder}).get(holder, 0)
+        below[holder] = got
+        return got
+
+    def share(holder: int, path: frozenset) -> Dict[int, int]:
+        """What of the tyres sold below `holder` goes back up to each holder it got tyres from: its own arrival's first, the rest up the
+        chain in turn, never more than it got from each (the review 2026-11-26: a sold tyre is taken off one arrival only)."""
+        if holder in shares:
+            return shares[holder]
+        rest = sold_below(holder, path) - (paid[holder]["pieces"] if holder in paid and holder not in records else 0)
+        out: Dict[int, int] = {}
+        for up, qty in parents.get(holder, []):
+            if qty is None:                                               # a record and its order: what the order brought into it
+                qty = (paid[up]["pieces"] if up in paid else 0) + sum(q for _, q in parents.get(up, []) if q is not None)
+            give = max(min(rest, qty), 0)
+            out[up], rest = out.get(up, 0) + give, rest - give
+        shares[holder] = out
+        return out
+
+    def walk(holder: int, seen: set) -> tuple:
+        """(something of what `holder` held still waits, the day of the last sale further on)."""
+        seen.add(holder)
+        code, kind = stages.get(holder, ("", ""))
+        waits, last = kind == "open" and code not in GONE_BACK, ""
+        if holder in records and holder in sold:
+            last = sold[holder][1]
+        for nxt, qty in nexts(holder):
+            if nxt in seen:
+                continue
+            if qty is not None and nxt in sold:
+                last = max(last, sold[nxt][1])
+                continue
+            wait, day = walk(nxt, seen)
+            waits, last = waits or wait, max(last, day)
+        return waits, last
+
     out = []
     for order_id, found in sorted(paid.items()):
-        code, kind = stages.get(order_id, ("", ""))
-        if not (start <= found["day"] <= end) or code == HERE or (kind == "open" and code not in orders.RETURN_STAGES) or not code:
+        if order_id not in stages or order_id in sold:                    # a sale of its own: the sale is the fee of the chain
             continue
-        if "Заказ №%d" % order_id in sold:
-            if order_id not in from_oth:
-                continue
-            found = dict(found, sold=True)                # the old way (no record of storage): the arrival stays, the sale is the issue
-        out.append(dict(found, order=order_id))
+        got = sold_below(order_id, frozenset())
+        waits, last = walk(order_id, set())
+        pieces = found["pieces"] - min(got, found["pieces"])
+        ended = not waits
+        day = max(found["day"] if found["left"] else "", last[:10])
+        if pieces > 0 and (not ended or found["left"]):
+            out.append((order_id, dict(found, pieces=pieces, record=record_of.get(order_id), day=day or found["day"]), ended))
     return out
 
 
-def _sold_notes(conn) -> set:
-    return {r[0] for r in conn.execute("SELECT DISTINCT note FROM sale WHERE source = 'order' AND reversed_at IS NULL")}
-
-
-def _apart(conn, paid: Dict[int, dict], sold: set) -> set:
-    return sold_from_oth(conn, [o for o in paid if "Заказ №%d" % o in sold])
-
-
-def apart(conn) -> set:
-    """The orders whose paid arrival and sale are two items (sold from «На ОТХ» themselves, the old way): the arrival keeps the item of the
-    order («order:N», what the office may have settled already), the sale is an item of its own (order_report.SALE_ITEM)."""
-    paid = _paid(conn)
-    return _apart(conn, paid, _sold_notes(conn)) if paid else set()
-
-
 def sold_from_oth(conn, order_ids: Iterable[int]) -> set:
-    """Those of `order_ids` sold from «На ОТХ» themselves (the old way, no record of storage: order_oth.sell, by the point or the office):
-    their arrival left the point unsold (the client refused) and stays paid on the day it left; the sale is another issue (the owner
-    2026-11-26) — as the way through a record of storage, where the arrival is the cancelled order's and the sale another order's."""
+    """Those of `order_ids` sold from «На ОТХ» themselves (order_oth.sell of the order or of its record, by the point or the office, and the
+    order of the point's sale of a record, oth_point_sale): all their tyres came from «На ОТХ» of their point (order_report.oth_pieces)."""
     from . import order_oth
     ids = sorted({int(i) for i in order_ids})
     found = set()
