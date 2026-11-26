@@ -66,6 +66,12 @@ def came(conn, order_id: int, now: str, author: str) -> None:
                  (int(order_id), now, author, point[0] if point else None, own_pieces(conn, order_id)))
 
 
+def recount(conn, order_id: int) -> None:
+    """The tyres of an arrival counted again (no commit): an order made right on «На точке» gets its positions after (order_merge)."""
+    if arrived(conn, order_id):
+        conn.execute("UPDATE order_arrival SET pieces = ? WHERE order_id = ?", (own_pieces(conn, order_id), int(order_id)))
+
+
 def moved(conn, order_id: int, was_code: str, code: str, now: str, author: str, kind: str = "") -> None:
     """orders.move_card, in its transaction: «На точке» — came; back from «На точке» to a stage before it — undone (the journal says so);
     to «Отмена», a closed stage or «На ОТХ» / «На возврат» — the order left the point: the day of its fee without a sale."""
@@ -120,6 +126,9 @@ def _paid(conn) -> Dict[int, dict]:
     приезжали», with tyres of its own, the order not a record of storage."""
     from . import oth_storage
     records = oth_storage.record_ids(conn)
+    # the sources of a merge not undone: their tyres are the merged order's (its own arrival, recount), never paid twice (the review 2026-11-26)
+    records |= {r[0] for r in conn.execute("SELECT s.order_id FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id "
+                                           "WHERE m.undone_at = '' AND s.ref = 0")}
     out = {}
     for order_id, point_id, arrived_at, left_at, pieces in conn.execute(
             "SELECT order_id, point_id, arrived_at, left_at, pieces FROM order_arrival WHERE arrived_at != '' AND undone_at IS NULL "
@@ -152,21 +161,28 @@ def unsold(conn, start: str, end: str) -> List[dict]:
 
 
 def paid_oth_pieces(conn, order_ids: Iterable[int]) -> Dict[int, int]:
-    """Order → the tyres it took from «На ОТХ» whose arrival was paid already (the order they came with — the source of the record of
-    storage, or the order that stood on «На ОТХ» the old way — has a paying arrival): its fee of the issue is not paid for them again."""
-    ids = sorted({int(i) for i in order_ids if i})
+    """Order → the tyres it took from «На ОТХ» whose arrival was paid already: the order they came with (the source of the record of
+    storage, or the order that stood on «На ОТХ» the old way) was paid for its arrival without a sale — those tyres are not paid again.
+    An order sold in part (2 of 4) was paid for the tyres sold only: the rest on «На ОТХ» are not paid, the order that takes them gets
+    the fee (the review 2026-11-26). The paid tyres of a source go to its takers once, the first taken first (order_item_oth order)."""
+    ids = {int(i) for i in order_ids if i}
     if not ids:
         return {}
     from . import oth_storage
     paid = _paid(conn)
     if not paid:
         return {}
+    sold = {r[0] for r in conn.execute("SELECT DISTINCT note FROM sale WHERE source = 'order' AND reversed_at IS NULL")}
+    credit = {oid: found["pieces"] for oid, found in paid.items() if "Заказ №%d" % oid not in sold}
     out: Dict[int, int] = {}
-    for chunk in range(0, len(ids), 500):
-        part = ids[chunk:chunk + 500]
-        for order_id, from_order, qty in conn.execute(
-                "SELECT order_id, from_order, qty FROM order_item_oth WHERE undone_at = '' AND order_id IN (%s)" % ",".join("?" * len(part)), part):
-            source = oth_storage.source_of(conn, from_order) or from_order
-            if source in paid:
-                out[order_id] = out.get(order_id, 0) + int(qty)
+    for order_id, from_order, qty in conn.execute(
+            "SELECT order_id, from_order, qty FROM order_item_oth WHERE undone_at = '' ORDER BY at, item_id").fetchall():
+        source = oth_storage.source_of(conn, from_order) or from_order
+        left = credit.get(source, 0)
+        if not left:
+            continue
+        got = min(int(qty), left)
+        credit[source] = left - got
+        if order_id in ids:
+            out[order_id] = out.get(order_id, 0) + got
     return out

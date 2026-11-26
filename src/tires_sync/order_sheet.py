@@ -268,6 +268,17 @@ def _sent(conn, card_id: int) -> Dict[str, str]:
 KEEPS_BEFORE = order_report.BONUS_FROM
 
 
+def _profit_sent(conn, card_id: int) -> bool:
+    """A row of the order went to the table with its profit already: only such rows keep the old sums (KEEPS_BEFORE); a row that goes
+    there for the first time is counted as the report counts it (the review 2026-11-26)."""
+    row = conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (int(card_id),)).fetchone()
+    try:
+        written = json.loads(row[0] or "{}") if row else {}
+    except ValueError:
+        return False
+    return isinstance(written, dict) and any(isinstance(r, dict) and r.get("Прибыль ₽") not in ("", None) for r in written.values())
+
+
 def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     """Position → (profit ₽, profit %) as the analytics counts it (order_report): the margin of the position's sale (at WebMIM's price where
     there is one) less its share of the order's fixed sums (order_report.fee_parts — the fee of the issue, the bonus of a handed-over client
@@ -296,7 +307,7 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     fixed = order_report.fixes(conn)                                              # the sums the office set (point_item_fix), as the report
     item = "order:%d" % card["id"]
     theirs = got["handoff_to"][1] if got["handoff_to"] is not None and got["handoff_to"][0] == "id" else None
-    if day < KEEPS_BEFORE and not fixed.get((issued, item)) and not fixed.get((theirs, item)):
+    if day < KEEPS_BEFORE and _profit_sent(conn, card["id"]) and not fixed.get((issued, item)) and not fixed.get((theirs, item)):
         # the rows of the orders sold before the bonuses moved to 2026-12-01 keep the sums they were written with (the review 2026-11-26:
         # the deploy sends no recount of old rows); a sum the office sets for such an order counts as everywhere
         fee = order_report.legacy_fee(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]), oth_sold)

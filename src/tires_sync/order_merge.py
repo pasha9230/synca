@@ -435,6 +435,8 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
                          (merge_id, card["id"], position, 1 if ref else 0, card["stage_id"], card["entered_at"], card["cancel_reason"], card["reserve_until"],
                           json.dumps(saved["chats"]), json.dumps(saved["calls"]), json.dumps(saved["callbacks"])))
             _copy_history(conn, card, new, logins)
+        from . import point_arrival
+        point_arrival.recount(conn, new)                                # made on «На точке»: its arrival holds the tyres moved in (review 2026-11-26)
         main = (chosen if chosen is not None and chosen["id"] in chats_of else base)["avito_chat"]      # the chats moved with the tyres
         orders.update_card(conn, new, {"client_phone": phone, "avito_chat": main}, now, author, commit=False, link_client=False)
         busy = orders.open_order_conflict(conn, phone, plan["point_id"], besides=new)       # the sources are cancelled already

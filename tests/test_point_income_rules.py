@@ -4,7 +4,9 @@ office's operations on every item (a sum set by hand, «Отменить нач�
 report, the analytics, the ledger, the point's page and the row of the Google table."""
 from __future__ import annotations
 
+import json
 import re
+import sqlite3
 
 from panel_helpers import post
 from test_mypoint import manager
@@ -137,6 +139,8 @@ def test_the_tyres_from_oth_are_paid_once(tmp_path):
     _take_from(conn, taken, first, 4)
     go(conn, taken, "placed", "moving", "at_point", "oth")                     # the same tyres from «На ОТХ», refused again: 0
     assert issue_of(conn, a) == {first: (300, True)}
+    conn.execute("UPDATE order_item_oth SET undone_at = ? WHERE order_id = ?", (DAY, taken))   # given back to «На ОТХ»
+    conn.commit()
     sold = card(conn, a, phone="+7 900 000 00 13")
     _take_from(conn, sold, first, 4)
     go(conn, sold, "placed", "moving", "at_point", "done")
@@ -173,10 +177,15 @@ def test_old_rows_of_the_table_keep_their_sums(tmp_path):
     handed(conn, mine, pid)
     orders.move_card(conn, mine, sheet_stage(conn, "done")["id"], NOW, "owner")
     orders.record_sales(conn, mine, "2026-11-28", NOW, "owner", "2026-11-28")
-    rows = list(sheet.rows_of(conn, mine, NOW).values())
+    rows = sheet.rows_of(conn, mine, NOW)
     report = order_report.build(conn, "2026-11-28", "2026-11-28")
     assert report["handoff"]["fee"] == 0                                                   # the report: no bonus before 01.12
-    assert round(sum(r["Прибыль ₽"] for r in rows), 2) == round(report["total"]["net"] - 200, 2)   # the row: as written (50 ₽ a tyre)
+    assert round(sum(r["Прибыль ₽"] for r in rows.values()), 2) == report["total"]["net"]   # a row going there the first time: the new rules
+    conn.execute("INSERT OR IGNORE INTO sheet_order (order_id, placed_at) VALUES (?, ?)", (mine, NOW))
+    conn.execute("UPDATE sheet_order SET rows = ? WHERE order_id = ?", (json.dumps({m: dict(r, **{"Прибыль ₽": 1.0}) for m, r in rows.items()}), mine))
+    conn.commit()                                                                          # the row was sent before with its profit
+    rows = list(sheet.rows_of(conn, mine, NOW).values())
+    assert round(sum(r["Прибыль ₽"] for r in rows), 2) == round(report["total"]["net"] - 200, 2)   # it keeps the old sums (50 ₽ a tyre)
     point_payouts.fix_items(conn, [(pid, "order:%d" % mine)], "issue", 0, "ошибка", NOW, "owner", "2026-11-01", "2026-11-30")
     rows = list(sheet.rows_of(conn, mine, NOW).values())
     assert round(sum(r["Прибыль ₽"] for r in rows), 2) == order_report.build(conn, "2026-11-28", "2026-11-28")["total"]["net"]
@@ -225,6 +234,52 @@ def test_a_sum_is_set_only_for_an_article_the_item_has(tmp_path):
     assert point_payouts.fix_items(conn, [(a, "order:2")], "handoff", 100, "x", NOW, "owner") == 1
     adj = point_payouts.adjust(conn, a, 400, "разовый бонус", "2026-12-05", NOW, "owner")
     assert point_payouts.fix_items(conn, [(a, "adj:%d" % adj)], "adj", -50, "удержание", NOW, "owner") == 1
+
+
+def test_a_merged_order_pays_the_issue_once(tmp_path):
+    from tires_sync import order_merge
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    one, two = card(conn, a, qty=2, phone="+7 900 000 00 21"), card(conn, a, qty=2, phone="+7 900 000 00 21")
+    go(conn, one, "placed", "moving", "at_point")
+    go(conn, two, "placed", "moving", "at_point")
+    new = order_merge.merge(conn, [one, two], stage(conn, "at_point"), NOW, "o", client_from=one)
+    assert point_arrival._row(conn, new)["pieces"] == 4                       # the tyres moved in, counted after the move
+    assert issue_of(conn, a) == {}                                           # the sources cancelled by the merge: nothing
+    go(conn, new, "done")
+    orders.record_sales(conn, new, "2026-12-15", NOW, "owner", "2026-12-15")
+    assert issue_of(conn, a) == {new: (300, False)}                           # the issue once, by the sale
+
+
+def test_a_part_sold_leaves_the_rest_unpaid_for_the_next_order(tmp_path):
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    first = card(conn, a, phone="+7 900 000 00 31")
+    go(conn, first, "placed", "moving", "at_point")
+    sales.add_sale(conn, day="2026-12-11", goods_id="1", brand_key="nokian", season="winter", diameter=16, name="Nokian", ad_kind="single",
+                   pieces=2, sale_total=10000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, account_id=None, point="", point_id=a,
+                   note="Заказ №%d" % first, now=NOW, author="o", today="2026-12-11", source="order")        # 2 of 4 sold
+    go(conn, first, "oth")                                                    # the other 2 on «На ОТХ»
+    later = card(conn, a, qty=2, phone="+7 900 000 00 32")
+    _take_from(conn, later, first, 2)
+    assert point_arrival.paid_oth_pieces(conn, [later]) == {}                  # not paid by the first order: the fee is the later one's
+    got = issue_of(conn, a)
+    assert got[first] == (150, False)                                         # the first: the 2 tyres it sold
+
+
+def test_the_first_version_of_the_arrival_table_gets_its_columns(tmp_path):
+    from tires_sync import store
+    path = str(tmp_path / "old.db")
+    raw = sqlite3.connect(path)
+    raw.execute("CREATE TABLE order_arrival (order_id INTEGER PRIMARY KEY, arrived_at TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '', "
+                "undone_at TEXT, undone_by TEXT, none_at TEXT, none_by TEXT)")
+    raw.execute("INSERT INTO order_arrival (order_id, arrived_at) VALUES (1, '2026-11-28T10:00:00')")
+    raw.commit()
+    raw.close()
+    conn = store.connect(path)
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(order_arrival)")}
+    assert {"point_id", "pieces", "left_at"} <= columns
+    assert conn.execute("SELECT pieces, point_id, left_at FROM order_arrival WHERE order_id = 1").fetchone() == (0, None, None)
 
 
 # ---- 2. the office's operations on every item ---------------------------------------------------------------------------------------

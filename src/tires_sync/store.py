@@ -742,6 +742,10 @@ def _migrate(conn) -> None:
                         ("special_amount", "REAL NOT NULL DEFAULT 0"), ("receipt_needed", "INTEGER NOT NULL DEFAULT 0")):
         _add_column(conn, "order_card", column, ddl)
     _add_column(conn, "order_card", "supplier_number", "TEXT NOT NULL DEFAULT ''")   # the number of the order of 4 Точки, «Оформил вручную» (order_supplier)
+    # order_arrival of the first version (2026-11-25): the point, the tyres and the day it left came after (the review 2026-11-26)
+    _add_column(conn, "order_arrival", "point_id", "INTEGER")
+    _add_column(conn, "order_arrival", "pieces", "INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "order_arrival", "left_at", "TEXT")
     _add_column(conn, "order_item", "code", "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "order_item", "purchase_manual", "INTEGER NOT NULL DEFAULT 0")   # 1: the purchase was typed by hand, WebMIM does not overwrite it
     _add_column(conn, "account", "chats_enabled", "INTEGER NOT NULL DEFAULT 0")
