@@ -180,6 +180,13 @@ def create_app(config: dict) -> Flask:
         """A UTC stamp in full, in Moscow time: 2026-10-20T21:30:00 -> 21.10.2026 00:30:00."""
         return _shown(value, 3, True)
 
+    def dt_at(value):
+        """A Moscow stamp for a sentence: 2026-11-26T14:30:05 -> 26.11.2026 в 14:30 (a bare date: 26.11.2026)."""
+        at, size = _stamp(value)
+        if at is None:
+            return "—" if value is None or not str(value).strip() else str(value)
+        return at.strftime("%d.%m.%Y") if size == 10 else at.strftime("%d.%m.%Y в %H:%M")
+
     def short_dt(value):
         """A Moscow stamp in a table: 20.10 12:00 (the year only when it is not this one)."""
         return _shown(value, 0, False)
@@ -224,7 +231,7 @@ def create_app(config: dict) -> Flask:
         return "%d %s%s" % (at.day, months[at.month - 1], "" if at.year == today.year else " %d" % at.year)
 
     app.jinja_env.filters.update(money=money, money_delta=money_delta, phone=phone)
-    app.jinja_env.filters.update(dt=dt, dt_utc=dt_utc, short_dt=short_dt, short_dt_utc=short_dt_utc, day=day, hm=hm, day_label=day_label)
+    app.jinja_env.filters.update(dt=dt, dt_at=dt_at, dt_utc=dt_utc, short_dt=short_dt, short_dt_utc=short_dt_utc, day=day, hm=hm, day_label=day_label)
     app.jinja_env.globals["audit_dt"] = audit_dt
 
     def chat_client(chat_row, order_id=None):
