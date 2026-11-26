@@ -121,7 +121,7 @@
   var SCROLL = "tires.mypoint.scroll", LAST = "tires.mypoint.reloaded";
   var active = Date.now(), sending = false, waiting = null, reloaded = 0;
   var BUSY = ".modal-backdrop.is-open, dialog[open], [aria-modal='true'].is-open, details.mp-refuse[open], details.mp-handover[open], " +
-             "details.pt-menu[open], details.mp-more[open], details.notify-switch[open], .notify-ask, #bell-pop:not([hidden]), [aria-busy='true']";
+             "details.pt-menu[open], details.mp-more[open], details.notify-switch[open], #bell-pop:not([hidden]), [aria-busy='true']";
 
   function session(name, value) {
     try {
