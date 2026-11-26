@@ -1,0 +1,11 @@
+{# «Лист ожидания» of the window (the owner 2026-11-26): the client's wishes in words and «подойдут аналоги». The new order: «Поставить в
+   ожидание» makes it right on «Ожидает наличие» (routes_orders.wait_stage). The card: the same two fields, saved with the window; shown on
+   «Ожидает наличие» or once something is written. The lines of «Что нужно клиенту» stay the check against the stock; the words are for people. #}
+{% set wl_shown = (not card and not pv) or (card and (c.stage.code == "wait" or v.wait_wish or v.wait_analogs)) %}
+{% if wl_shown %}<details class="owin-extra" data-waitlist{% if v.wait_on or (card and (c.stage.code == "wait" or v.wait_wish)) %} open{% endif %}><summary>Лист ожидания{% if card and v.wait_analogs %} <span class="badge badge--neutral" data-wait-analogs>подойдут аналоги</span>{% endif %}</summary>
+<div class="owin-grid">
+{% if not card %}<label class="row owin-check is-wide"><input type="checkbox" name="wait_on" value="1"{% if v.wait_on %} checked{% endif %} data-wait-on><span>Поставить в ожидание: заказ сразу на этапе «Ожидает наличие»</span></label>{% endif %}
+<label class="field is-wide"><span class="label">Пожелания клиента: что именно ждёт (размер, бренд, сезон, шипы, бюджет, сроки)</span><textarea class="textarea" name="wait_wish" rows="2" maxlength="1000" placeholder="Например: 205/55 R16 зима, шипы, Nokian или Ikon, до 6000 ₽ за шт., к 10 декабря" data-wait-wish>{{ v.wait_wish or '' }}</textarea></label>
+<label class="row owin-check"><input type="checkbox" name="wait_analogs" value="1"{% if v.wait_analogs and v.wait_analogs not in ("0", 0) %} checked{% endif %}><span>Подойдут аналоги (другой бренд или соседний размер)</span></label><input type="hidden" name="wait_analogs" value="">
+{% if not card %}<p class="small muted is-wide" style="margin:0">Чтобы панель сама проверяла наличие, после создания добавьте в заказе строку в «Что нужно клиенту».</p>{% endif %}
+</div></details>{% endif %}

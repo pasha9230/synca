@@ -998,6 +998,20 @@ def register(app) -> None:
                               "и проверьте наличие у поставщика." % row["name"][:120], "warning")
         return new_page(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, rows)
 
+    def wait_stage(conn, fields: dict) -> tuple:
+        """«Лист ожидания» of the new order's window (the owner 2026-11-26): «Поставить в ожидание» makes the order right on «Ожидает
+        наличие». It needs the client (a name or a phone) and the wishes in words; the journal names them. (stage, events) or OrderError."""
+        stage = next((s for s in orders.list_stages(conn) if s["code"] == "wait"), None)
+        if stage is None:
+            raise orders.OrderError("В воронке нет этапа «Ожидает наличие».")
+        wish = orders._clean("wait_wish", fields.get("wait_wish"), conn)
+        if not wish:
+            raise orders.OrderError("Лист ожидания: опишите, что ждёт клиент (размер, бренд, сезон, бюджет).")
+        if not (str(fields.get("client_name") or "").strip() or str(fields.get("client_phone") or "").strip()):
+            raise orders.OrderError("Лист ожидания: укажите имя или телефон клиента.")
+        analogs = "да" if orders._clean("wait_analogs", fields.get("wait_analogs"), conn) else "нет"
+        return stage, (("want", "Поставлен в лист ожидания. Ждёт: %s. Подойдут аналоги: %s." % (wish[:300], analogs)),)
+
     @app.route("/orders/new", methods=["POST"])
     @login_required
     def order_new():
@@ -1027,8 +1041,10 @@ def register(app) -> None:
                     warnings.append(warning)
                 if by_text:
                     found.append(by_text)
+            stage, events = wait_stage(conn, fields) if request.form.get("wait_on") == "1" else (None, ())
             stamp = local_iso()
-            card_id = orders.create_card_with_items(conn, fields, items, stamp, author(), require_contact=not items, scope_point=own_point())
+            card_id = orders.create_card_with_items(conn, fields, items, stamp, author(), require_contact=not items, scope_point=own_point(),
+                                                    stage=stage, events=events)
             if records:                                                   # where a position came from (the base of positions, a moved code)
                 order_search.write_notes(conn, card_id, records, stamp, author())
                 conn.commit()
