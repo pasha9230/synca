@@ -2,8 +2,9 @@
 {% from "_ui.html" import icon %}
 {% block title %}События позиций · История · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>История</h1><p class="sub">Жизнь каждой позиции в фиде: когда опубликована, когда стала ждать утра или удержана защитой, когда вернулась и когда снята. Записи копятся с {{ since or "первого цикла после обновления" }}.</p></div></header>
-{% set tab = "ads" %}{% include "_history_tabs.html" %}
+{% set tab = "history" %}{% include "_settings_head.html" %}
+{% set htab = "ads" %}{% include "_history_tabs.html" %}
+<p class="sub">Жизнь каждой позиции в фиде: когда опубликована, когда стала ждать утра или удержана защитой, когда вернулась и когда снята. Записи копятся с {{ since or "первого цикла после обновления" }}.</p>
 <section class="card">
 <div class="tiles" style="padding:var(--s-4) var(--s-5)">
 <div class="tile tile--brand"><span class="tile-label">Опубликовано</span><span class="tile-value">{{ week.published }}</span><span class="tile-sub">за 7 дней</span></div>

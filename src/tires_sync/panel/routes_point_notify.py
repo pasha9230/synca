@@ -72,6 +72,26 @@ def _compare(conn, point_id, now: str, issued) -> dict:
     return {"period": period, "cmp_start": start, "cmp_end": end, "cmp_rows": rows, "month_name": ps.month_name(first)}
 
 
+SETTINGS = "/settings/notify#points-notify"      # «Уведомления точек» live in «Настройки → Уведомления» (the owner 2026-11-26)
+
+
+def notify_values(conn) -> dict:
+    """The block «Уведомления точек» and «Что видят точки» of «Настройки → Уведомления»: every point's state, who may switch what."""
+    states = [dict(p, notify=pn.state(conn, p["id"])) for p in points.list_points(conn)]
+    return {"states": states, "may_switch": can("orders", "edit"), "compare_on": ps.compare_shown(conn),
+            "income_on": order_report.income_shown(conn), "points_switch": _may_switch_points()}
+
+
+def _old_address() -> str:
+    """The old page /points/notify (2026-11-25): its history (?p, ?from, ?to, ?kind) is «Настройки → История → Точки», the rest the block."""
+    from urllib.parse import urlencode
+    if not any(request.args.get(k) for k in ("from", "to", "kind")) or not can("users"):
+        return SETTINGS
+    wanted = {"p": request.args.get("p", ""), "from": _day(request.args.get("from")), "to": _day(request.args.get("to")),
+              "k": request.args.get("kind", "") if request.args.get("kind", "") in pn.KINDS else ""}
+    return "/history/points?" + urlencode({k: v for k, v in wanted.items() if v})
+
+
 def register(app) -> None:
     app.jinja_env.globals["notice_marks"] = notice_marks
     app.jinja_env.globals["returns_mark"] = pn.RETURNS_MARK
@@ -201,7 +221,8 @@ def register(app) -> None:
     @app.route("/points/notify", methods=["GET", "POST"])
     @login_required
     def points_notify():
-        """«Уведомления точек» of the office: the state of every point, «Выключить» / «Включить», the history with its filters."""
+        """«Уведомления точек» of the office: «Выключить» / «Включить» and the two switches of «Что видят точки» (POST); the page itself is now
+        the block of «Настройки → Уведомления» and the history «Настройки → История → Точки» (GET: the old address leads there)."""
         if own_point() is not None:
             abort(403)
         conn = get_conn()
@@ -215,7 +236,7 @@ def register(app) -> None:
             if what == "income" and order_report.set_income_shown(conn, on, now_iso(), author()):
                 conn.commit()
                 flash("Точки видят страницу «Доход»." if on else "Страница «Доход» скрыта от точек.", "info")
-            return redirect("/points/notify")
+            return redirect(SETTINGS)
         if request.method == "POST":
             try:
                 point_id = int(request.form.get("p") or 0)
@@ -229,15 +250,5 @@ def register(app) -> None:
             except pn.NotifyError as err:
                 conn.rollback()
                 flash(str(err), "error")
-            return redirect(_back("/points/notify"))
-        known = points.list_points(conn)
-        wanted = str(request.args.get("p") or "")
-        point_id = int(wanted) if wanted.isascii() and wanted.isdigit() and int(wanted) in {p["id"] for p in known} else None
-        since, until = _day(request.args.get("from")), _day(request.args.get("to"))
-        kind = request.args.get("kind", "")
-        kind = kind if kind in pn.KINDS else ""
-        states = [dict(p, notify=pn.state(conn, p["id"])) for p in known]
-        return render_template("points_notify.html", states=states, points=known, point_id=point_id, since=since, until=until, kind=kind,
-                               kinds=pn.KINDS, rows=pn.history(conn, point_id, since, until, kind), may_switch=can("orders", "edit"),
-                               compare_on=ps.compare_shown(conn), income_on=order_report.income_shown(conn),
-                               points_switch=_may_switch_points())
+            return redirect(_back(SETTINGS))
+        return redirect(_old_address())

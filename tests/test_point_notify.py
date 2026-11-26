@@ -76,28 +76,29 @@ def test_on_by_default_the_point_switches_off_only_with_a_name_and_both_switches
 
 def test_the_office_switches_a_point_and_reads_the_history_by_point_days_and_kind(tmp_path, clock):
     app, owner, tok, conn, a, b, mine = env(tmp_path)
-    page = owner.get("/points/notify").get_data(as_text=True)
+    page = owner.get("/settings/notify").get_data(as_text=True)               # «Настройки → Уведомления» (2026-11-26)
     assert 'data-notify-point="%d"' % a in page and 'data-state="on"' in page and 'data-switch="off"' in page
-    post(owner, "/points/notify", tok, p=str(b), on="0", reason="точка закрыта на ремонт", back="/points/notify")
+    post(owner, "/points/notify", tok, p=str(b), on="0", reason="точка закрыта на ремонт", back="/settings/notify")
     assert not pn.enabled(conn, b) and pn.enabled(conn, a)
     clock["now"] = "2026-11-28T12:00:00"
-    post(owner, "/points/notify", tok, p=str(b), on="1", back="/points/notify")
+    post(owner, "/points/notify", tok, p=str(b), on="1", back="/settings/notify")
     post(mine, "/my-point/notify", "tok", on="0", who="Иван")
     def history(url):
-        page = owner.get(url).get_data(as_text=True)
-        return page[page.index(">История</h2>"):]
-    page = history("/points/notify?p=%d" % b)
+        page = owner.get(url).get_data(as_text=True)                          # «Настройки → История → Точки»
+        return page[page.index("data-history-tabs"):]
+    page = history("/history/points?p=%d" % b)
     assert "точка закрыта на ремонт" in page and "Иван" not in page                 # one point
     assert page.count('data-history-kind="notify_') == 2
-    page = history("/points/notify?from=2026-11-27&to=2026-11-30")
+    page = history("/history/points?from=2026-11-27&to=2026-11-30")
     assert "точка закрыта на ремонт" not in page and "Иван" in page                 # the days
-    page = history("/points/notify?kind=notify_off")
+    page = history("/history/points?k=notify_off")
     assert 'data-history-kind="notify_on"' not in page and page.count('data-history-kind="notify_off"') == 2
 
 
 def test_who_may_look_and_switch(tmp_path, clock):
     app, owner, tok, conn, a, b, mine = env(tmp_path)
-    assert mine.get("/points/notify").status_code == 403                           # a point: never the office's page
+    assert mine.get("/settings/notify").status_code == 403                         # a point: never the office's page
+    assert mine.get("/points/notify").status_code in (302, 403)
     assert post(mine, "/points/notify", "tok", p=str(b), on="0").status_code == 403
     assert not pn.history(conn)
     for role in ("chats", "viewer"):
@@ -107,7 +108,7 @@ def test_who_may_look_and_switch(tmp_path, clock):
         client = app.test_client()
         with client.session_transaction() as session:
             session.update(user=login_, epoch=store.get_session_epoch(conn, login_), csrf="tok")
-        assert client.get("/points/notify").status_code == 200                      # the office looks with the usual rights
+        assert client.get("/settings/notify").status_code == 200                    # the office looks with the usual rights
         status = post(client, "/points/notify", "tok", p=str(a), on="0").status_code
         assert (status == 302) == (login_ == "chats1")                              # the operator switches, the observer only looks
     assert [r["author"] for r in pn.history(conn, a)] == ["chats1"]
@@ -118,7 +119,7 @@ def test_the_owner_looking_at_a_point_sees_its_state_and_the_link_to_switch(tmp_
     app, owner, tok, conn, a, b, mine = env(tmp_path, view)
     pn.switch(conn, a, False, NOW, "admin", "Офис")
     page = owner.get("/my-point?p=%d" % a).get_data(as_text=True)
-    assert 'data-notify-switch-state="off"' in page and 'href="/points/notify?p=%d"' % a in page and 'action="/my-point/notify"' not in page
+    assert 'data-notify-switch-state="off"' in page and 'href="/settings/notify#points-notify"' in page and 'action="/my-point/notify"' not in page
 
 
 # ---- D: «Разрешите уведомления» 3 times a day -------------------------------------------------------------------------------------------
@@ -288,7 +289,7 @@ def test_the_point_sees_its_own_point_only_and_the_office_its_actions(tmp_path, 
     page = mine.get("/my-point/notices?p=%d" % b).get_data(as_text=True)          # ?p= is the office's: the point stays on its own
     assert "Альфа" in page and "Бета" not in page
     post(mine, "/my-point/notices/task/%d/read" % task, "tok")
-    office = owner.get("/points/notify?p=%d" % a).get_data(as_text=True)
+    office = owner.get("/history/points?p=%d" % a).get_data(as_text=True)
     assert 'data-history-kind="task_read"' in office and "Пересчитать шины" in office
     seen = owner.get("/my-point/notices?p=%d" % a).get_data(as_text=True)          # the owner looks: no buttons of the point
     assert 'data-office-task="%d"' % task in seen and "data-task-read-btn" not in seen
@@ -303,7 +304,7 @@ def test_the_nav_and_the_head_lead_to_the_notices_page(tmp_path, clock, view):
     head = re.search(r"<header.*?</header>", page, re.S).group(0)
     assert 'href="/my-point/notices"' in head and 'aria-label="Сводки' in head
     assert mine.get("/my-point/notices").status_code == 200 and owner.get("/my-point/notices?p=%d" % a).status_code == 200
-    assert 'href="/points/notify"' in owner.get("/orders").get_data(as_text=True)
+    assert 'href="/points/notify"' not in owner.get("/orders").get_data(as_text=True)     # not in the menu (2026-11-26)
 
 
 # ---- «Сводки» (the owner 2026-11-26): the name, «Требует действия сейчас», one block of counts, «Другие точки» ------------------------------
@@ -417,7 +418,7 @@ def test_the_admin_and_the_operator_switch_other_points_and_the_income_the_viewe
     app, owner, tok, conn, a, b, mine = env(tmp_path)
     for login_, role in (("pavel", "partner"), ("chatty", "chats")):
         client = staff(app, conn, login_, role)
-        page = client.get("/points/notify").get_data(as_text=True)
+        page = client.get("/settings/notify").get_data(as_text=True)
         assert "data-switch-compare" in page and "data-switch-income" in page, role
         post(client, "/points/notify", "tok", what="compare", on="")
         assert not compare_shown(conn), role
@@ -428,7 +429,7 @@ def test_the_admin_and_the_operator_switch_other_points_and_the_income_the_viewe
         post(client, "/points/notify", "tok", what="income", on="")
         assert not order_report.income_shown(conn), role
     looker = staff(app, conn, "vera", "viewer")
-    assert "data-switch-compare" not in looker.get("/points/notify").get_data(as_text=True)
+    assert "data-switch-compare" not in looker.get("/settings/notify").get_data(as_text=True)
     assert post(looker, "/points/notify", "tok", what="income", on="1").status_code == 403
     assert post(mine, "/points/notify", "tok", what="income", on="1").status_code == 403
     assert not order_report.income_shown(conn) and compare_shown(conn)

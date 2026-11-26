@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{# «Пункты выдачи → Аналитика точек» (routes_point_payouts.points_analytics_page, point_metrics; the owner 2026-11-26): how fast the
+   orders reach each point and how they end there, for the period. Hours; «нет данных» where nothing is recorded. No money. #}
+{% macro hours(st) %}{% if st.n %}<span title="среднее {{ st.avg }} ч · заказов {{ st.n }}">{{ st.med }} ч</span> <span class="muted xs">(ср. {{ st.avg }})</span>{% else %}<span class="muted">нет данных</span>{% endif %}{% endmacro %}
+{% macro pct(v) %}{% if v is none %}<span class="muted">нет данных</span>{% else %}{{ v }} %{% endif %}{% endmacro %}
+{% block title %}Аналитика точек · Пункты выдачи · Tires Sync{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>Пункты выдачи<span class="help-q" tabindex="0" data-tip="По заказам, которые приехали на точку за период (отметка «Приехал»): сколько часов от создания заказа до приезда; сколько от приезда до выдачи, а при невыкупе, отмене или возврате — до перевода на ОТХ, в отмену или на возврат (по журналу этапов заказа). Показана медиана (середина), в скобках — среднее. Выдано — заказы, перешедшие в «Выполнено» за период.">?</span></h1></div></header>
+{% set ptab = "analytics" %}{% include "_payouts_tabs.html" %}
+<form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap;margin-bottom:var(--s-4)" data-analytics-filters>
+<label class="field"><span class="label">С</span><input class="input" type="date" name="from" value="{{ start }}"></label>
+<label class="field"><span class="label">По</span><input class="input" type="date" name="to" value="{{ end }}"></label>
+<label class="field"><span class="label">Точка</span><select class="select" name="p"><option value="">Все</option>{% for id, name in names.items() %}<option value="{{ id }}"{% if id == point_id %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<button class="btn btn--primary">Показать</button></form>
+<section class="card"><div class="card-head"><h3>Аналитика точек</h3><span class="sub">с {{ start|short_dt }} по {{ end|short_dt }}</span></div>
+{% if rows %}<div class="card-body" style="overflow-x:auto"><table class="table" data-point-metrics><thead><tr><th>Точка</th><th>Заказ → приехало</th><th>На точке → итог</th><th>Принято</th><th>Выдано</th><th>Передано клиентов</th><th>Невыкуп</th><th>Отмена</th><th>Возврат</th><th>Ещё на точке</th></tr></thead><tbody>
+{% for r in rows + ([total] if not point_id else []) %}<tr{% if r.id is none %} class="strong" data-metrics-total{% else %} data-point="{{ r.id }}"{% endif %}><td>{{ r.name }}</td><td data-to-arrive>{{ hours(r.to_arrive) }}</td><td data-to-end>{{ hours(r.to_end) }}</td>
+<td data-received>{{ r.received }}{% if r.pieces %} <span class="muted xs">({{ r.pieces }} шт)</span>{% endif %}</td><td data-issued>{{ r.issued }}</td><td data-handed>{{ r.handed }}</td>
+<td data-share-oth>{{ pct(r.share.oth) }}{% if r.outcomes.oth %} <span class="muted xs">({{ r.outcomes.oth }})</span>{% endif %}</td><td data-share-cancel>{{ pct(r.share.cancel) }}{% if r.outcomes.cancel %} <span class="muted xs">({{ r.outcomes.cancel }})</span>{% endif %}</td><td data-share-return>{{ pct(r.share.return) }}{% if r.outcomes.return %} <span class="muted xs">({{ r.outcomes.return }})</span>{% endif %}</td><td>{{ r.outcomes.open }}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="card-body muted">Точек пока нет.</div>{% endif %}</section>
+{% endblock %}

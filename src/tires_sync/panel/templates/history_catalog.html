@@ -2,8 +2,9 @@
 {% from "_ui.html" import icon %}
 {% block title %}Каталог по часам · История · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>История</h1><p class="sub">Сколько наших опубликованных позиций сейчас есть в выгрузке поставщика. Днём другие продавцы кладут шины в корзину, и они пропадают; в полночь корзины обнуляются и каталог наполняется заново. Здесь видно, когда именно.</p></div></header>
-{% set tab = "catalog" %}{% include "_history_tabs.html" %}
+{% set tab = "history" %}{% include "_settings_head.html" %}
+{% set htab = "catalog" %}{% include "_history_tabs.html" %}
+<p class="sub">Сколько наших опубликованных позиций сейчас есть в выгрузке поставщика. Днём другие продавцы кладут шины в корзину, и они пропадают; в полночь корзины обнуляются и каталог наполняется заново. Здесь видно, когда именно.</p>
 {% if summary %}<section class="card"><div class="card-head"><h3>Когда каталог наполняется</h3></div>
 <ul class="log">{% for s in summary %}<li><time>{{ s.day|day }}</time><span>{% if s.first_at %}Накануне вечером на месте было {{ s.before }}, наполнение замечено в {{ s.first_at|hm }}: стало {{ s.after }} из {{ s.published }}.{% else %}Накануне вечером на месте было {{ s.before }}; за ночь прироста не было.{% endif %}</span></li>{% endfor %}</ul></section>{% endif %}
 <section class="card">
