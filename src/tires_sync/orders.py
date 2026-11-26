@@ -446,17 +446,17 @@ MARKS = {"settled_point_at": "Расчёт с точкой", "codes_written_off_
 EDITABLE = ("client_name", "client_phone", "avito_chat", "point_id", "delivery_date", "delivery_time", "tags", "comment",
             "webmim_id", "webmim_number", "webmim_status", "cancel_reason", "return_kind", "return_reason", "return_amount",
             "source", "deal_kind", "transfer_number", "settled_point_at", "codes_written_off_at", "settled_supplier_at", "responsible", "reserve_until",
-            "special_terms", "special_amount", "receipt_needed", "wait_wish", "wait_analogs")
+            "special_terms", "special_amount", "receipt_needed", "wait_wish", "wait_analogs", "wait_other_sizes")
 LABELS = {"client_name": "Клиент", "client_phone": "Телефон", "avito_chat": "Чат Авито", "point_id": "Точка", "delivery_date": "Дата доставки",
           "delivery_time": "Время доставки", "tags": "Теги", "comment": "Комментарий", "webmim_id": "ID заказа WebMIM",
           "webmim_number": "Номер заказа WebMIM", "webmim_status": "Статус WebMIM", "cancel_reason": "Причина отмены",
           "return_kind": "Тип возврата", "return_reason": "Причина возврата", "return_amount": "Сумма возврата",
           "source": "Откуда", "deal_kind": "Тип сделки", "transfer_number": "Номер перемещения", "responsible": "Ответственный", "reserve_until": "Крайняя дата резерва", "special_terms": "Особые условия", "special_amount": "Сумма по особым условиям",
-          "receipt_needed": "Нужен товарный чек", "wait_wish": "Пожелания клиента (лист ожидания)", "wait_analogs": "Подойдут аналоги", **MARKS}
+          "receipt_needed": "Нужен товарный чек", "wait_wish": "Пожелания клиента (лист ожидания)", "wait_analogs": "Можно другие бренды", "wait_other_sizes": "Можно другие размеры", **MARKS}
 CARD_FIELDS = ("id, pipeline_id, stage_id, client_name, client_phone, avito_chat, point_id, delivery_date, delivery_time, tags, comment, "
                "webmim_id, webmim_number, webmim_status, cancel_reason, return_kind, return_reason, return_amount, sale_ids, "
                "source, deal_kind, transfer_number, settled_point_at, codes_written_off_at, settled_supplier_at, responsible, reserve_until, special_terms, special_amount, receipt_needed, "
-               "wait_wish, wait_analogs, created_at, created_by, entered_at, updated_at")
+               "wait_wish, wait_analogs, wait_other_sizes, created_at, created_by, entered_at, updated_at")
 MAX_TAGS, MAX_TAG, MAX_COMMENT, MAX_NOTE = 10, 30, 2000, 2000
 MAX_WISH = 1000                  # «Пожелания клиента» of «Лист ожидания» (the owner 2026-11-26): what the client waits for, in words
 
@@ -551,7 +551,7 @@ def _clean(key: str, value, conn):
         if len(text) > MAX_WISH:
             raise OrderError("Пожелания клиента: не длиннее %d знаков." % MAX_WISH)
         return text
-    if key in ("receipt_needed", "wait_analogs"):
+    if key in ("receipt_needed", "wait_analogs", "wait_other_sizes"):
         return 1 if str(value or "").strip().lower() in ("1", "on", "true", "да") else 0
     if key == "responsible":
         return _single(value, 60, label)
@@ -756,13 +756,15 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
     if "webmim_number" in changed:                                      # when it was typed (webmim_cabinet.typed_since_release)
         _mark_number(conn, card_id, changed["webmim_number"], now)
     for key, value in changed.items():
-        if key in ("receipt_needed", "wait_analogs"):
+        if key in ("receipt_needed", "wait_analogs", "wait_other_sizes"):
             shown = "да" if value else "нет"
         elif key == "special_amount":
             shown = ("%.2f" % value).rstrip("0").rstrip(".") if value else "(пусто)"
         else:
             shown = "(пусто)" if value in ("", None, 0, 0.0) else str(value)[:80]
         add_event(conn, card_id, now, author, "field", "%s: %s" % (LABELS[key], shown))
+    if changed.get("wait_analogs") == 1 or changed.get("wait_other_sizes") == 1:
+        analogs_to_wants(conn, card_id, now, author, brands=changed.get("wait_analogs") == 1, sizes=changed.get("wait_other_sizes") == 1)
     try:
         _guard_stage(conn, card_id, before)
     except OrderError:
@@ -777,6 +779,21 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
     if commit:
         conn.commit()
     return list(changed)
+
+
+def analogs_to_wants(conn, card_id, now: str, author: str, brands: bool = True, sizes: bool = False) -> int:
+    """«Можно другие бренды» / «Можно другие размеры» of the order ticked (the owner 2026-11-26, two ticks): every line of «Что нужно
+    клиенту» gets the same tick; saved with the caller's change. Unticked, the lines stay as they are (a tick set by hand is the manager's).
+    Returns the lines changed."""
+    changed = 0
+    for wanted, column, words in ((brands, "any_brand", "можно другие бренды"), (sizes, "any_size", "можно другие размеры")):
+        if not wanted:
+            continue
+        cur = conn.execute("UPDATE order_want SET %s = 1 WHERE order_id = ? AND %s = 0" % (column, column), (card_id,))
+        if cur.rowcount:
+            add_event(conn, card_id, now, author, "want", "В строках «Что нужно клиенту» отмечено «%s» (%d)" % (words, cur.rowcount))
+        changed += cur.rowcount
+    return changed
 
 
 def _attach_client(conn, card_id, now: str, author: str) -> None:
@@ -1405,6 +1422,16 @@ def client_words(event: dict) -> bool:
     return event.get("kind") == "chat" and str(event.get("text") or "").startswith(("Клиент написал", "Клиент звонил"))
 
 
+EMPTY_SQL = ("c.client_name = '' AND c.client_phone = '' AND c.avito_chat = '' AND NOT EXISTS (SELECT 1 FROM order_item i WHERE i.order_id = c.id) "
+             "AND NOT EXISTS (SELECT 1 FROM order_want w WHERE w.order_id = c.id) AND NOT EXISTS (SELECT 1 FROM avito_chat a WHERE a.order_id = c.id)")
+
+
+def empty_ids(conn) -> set:
+    """The empty orders of «Новый заказ» (the review 2026-11-26): «Новый заказ» of «Заказы» makes the card at once; until a name, a phone,
+    a chat, a position or a line «Что нужно клиенту» is in it, it is on no board and in no count of the analytics."""
+    return {r[0] for r in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'new' AND " + EMPTY_SQL)}
+
+
 def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "", with_sums: bool = True, returning: str = "") -> dict:
     """The board: the cards by stage with their sums of sale, the columns' sums and «Сумма в работе»; `with_sums=False` (the manager of a point,
     the owner 2026-10-26): every sum is None — not counted, not given. A card of «На возврат» has its label (order_oth.label_of);
@@ -1425,7 +1452,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     columns = {s["id"]: {"stage": s, "count": 0, "sum": 0.0, "cards": []} for s in stages}
     summary = {"open": 0, "overdue": 0, "new_today": 0, "sum_open": 0.0}
     rows = conn.execute("SELECT id, stage_id, client_name, client_phone, point_id, delivery_date, tags, created_at, entered_at, webmim_number, "
-                        "wait_wish, wait_analogs FROM order_card ORDER BY id DESC").fetchall()
+                        "wait_wish, wait_analogs, wait_other_sizes FROM order_card ORDER BY id DESC").fetchall()
     from . import oth_sale, order_oth, order_sheet
     stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке» (open stages only)
     plans = order_oth.plans(conn)                                               # the labels of «На возврат» (2026-11-03)
@@ -1433,8 +1460,9 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     intercity = {r[0] for r in conn.execute("SELECT order_id FROM order_intercity WHERE enabled = 1")}     # «В другой город» (2026-11-02)
     since = order_oth.migrated_since(conn)                                      # the day of the stage of a migrated order (2026-11-06)
     gone = unlinked_orders(conn)                                                # «На возврат» and after: «клиента нет» (the owner 2026-11-09)
-    for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim, wish, analogs in rows:
-        if sid not in columns:
+    blank = empty_ids(conn)                                                     # an empty «Новый заказ»: not on the board (2026-11-26)
+    for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim, wish, analogs, other_sizes in rows:
+        if sid not in columns or cid in blank:
             continue
         tag_names = tag_list(tags)
         if point_id and pid != point_id:
@@ -1460,7 +1488,8 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
                                       "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "stage_day": stage_day(since.get(cid, entered)), "overdue": overdue,
                                       "tags": tag_names, "intercity": cid in intercity, "webmim": webmim or "", "created": (created or "")[:10],
                                       "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid), "oth_card": oth_card,
-                                      "wait_wish": (wish or "") if stage["code"] == "wait" else "", "wait_analogs": bool(analogs) and stage["code"] == "wait"})
+                                      "wait_wish": (wish or "") if stage["code"] == "wait" else "", "wait_analogs": bool(analogs) and stage["code"] == "wait",
+                                      "wait_other_sizes": bool(other_sizes) and stage["code"] == "wait"})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)
         if stage["kind"] == "open":

@@ -159,14 +159,14 @@ def test_can_post_says_what_the_server_says_for_every_role_and_every_page(world)
 
 # what each role sees: (page, the text of the button or the form address) → who has it (the rest must not)
 SEEN = [
-    ("/orders", 'href="/orders/new"', {"owner", "partner", "chats"}),                                   # «Новый заказ»
+    ("/orders", 'action="/orders/blank"', {"owner", "partner", "chats"}),                                   # «Новый заказ»
     ("/orders", 'href="/orders/bulk"', {"owner", "partner"}),                                           # «Закрыть разом» (право «массово»)
     ("/orders", 'draggable="true"', {"owner", "partner", "chats", "point"}),                            # moving a card on the board
     ("/orders/{card}", 'action="/orders/{card}/delete"', {"owner", "partner"}),                         # «Удалить заказ» (право «удалять»)
     ("/orders/{card}", 'action="/orders/{card}/save"', {"owner", "partner", "chats"}),                  # the window can be saved
     ("/orders/{card}", 'Только просмотр: менять заказ', {"viewer", "point"}),
     ("/orders/{card}", 'action="/orders/{card}/note"', {"owner", "partner", "chats", "point"}),         # the point writes notes
-    ("/orders/{card}", 'action="/orders/{card}/wants/add"', {"owner", "partner", "chats"}),
+    ("/orders/{card}", 'form="ow-main" name="want_add"', {"owner", "partner", "chats"}),     # the new line is in the window's form (2026-11-26)
     ("/chats/{chat}", 'action="/chats/{chat}/send"', {"owner", "partner", "chats", "point"}),           # «Отправить клиенту» (право «отправлять»; the point: its account, 2026-10-21)
     ("/chats/{chat}", 'action="/chats/{chat}/delete"', {"owner", "partner"}),
     ("/chats/{chat}", 'action="/chats/{chat}/create-deal"', {"owner", "partner", "chats", "point"}),

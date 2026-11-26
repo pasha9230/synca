@@ -126,8 +126,12 @@ def client_text(card: dict) -> str:
 
 def add_want(conn, card_id, fields: dict, now: str, author: str, commit: bool = True) -> int:
     """A line «Что нужно клиенту». `commit=False`: written with the caller's change (a new card and its line, all or nothing)."""
-    orders._row(conn, card_id)                                     # raises when there is no such card
+    card = orders._row(conn, card_id)                              # raises when there is no such card
     clean = _clean(fields)
+    if card.get("wait_analogs"):                                   # «Можно другие бренды» of the order: the line allows them too (2026-11-26)
+        clean["any_brand"] = 1
+    if card.get("wait_other_sizes"):                               # «Можно другие размеры»: a neighbour size
+        clean["any_size"] = 1
     keys = sorted(clean)
     cur = conn.execute("INSERT INTO order_want (order_id, %s, created_at) VALUES (?, %s, ?)" % (", ".join(keys), ", ".join("?" for _ in keys)),
                        [card_id] + [clean[k] for k in keys] + [now])
