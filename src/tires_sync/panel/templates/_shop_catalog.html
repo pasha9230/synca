@@ -9,7 +9,7 @@
 {% include "_shop_filters.html" %}
 <div class="shop-cat shop-cat--top">
 <section class="shop-results" data-tour="catalog">
-<div class="shop-tools"><div class="shop-tools-title"><h1>Каталог</h1><span class="muted" data-found>Найдено {{ total }}{% if mixed %} компл.{% endif %}{% if pages > 1 %} · страница {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
+<div class="shop-tools"><div class="shop-tools-title"><span class="muted" data-found>Найдено {{ total }}{% if mixed %} компл.{% endif %}{% if pages > 1 %} · страница {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
 <div class="shop-sort"><span class="muted">Сортировка:</span><div class="sortbar">{% for key, label in (("price", "Цена"), ("size", "Размер"), ("brand", "Бренд"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active" aria-current="true"{% endif %}>{{ label }}{{ sort_arrow(f, key) }}</a>{% endfor %}</div></div>
 {% include "_shop_columns.html" %}{{ view_seg(view, view_links) }}</div>
 {% macro buy(r) %}<form method="post" action="/shop/cart/add" class="shop-buy"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ r.key }}">
@@ -22,11 +22,11 @@
 <div class="shop-tile-price"><b class="strong">{{ r.price|money }}</b> <span class="muted">за шт.</span></div>
 {% if cart %}{{ buy(r) }}{% endif %}</article>{% endfor %}</div>
 {% elif rows %}<div class="table-wrap"><table class="table shop-table">
-<thead><tr><th class="w-thumb"></th><th>Шина</th><th>Размер</th>{% if "season" not in hidden %}<th>Сезон</th>{% endif %}{% if "country" not in hidden %}<th>Страна</th>{% endif %}{% if "year" not in hidden %}<th>Год</th>{% endif %}{% if "wh" not in hidden %}<th>Склад</th>{% endif %}{% if "stock" not in hidden %}<th class="num">Остаток</th>{% endif %}{% if "price" not in hidden %}<th class="num">Цена за шт.</th>{% endif %}{% if cart %}<th class="c-buy">Количество</th>{% endif %}</tr></thead>
+<thead><tr><th class="w-thumb"></th><th>Бренд</th><th>Шина</th><th>Размер</th>{% if "season" not in hidden %}<th>Сезон</th>{% endif %}{% if "country" not in hidden %}<th>Страна</th>{% endif %}{% if "year" not in hidden %}<th>Год</th>{% endif %}{% if "wh" not in hidden %}<th>Склад</th>{% endif %}{% if "stock" not in hidden %}<th class="num">Остаток</th>{% endif %}{% if "price" not in hidden %}<th class="num">Цена за шт.</th>{% endif %}{% if cart %}<th class="c-buy">Количество</th>{% endif %}</tr></thead>
 <tbody>{% for r in rows %}
 <tr{% if cart %} class="has-buy"{% endif %}>
 <td class="c-photo w-thumb">{% if r.photo %}<img class="thumb" src="{{ r.photo }}" alt="" width="36" height="36" loading="lazy">{% else %}<div class="thumb">нет фото</div>{% endif %}</td>
-<td class="c-tire"><b>{{ r.brand }}</b> {{ r.model or r.name }} <span class="muted">{{ r.load }}{{ r.speed }}</span>{% if r.runflat %} <span class="badge badge--neutral">RunFlat</span>{% endif %}</td>
+<td class="c-brand">{{ r.brand }}</td><td class="c-tire">{{ r.model or r.name }} <span class="muted">{{ r.load }}{{ r.speed }}</span>{% if r.runflat %} <span class="badge badge--neutral">RunFlat</span>{% endif %}</td>
 <td class="c-size">{{ r.size }}</td>
 {% if "season" not in hidden %}<td class="c-season">{{ season_icons(r) }}</td>{% endif %}
 {% if "country" not in hidden %}<td class="c-country">{{ r.country or "—" }}</td>{% endif %}{% if "year" not in hidden %}<td class="c-year">{{ r.year or "—" }}</td>{% endif %}

@@ -148,8 +148,11 @@ def test_country_and_year_are_two_columns_and_the_client_hides_and_keeps_them(tm
     view(conn, "client", state)
     html = page(client)
     names = head(html)
-    assert "Страна" in names and "Год" in names and "Страна, год" not in names
+    assert "Страна" in names and "Год" not in names and "Страна, год" not in names
     assert "Колонки" in html and html.count('name="show"') == 6
+    assert 'name="show" value="year">' in html
+    assert client.post("/shop/columns", data={"csrf": "tok", "show": ["season", "country", "year", "wh", "stock", "price"]}).status_code == 302
+    assert "Год" in head(page(client))
     assert post(client, "/shop/columns", "tok", show="season").status_code == 302      # only «Сезон» stays shown
     client.post("/shop/columns", data={"csrf": "tok", "show": ["season", "price"]}, headers={"Referer": "http://localhost/shop?w=205"})
     assert user_prefs.get(conn, "buyer", cc.COLUMNS_KEY) == ["country", "year", "wh", "stock"]

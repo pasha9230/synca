@@ -61,7 +61,7 @@ def test_the_switch_of_the_view_is_kept_for_the_client(tmp_path, state):
 def test_another_client_keeps_its_own_view(tmp_path):
     app, client, conn, _ = make_shop(tmp_path)
     to_view2(client)
-    assert cc.filters_view(conn, "buyer") == 2 and cc.filters_view(conn, "someone") == 1 and cc.filters_view(conn, "") == 1
+    assert cc.filters_view(conn, "buyer") == 2 and cc.filters_view(conn, "someone") == 2 and cc.filters_view(conn, "") == 1
 
 
 @pytest.mark.parametrize("state", ["off", "all"])
@@ -84,8 +84,8 @@ def test_view2_has_three_glued_lists_chips_counters_and_the_clients_brands(tmp_p
     brands = box[box.index('id="ms-b-list"'):box.index("</ul>", box.index('id="ms-b-list"'))]
     assert sorted(re.findall(r'data-v="([^"]+)"', brands)) == ["ikon tyres", "laufenn"]               # the client's own brands only
     assert '<input type="hidden" name="b" value="ikon tyres">' in box and 'value="nobody"' not in box and ">nobody<" not in box
-    assert "Показать" not in box and "msel-go" not in box and "<details" not in box
-    for word in ("Подбор по авто", "Шинный калькулятор", "Происхождение", "Отечественная", "В наличии", "Все фильтры"):
+    assert "Показать" not in box and "msel-go" not in box and '<details class="shop-extra">' in box
+    for word in ("Подбор по авто", "Шинный калькулятор"):
         assert word not in html, word
     assert 'class="shop-v2-reset"' in box and '<path d="M8 12h8"/>' in box       # «Сбросить» with its icon
     assert "WebMIM" not in html and "4Точки" not in html and "мим" not in html.lower()
@@ -346,3 +346,34 @@ def test_no_set_of_warehouse_2_when_it_is_off_for_the_client(tmp_path):
     html = results(page(client, url))
     got = groups(html)
     assert got["Комплект"] == "нет" and got["Только задняя ось"] == [] and "255/40" not in html
+
+
+def test_new_clients_get_the_enhanced_filters_by_default(tmp_path):
+    app, client, conn, _ = make_shop(tmp_path)
+    user_prefs.drop(conn, "buyer", cc.VIEW_KEY)
+    html = page(client)
+    assert 'data-fv2' in html and 'Все фильтры' in html
+    assert 'Все бренды поставщика' not in block(html)
+    assert '<th>Бренд</th>' in html and '<th>Год</th>' not in html
+    assert 'name="commercial"' in html and 'name="rf"' in html
+    assert "script-src 'self'" in client.get("/shop").headers["Content-Security-Policy"]
+
+
+def test_enhanced_filters_use_client_prices_stock_and_known_origins(tmp_path):
+    from dataclasses import replace
+    from werkzeug.datastructures import MultiDict
+
+    app, client, conn, _ = make_shop(tmp_path)
+    with app.test_request_context('/shop'):
+        from tires_sync.panel import routes_shop
+        visible = routes_shop._visible(app, conn, routes_shop._offers(app, conn).offers.values(), 'buyer')
+    first, second = visible[:2]
+    first = replace(first, price=1500, offer=replace(first.offer, country='Россия', stock=8, runflat=True, car_type='C'))
+    second = replace(second, price=2500, offer=replace(second.offer, country='', stock=3, runflat=False, car_type=''))
+    items = [first, second]
+    def chosen(**params):
+        return cc.apply(items, cc.filters_of(MultiDict(params), {i.brand for i in items}))
+    assert chosen(c='dom', sn='4', pf='1000', pt='2000', rf='1', commercial='1') == [first]
+    assert chosen(c='imp') == []
+    assert chosen(sn='9') == []
+    assert chosen(pf='2000') == [second]

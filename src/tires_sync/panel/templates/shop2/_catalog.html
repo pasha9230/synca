@@ -10,7 +10,7 @@
 <div class="shop-cat shop2 shop2-cat shop-cat--top">
 <section class="shop-results shop2-results" data-tour="catalog">
 <div class="shop2-tools">
-<div class="shop2-title"><h1>Каталог</h1><span class="muted" data-found>найдено {{ total }}{% if mixed %} компл.{% endif %}{% if pages > 1 %} · стр. {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
+<div class="shop2-title"><span class="muted" data-found>найдено {{ total }}{% if mixed %} компл.{% endif %}{% if pages > 1 %} · стр. {{ page }} из {{ pages }}{% endif %} · ваши цены</span></div>
 <div class="shop2-sortrow">
 <div class="shop2-sort" role="group" aria-label="Сортировка">{% for key, label in (("price", "Цена"), ("size", "Размер"), ("brand", "Бренд"), ("stock", "Остаток")) %}<a href="{{ sort_links[key] }}"{% if f.sort == key %} class="is-active" aria-current="true"{% endif %}>{{ label }}{{ sort_arrow(f, key) }}</a>{% endfor %}</div>
 {% include "_shop_columns.html" %}{{ view_seg(view, view_links, "shop2-view") }}
@@ -30,11 +30,11 @@
 <div class="shop-tile-price"><b class="strong">{{ r.price|money }}</b> <span class="muted">за шт.</span></div>
 {% if cart %}{{ buy(r) }}{% endif %}</article>{% endfor %}</div>
 {% elif rows %}<div class="table-wrap card shop2-table-wrap"><table class="table shop-table shop2-table">
-<thead><tr><th class="shop2-th-photo"><span class="sr-only">Фото</span></th><th>Шина</th>{% if "season" not in hidden %}<th>Сезон</th>{% endif %}{% if "country" not in hidden %}<th>Страна</th>{% endif %}{% if "year" not in hidden %}<th>Год</th>{% endif %}{% if "wh" not in hidden %}<th>Склад</th>{% endif %}{% if "stock" not in hidden %}<th class="num">Остаток</th>{% endif %}{% if "price" not in hidden %}<th class="num">Цена за шт.</th>{% endif %}{% if cart %}<th class="c-buy">Количество</th>{% endif %}</tr></thead>
+<thead><tr><th class="shop2-th-photo"><span class="sr-only">Фото</span></th><th>Бренд</th><th>Шина</th>{% if "season" not in hidden %}<th>Сезон</th>{% endif %}{% if "country" not in hidden %}<th>Страна</th>{% endif %}{% if "year" not in hidden %}<th>Год</th>{% endif %}{% if "wh" not in hidden %}<th>Склад</th>{% endif %}{% if "stock" not in hidden %}<th class="num">Остаток</th>{% endif %}{% if "price" not in hidden %}<th class="num">Цена за шт.</th>{% endif %}{% if cart %}<th class="c-buy">Количество</th>{% endif %}</tr></thead>
 <tbody>{% for r in rows %}
 <tr id="row-{{ loop.index }}"{% if cart %} class="has-buy"{% endif %}>
 <td class="c-photo"><a class="shop2-open" href="#tire-{{ loop.index }}" title="Карточка шины">{{ photo(r, "shop2-ph") }}</a></td>
-<td class="c-tire"><div class="shop2-name"><a class="shop2-open" href="#tire-{{ loop.index }}"><b>{{ r.brand }}</b> {{ r.model or r.name }}</a></div><div class="shop2-sub">{{ r.size }} {{ r.load }}{{ r.speed }}{% if r.runflat %} · RunFlat{% endif %}<span class="shop2-origin-m">{% if r.country or r.year %} · {{ r.country }}{% if r.country and r.year %}, {% endif %}{{ r.year }}{% endif %}</span></div></td>
+<td class="c-brand">{{ r.brand }}</td><td class="c-tire"><div class="shop2-name"><a class="shop2-open" href="#tire-{{ loop.index }}">{{ r.model or r.name }}</a></div><div class="shop2-sub">{{ r.size }} {{ r.load }}{{ r.speed }}{% if r.runflat %} · RunFlat{% endif %}<span class="shop2-origin-m">{% if r.country or r.year %} · {{ r.country }}{% if r.country and r.year %}, {% endif %}{{ r.year }}{% endif %}</span></div></td>
 {% if "season" not in hidden %}<td class="c-season">{{ season(r) }}</td>{% endif %}
 {% if "country" not in hidden %}<td class="c-country">{{ r.country or "—" }}</td>{% endif %}{% if "year" not in hidden %}<td class="c-year">{{ r.year or "—" }}</td>{% endif %}
 {% if "wh" not in hidden %}<td class="c-wh">{{ r.warehouse }}</td>{% endif %}

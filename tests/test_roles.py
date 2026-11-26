@@ -420,7 +420,7 @@ def test_the_pages_of_the_client_have_nothing_of_the_staff_panel(tmp_path):
         page = client.get(url)
         html = page.get_data(as_text=True)
         assert page.status_code == code, url
-        for mark in ("topsearch", 'action="/search"', "bell", "sb-link", "sb-count", "notify.js", "topbar.js", "app.js", 'href="/orders"', 'href="/catalog"'):
+        for mark in ("topsearch", 'action="/search"', 'id="bell"', "bell.css", "bell.js", "sb-link", "sb-count", "notify.js", "topbar.js", "app.js", 'href="/orders"', 'href="/catalog"'):
             assert mark not in html, (url, mark)
     assert "Каталог" in client.get("/shop").get_data(as_text=True)    # since 2026-10-31 a client gets our % of the brands from the start
 

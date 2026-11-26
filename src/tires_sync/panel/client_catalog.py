@@ -36,7 +36,7 @@ SORTS = ("brand", "size", "price", "stock")
 PAGE = 50
 PARAMS = ("size", "q", "s", "t", "wh", "b", "xb", "o", "r", "p", "v",     # the only parameters the links of the page carry on
           "w", "h", "d", "sf",                                         # «Новый вид»: the width, the height, the radius; the filters folded
-          "mixed", "fw", "fh", "fd", "rw", "rh", "rd")                 # «Вид 2»: the mixed-width sets, the front and the rear axis
+          "mixed", "fw", "fh", "fd", "rw", "rh", "rd", "c", "sn", "pf", "pt", "rf", "commercial", "bm")                 # «Вид 2»: the mixed-width sets, the front and the rear axis
 MAX_VALUES = 30                       # the values of one of the width, the height, the radius ticked at once
 MAX_TEXT = 120                        # the length of a text filter (the size line, the search)
 MAX_SIZES = 20
@@ -187,6 +187,12 @@ class Filters:
     widths: List[int] = ()
     heights: List[int] = ()
     diameters: List[int] = ()
+    origin: str = ""
+    stock_min: int = 0
+    price_from: int = 0
+    price_to: int = 0
+    runflat: bool = False
+    commercial: bool = False
     wide: bool = False                 # «Новый вид»: the search looks in more fields (_search_fields)
 
 
@@ -264,6 +270,11 @@ def recent_links(base: str, pairs, recent) -> List[Tuple[str, str]]:
     return [("%d/%d R%d" % s, _url(base, rest + [("w", s[0]), ("h", s[1]), ("d", s[2])])) for s in recent]
 
 
+def _positive(value):
+    text = str(value or "").strip()
+    return min(int(text), 10000000) if text.isascii() and text.isdigit() and len(text) <= 8 else 0
+
+
 def filters_of(args, known_brands, wide: bool = False) -> Filters:
     """The GET parameters, parsed on the server with limits; a brand the client sees no position of is dropped (never searched for).
     The width, the height and the radius by several values each (both views since 2026-11-09: the filters of the office's catalog);
@@ -279,7 +290,10 @@ def filters_of(args, known_brands, wide: bool = False) -> Filters:
                    args.get("s") if args.get("s") in SEASONS else "", args.get("t") if args.get("t") in ("studded", "friction") else "",
                    {"1": 1, "2": 2}.get(args.get("wh") or "", 0), (args.get("q") or "")[:MAX_TEXT].strip(),
                    args.get("o") if args.get("o") in SORTS else "brand", args.get("r") == "1", page,
-                   size_numbers(args, "w"), size_numbers(args, "h"), size_numbers(args, "d"), wide)
+                   size_numbers(args, "w"), size_numbers(args, "h"), size_numbers(args, "d"),
+                   origin=args.get("c") if args.get("c") in ("imp", "dom") else "",
+                   stock_min=_positive(args.get("sn")), price_from=_positive(args.get("pf")), price_to=_positive(args.get("pt")),
+                   runflat=args.get("rf") == "1", commercial=args.get("commercial") == "1", wide=wide)
 
 
 def apply(items: List[Visible], f: Filters) -> List[Visible]:
@@ -295,6 +309,16 @@ def apply(items: List[Visible], f: Filters) -> List[Visible]:
         if (brands and i.brand not in brands) or i.brand in without:
             continue
         if (f.season and o.season.value != f.season) or (f.studs and o.studded != (f.studs == "studded")):
+            continue
+        country = " ".join(str(getattr(o, "country", "") or "").split()).casefold()
+        domestic = country in ("россия", "russia", "рф")
+        if f.origin and (not country or domestic != (f.origin == "dom")):
+            continue
+        if f.stock_min and o.stock < f.stock_min:
+            continue
+        if f.price_from and i.price < f.price_from or f.price_to and i.price > f.price_to:
+            continue
+        if f.runflat and not o.runflat or f.commercial and (o.car_type or "").strip().upper() not in ("C", "LT"):
             continue
         if f.warehouse and i.warehouse != f.warehouse:
             continue
@@ -343,7 +367,7 @@ def columns_of(both: bool) -> tuple:
 
 
 def hidden_columns(conn, login: str) -> List[str]:
-    saved = user_prefs.get(conn, login, COLUMNS_KEY, []) if login else []
+    saved = user_prefs.get(conn, login, COLUMNS_KEY, ["year"]) if login else ["year"]
     keys = [k for k, _ in COLUMNS]
     return [k for k in keys if isinstance(saved, list) and k in saved]
 
@@ -375,7 +399,7 @@ def size_values(items: List[Visible]) -> dict:
 
 # «Вид 2» of the client's filters (the owner 2026-11-09…10, by the catalog of the supplier the client knows): the width, the profile,
 # the radius as three glued lists of ANY size (not only of the stock), the brands as a list, the mixed-width sets (front / rear).
-VIEW_KEY = "shop.fview"               # user_pref of the client: 1 or 2, the view of the block of the filters
+VIEW_KEY = "shop.fview2"               # user_pref of the client: 1 or 2, the view of the block of the filters
 QTY_AXIS = 2                          # «Количество» of a tyre of a mixed set: 2 per axis, never more than the stock
 KITS_MAX = PAGE                       # the sets shown at most (and the rows of «Только передняя / задняя ось»)
 ANY_SIZES = {"w": list(range(125, 400, 10)), "h": list(range(25, 90, 5)), "d": list(range(10, 25))}   # «выбрать любой размер как в мим»
@@ -383,8 +407,8 @@ AXES = (("f", "Передняя ось"), ("r", "Задняя ось"))
 
 
 def filters_view(conn, login: str) -> int:
-    """The view of the block of the filters the client chose (1 by default): kept until the client changes it."""
-    return 2 if login and user_prefs.get(conn, login, VIEW_KEY, 1) == 2 else 1
+    """The view of the block of the filters the client chose (2 by default): kept until the client changes it."""
+    return 2 if login and user_prefs.get(conn, login, VIEW_KEY, 2) == 2 else 1
 
 
 def save_filters_view(conn, login: str, value, now: str) -> int:
@@ -406,9 +430,10 @@ def brand_pick(base: str, pairs, items: List[Visible], chosen) -> dict:
     """«Производитель» of «Вид 2»: the brands the client sees (never another's), the chosen as chips each with the link without it."""
     labels = dict(brand_list(items))
     on = [b for b in chosen if b in labels]
-    rest = [(k, v) for k, v in pairs if k not in ("b", "p")]
+    param = "xb" if any(k == "xb" for k, _ in pairs) else "b"
+    rest = [(k, v) for k, v in pairs if k not in ("b", "xb", "p")]
     return {"options": brand_list(items), "on": [(b, labels[b]) for b in on],
-            "chips": [(labels[b], _url(base, rest + [("b", x) for x in on if x != b])) for b in on]}
+            "chips": [(labels[b], _url(base, rest + [(param, x) for x in on if x != b])) for b in on]}
 
 
 def axis_of(args, prefix: str) -> Tuple[Optional[int], Optional[int], Optional[int]]:
@@ -452,7 +477,8 @@ def mixed_sets(items: List[Visible], f: Filters, front, rear) -> dict:
     передняя»). The other filters (the brands, the season, the studs, the warehouse, the search) act on both axes; the sort is the
     page's."""
     base = apply(items, Filters([], [], "", f.brands, f.without, f.season, f.studs, f.warehouse, f.query, f.sort, f.descending, 1,
-                                wide=f.wide))
+                                origin=f.origin, stock_min=f.stock_min, price_from=f.price_from, price_to=f.price_to,
+                                runflat=f.runflat, commercial=f.commercial, wide=f.wide))
     return pair_axes(base, lambda i: _offer_size(i.offer), _model_key, front, rear)
 
 
