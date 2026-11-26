@@ -7,7 +7,9 @@
 <label class="field"><span class="label">С</span><input class="input" type="date" name="from" value="{{ start }}"></label>
 <label class="field"><span class="label">По</span><input class="input" type="date" name="to" value="{{ end }}"></label>
 <label class="field"><span class="label">Точка</span><select class="select" name="pt"><option value="">Все</option>{% for n in point_names %}<option value="{{ n }}"{% if n == point %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
-<button class="btn btn--primary">Показать</button><a class="btn btn--secondary" href="/orders/report/export.csv?from={{ start }}&to={{ end }}&pt={{ point|urlencode }}">Скачать CSV</a></form>
+<label class="field" data-handed-slice><span class="label">Заказы</span><select class="select" name="hs">{% for key, name in handed_slices.items() %}<option value="{{ key }}"{% if key == hs %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<label class="field"><span class="label">Передала точка</span><select class="select" name="hp"><option value="">Любая</option>{% for p in all_points %}<option value="{{ p.id }}"{% if p.id == hp %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+<button class="btn btn--primary">Показать</button><a class="btn btn--secondary" href="/orders/report/export.csv?from={{ start }}&to={{ end }}&pt={{ point|urlencode }}&hs={{ hs }}&hp={{ hp or '' }}">Скачать CSV</a></form>
 <section class="card"><div class="card-body" style="overflow-x:auto"><table class="table"><thead><tr><th>Точка</th><th>Заказов</th><th>Шин</th><th>Выручка</th><th>Закупка</th><th>Прибыль</th><th>Выплата точке</th><th>Чистая прибыль</th><th>{{ labels.owner }}</th><th>{{ labels.partner }}</th></tr></thead><tbody>
 {% for r in (report.lines + [report.total]) if report.lines %}<tr{% if loop.last %} class="strong"{% endif %}><td>{{ r.point }}</td><td>{{ r.orders }}</td><td>{{ r.pieces }}</td>{% for k in ("sale", "cost", "margin", "fee", "net", "owner", "partner") %}<td>{{ r[k]|money }}</td>{% endfor %}</tr>
 {% endfor %}{% if not report.lines %}<tr><td colspan="10" class="muted">За период продаж по заказам нет.</td></tr>{% endif %}

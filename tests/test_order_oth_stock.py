@@ -204,7 +204,8 @@ def test_the_page_na_oth_the_return_button_and_the_menu(tmp_path):
     r = post(owner, "/oth/return", tok, item=item)
     assert r.status_code == 302 and r.headers["Location"].endswith("/oth")
     html = owner.get("/oth").get_data(as_text=True)
-    assert "Возвращено поставщику" in html and "На ОТХ ничего нет" in html and "Отменить" in html
+    assert "Вернули поставщику" in html and "На ОТХ ничего нет" in html                    # the tab renamed (the owner 2026-11-22)
+    assert "Отменить" in owner.get("/oth?tab=returned").get_data(as_text=True)
     post(owner, "/oth/return", tok, item=item, undo="1")
     assert order_oth.goods_on_oth(conn) == {"1": 4}
     assert post(owner, "/oth/return", tok, item="999").status_code == 302
@@ -515,7 +516,7 @@ def test_the_page_returns_and_undoes_a_number_of_tyres(tmp_path):
     html = owner.get("/oth").get_data(as_text=True)
     assert "Отмечено как возвращённое поставщику" in html
     returned = owner.get("/oth?tab=returned").get_data(as_text=True)                       # two tabs (the owner 2026-11-08)
-    assert "из 4, возвращено 1" in html and "Возвращено поставщику" in returned               # the part is in both tabs
+    assert "из 4, возвращено 1" in html and "Вернули поставщику" in returned                 # the part is in both tabs
     assert re.search(r'name="qty" value="3" min="1" max="3"', html) and re.search(r'name="qty" value="1" min="1" max="1"', returned)
     post(owner, "/oth/return", tok, item=item, qty="9")
     assert "Можно вернуть не больше 3 шт." in owner.get("/oth").get_data(as_text=True)
@@ -549,3 +550,58 @@ def test_the_journal_of_actions_names_the_number_of_an_undo(tmp_path):
     shown = [texts.audit_text({"action": a, "detail": json.loads(d)}) for a, d in
              conn.execute("SELECT action, detail FROM audit WHERE action IN ('oth_return', 'oth_return_undo') ORDER BY id")]
     assert "(2 шт.)" in shown[0] and "снята (1 шт.)" in shown[1], shown
+
+
+def _signed(conn, cid, number, transfer, at, day="2026-10-24"):
+    """The act МХ-3 of the order signed by the point: what went back to the supplier for good (order_oth.sign_act's mark)."""
+    conn.execute("UPDATE order_card SET webmim_number = ?, transfer_number = ? WHERE id = ?", (number, transfer, cid))
+    conn.execute("INSERT INTO oth_return_plan (order_id, agreed_at, agreed_by, return_date, signed_at, signed_by) VALUES (?, ?, 'o', ?, ?, 'менеджер')",
+                 (cid, T, day, at))
+    conn.commit()
+
+
+def test_the_returned_tab_keeps_every_return_by_act_and_finds_it(tmp_path):
+    """The owner 2026-11-21: «Возвращено поставщику» never drops what went back (the act signed: the order left «На ОТХ»), and has a search
+    (WebMIM number, name, transfer number, code) and filters (pieces, the days from / to, the point)."""
+    app, owner, tok, conn = panel(tmp_path)
+    a, b = card_at(conn, "oth", T), card_at(conn, "oth", T)
+    _signed(conn, a, "5300001", "26R-0000011", "2026-10-24T12:00:00")
+    _signed(conn, b, "5300002", "26R-0000022", "2026-10-27T12:00:00")
+    conn.execute("UPDATE order_item SET qty = 2, code = 'K-777', name = 'Ikon Autograph Snow 3' WHERE order_id = ?", (b,))
+    conn.commit()
+    assert order_oth.stock(conn)["returned"] == []                                          # gone from the old list: the act signed
+    rows = order_oth.returned_history(conn, [])
+    assert [r["order_id"] for r in rows] == [b, a] and all(r["by_act"] for r in rows)        # newest first
+    page = lambda **q: owner.get("/oth", query_string=dict(tab="returned", **q)).get_data(as_text=True)
+    found = lambda html: sorted(int(x) for x in re.findall(r'<a href="/orders/(\d+)">53000', html))
+    assert found(page()) == [a, b] and "по акту МХ-3" in page() and "26R-0000011" in page()
+    assert found(page(q="5300002")) == [b] and found(page(q="0000011")) == [a]
+    assert found(page(q="autograph")) == [b] and found(page(q="k-777")) == [b]
+    assert found(page(qty_from="3")) == [a] and found(page(qty_to="3")) == [b]               # card_at: 4 tyres; b: 2
+    assert found(page(**{"from": "2026-10-25"})) == [b] and found(page(to="2026-10-24")) == [a]
+    assert found(page(qty_from="x", to="24.10")) == [a, b]                                  # a wrong number or day is left out
+    empty = page(q="нет такого")
+    assert "Ничего не найдено" in empty and found(empty) == []
+    pid = orders.get_card(conn, a)["point_id"]
+    assert found(page(point=str(pid))) == [a, b]                                            # both of the same point
+
+
+def test_the_returned_counter_is_the_whole_list_on_both_tabs_and_a_test_point_is_left_out(tmp_path):
+    """Review 2026-11-21: the counter of «Возвращено поставщику» counted the old marks only on «На складе» and the filtered rows on its own
+    tab; the returns of a test point were listed."""
+    from tires_sync import oth_stock
+    app, owner, tok, conn = panel(tmp_path)
+    a = card_at(conn, "oth", T)
+    _signed(conn, a, "5300001", "26R-0000011", "2026-10-24T12:00:00")
+    counter = lambda html: re.search(r'data-returned-pieces>(\d+) шт', html).group(1)
+    assert counter(owner.get("/oth").get_data(as_text=True)) == "4"
+    assert counter(owner.get("/oth?tab=returned&q=нет-такого").get_data(as_text=True)) == "4"
+    pid = orders.get_card(conn, a)["point_id"]
+    import pytest
+    mp = pytest.MonkeyPatch()
+    mp.setattr(oth_stock, "_test_points", lambda conn: {pid})
+    try:
+        html = owner.get("/oth?tab=returned").get_data(as_text=True)
+        assert counter(html) == "0" and "5300001" not in html
+    finally:
+        mp.undo()

@@ -96,13 +96,13 @@ def test_flat_and_grouped_price_sort_put_the_unpriced_last_by_brand_and_name():
 def test_page_explains_percents_and_has_segmented_filters_that_submit_themselves(tmp_path):
     html = app_with(tmp_path, *ROWS).get("/catalog").get_data(as_text=True)
     assert "Бренды и наценки" in html and "Сопоставления" in html
-    assert html.count('class="seg"') == 2
+    assert html.count('class="seg"') == 3
     for label in ("Все", "Лето", "Зима", "Шипы", "Без шипов", "В фиде", "Не в фиде", "Нет пары"):
         assert label in html
     assert 'name="s" value="summer"' in html and 'name="t" value="studded"' in html and '<option value="feed"' in html
-    assert 'aria-label="Ширина"' in html and 'aria-label="Профиль"' in html and 'aria-label="Диаметр"' in html
+    assert all('id="oc-%s-l">' % dimension in html for dimension in ("w", "h", "d"))
     assert 'placeholder="Размер, название, артикул"' in html                                          # the search is not only by the maker any more
-    assert "data-autosubmit" in html and "onchange=" not in html
+    assert "office_catalog.js" in html and "onchange=" not in html
 
 
 def test_winter_split_shows_studded_and_friction_models_with_icons(tmp_path):
@@ -165,7 +165,7 @@ def test_size_filter_accepts_several_values_per_field(tmp_path):
     assert len(names(client.get("/catalog?w=abc").get_data(as_text=True))) == 3  # not a number: no filter
     assert len(names(client.get("/catalog?w=999").get_data(as_text=True))) == 0
     html = client.get("/catalog?w=205,215&h=55").get_data(as_text=True)
-    assert 'name="w" value="205 215"' in html and 'name="h" value="55"' in html     # shown with spaces (the owner 2026-10-29: «225 205 195»)
+    assert all(field in html for field in ('name="w" value="205"', 'name="w" value="215"', 'name="h" value="55"'))
     assert len(names(client.get("/catalog/table?w=205,215").get_data(as_text=True))) == 2
 
 
@@ -224,7 +224,9 @@ def test_a_position_the_supplier_took_away_stays_in_the_catalog_with_stock_zero_
     assert ">GONE1<" not in get("?st=feed") and ">GONE1<" not in get("?st=no")                          # it is neither in the feed nor «not in the feed»
     assert ">GONE1<" in get("?q=175/70") and ">GONE1<" in get("?q=old%20model") and ">GONE1<" in get("?d=13")
     assert ">GONE1<" not in get("?d=16") and ">GONE1<" not in get("?s=summer") and ">GONE1<" not in get("?q=lauf")
-    assert "op\" value=\"on:900" not in page and "goods_id=900" not in page                          # nothing can be sold, ordered or added from it
+    assert "op\" value=\"on:900" not in page and "sales/new?goods_id=900" not in page                # nothing can be sold or added to the feed from it
+    # ТЗ 94 (the owner 2026-11-25): the office may still order it by hand — the only link with its code is «Заказ»
+    assert re.findall(r'href="[^"]*goods_id=900[^"]*"', page) == ['href="/orders/new?goods_id=900"']
 
 
 def test_a_gone_position_that_came_back_in_a_fresher_unload_is_shown_once_and_a_gone_row_has_no_checkbox_but_a_preview(tmp_path):

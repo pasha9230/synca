@@ -114,15 +114,23 @@ def _clean_number(value, limit: int, label: str) -> str:
     return text
 
 
-def sell(conn, record_id, pieces: Dict[int, int], name, phone, number, transfer, anonymous: bool, now: str, who: str) -> int:
+def sell(conn, record_id, pieces: Dict[int, int], name, phone, number, transfer, anonymous: bool, now: str, who: str, seller: str = "") -> int:
     """The window's «Продать»: B made on «Выполнено» with the pieces, as the module says. Returns B; SaleError (or OrderError) says why
-    nothing was done. Its own transaction: an open one of the caller is a RuntimeError."""
+    nothing was done. Its own transaction: an open one of the caller is a RuntimeError. `seller`: the login of the owner or the partner
+    working as the point (the owner 2026-11-20: they answer for B, oth_sale.credit_seller); empty: the point sold, the responsible of the
+    order stays and the journal says so."""
     if conn.in_transaction:
         raise RuntimeError("oth_point_sale.sell: открыта транзакция вызывающего, продажа идёт своей транзакцией")
     name, phone = _clean_contact(name, phone, anonymous)
     conn.execute("BEGIN IMMEDIATE")
     try:
         b = _sell(conn, int(record_id), pieces, name, phone, number, transfer, now, who)
+        from . import oth_sale
+        if seller:
+            oth_sale.credit_seller(conn, b, seller, now, commit=False)      # already the responsible: nothing to say
+        else:
+            kept = orders.get_card(conn, b)["responsible"]
+            orders.add_event(conn, b, now, who, "field", oth_sale.POINT_KEEPS_TEXT % (kept or "не назначен"))
     except Exception:
         conn.rollback()
         raise
@@ -185,7 +193,7 @@ def _sell(conn, x: int, pieces: Dict[int, int], name: str, phone: str, number, t
                     (done["id"], now, now, b, created["id"])).rowcount != 1:
         raise SaleError("Заказ продажи только что изменили: обновите страницу.")
     orders.add_event(conn, b, now, who, "stage", "Этап: «%s» → «%s»" % (created["name"], done["name"]))
-    orders.add_event(conn, b, now, who, "point", "Точка продала шины с ОТХ: %d шт. (запись хранения №%d)%s" % (
+    orders.add_event(conn, b, now, who, "point", order_oth.POINT_SOLD + ": %d шт. (запись хранения №%d)%s" % (
         sold, x, "; %s" % NO_CONTACT.lower() if not (name or phone) else ""))
     left = orders.get_card(conn, x)
     mark = oth_storage.record(conn, x) or {}

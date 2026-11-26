@@ -17,8 +17,8 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_log, user_prefs
-from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_send, webmim_cabinet, webmim_create, webmim_match
+from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_chain, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_arrival, point_log, user_prefs
+from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, point_payouts, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_point_fix, vk_send, webmim_cabinet, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
 from .routes_design import office_new, office_page
@@ -36,6 +36,9 @@ ORDER_PARTS = ("items", "wants", "money", "intercity", "webmim")        # the pa
 def local_now():
     """Moscow time; the panel clock is UTC."""
     return now() + timedelta(hours=3)
+
+
+TWIN_TEXT = "Заказ №%d этому клиенту создан только что: открыт он, второй не создан. Нужен ещё один отдельный заказ: нажмите кнопку через минуту."
 
 
 def local_iso() -> str:
@@ -80,6 +83,13 @@ def _responsible_options(app, conn, current: str = "") -> list:
         logins.append(current)
     return [{"login": login, "label": panel_users.person_name(conn, login, app.config["AUTHOR"]) + (" (владелец)" if login == app.config["AUTHOR"] else "")}
             for login in dict.fromkeys(logins)]
+
+
+def _chain_staff(app, conn) -> dict:
+    """For «Новый заказ этому клиенту»: who may answer for an order, and the panel's admin to name when the responsible of the earlier
+    order was deleted (the owner 2026-11-20): the one active panel user of the role «Владелец»; none or several: the main login."""
+    owners = [u["login"] for u in panel_users.list_users(conn) if u["active"] and u["role"] == "owner"]
+    return {"staff": {o["login"] for o in _responsible_options(app, conn)}, "admin": owners[0] if len(owners) == 1 else app.config["AUTHOR"]}
 
 
 def check_responsible(app, conn, login, current: str = "") -> None:
@@ -526,31 +536,67 @@ def register(app) -> None:
         _conn, settings, parsed, ref = context(app)
         return order_offers.item_args(conn, settings, parsed, ref, goods_id, local_now().date().isoformat(), account_id)
 
+    def catalog_row(conn, goods_id):
+        """A row of a new window for a position the office orders though it is not on sale (ТЗ 94, «Заказ» of the catalog): of today's
+        unload or of the permanent base of positions, with the panel's price when it has one, else an empty price to type. None: no such position."""
+        _conn, settings, parsed, ref = context(app)
+        try:
+            found = order_search.locate(conn, parsed, goods_id)
+        except order_search.NotLocated:
+            return None
+        name = found.offer.name_orig or found.offer.name
+        try:
+            shown = _price_text(order_search.located_args(conn, settings, parsed, ref, found, local_now().date().isoformat(), manual_sale="")["sale_unit"])
+        except orders.OrderError:
+            shown = ""
+        return {"goods_id": found.offer.goods_id, "query": name, "name": name, "qty": "1", "sale_unit": shown, "sale_auto": shown}
+
     def typed_goods(conn, code, text, stock=False):
-        """(code, name when found by the text): the position the manager chose in the list, or the one the text names exactly. Raises OrderError when the text is not exact
+        """(order_search.Located, name when found by the text): the position the manager chose in the list (by its code, else by the supplier's exact
+        name the list filled in: the code moves when the supplier rewrites a name), or the one the text names exactly, else the one position of the
+        permanent base of positions with that name (order_search.locate, the same as a chat's ad). Raises OrderError when the text is not exact
         enough: then the manager chooses in the list. `stock`: a deal of the point's stock, whose tyre the unload may not have (the list offers it)."""
-        if code:
-            return code, ""
         _conn, _settings, parsed, ref = context(app)
+        if code:
+            try:
+                return order_search.locate(conn, parsed, code, [text]), ""
+            except order_search.NotLocated as err:
+                raise orders.OrderError(order_search.first_line(err))
+        named = order_search.same_named(parsed, text)
+        if len(named) > 1:                                                # the list shows no position without a stock: the codes are named here
+            raise orders.OrderError("Позиций с названием «%s» в выгрузке поставщика: %d, ни одна не добавлена. Впишите в поле код нужной: %s." % (
+                text[:80], len(named), "; ".join("%s (остаток %d шт.)" % (o.goods_id, o.stock) for o in named[:order_search.SHOWN_VARIANTS])))
         offer, count = order_search.typed(conn, parsed, ref, text)
+        if offer is not None and offer.stock <= 0:                        # taken without a stock today: the journal and the page say so
+            return order_search.Located(offer, "name", searched="название «%s»" % text[:120]), offer.name_orig or offer.name
         if offer is not None:
-            return offer.goods_id, offer.name_orig or offer.name
+            return order_search.Located(offer, "id"), offer.name_orig or offer.name
         hint = " Шину, которой нет в выгрузке, выберите в списке строкой «шина с точки»." if stock else ""
         if count:
             raise orders.OrderError("По «%s» нашлось позиций: %d. Выберите нужную в списке под полем.%s" % (text[:80], count, hint))
-        raise orders.OrderError("По «%s» не нашлось ни кода позиции, ни модели с остатком.%s" % (text[:80], hint))
+        try:                                                              # the unload has it not: the permanent base of positions, by the exact name
+            found = order_search.locate(conn, parsed, "", [text])
+        except order_search.NotLocated:
+            raise orders.OrderError("По «%s» не нашлось ни кода позиции, ни модели с остатком, ни позиции с таким названием в базе позиций.%s" % (text[:80], hint))
+        return found, found.offer.name_orig or found.offer.name
 
     def row_item(conn, code, text, sale_unit, stock=False, account_id=None, sale_auto=""):
-        """(keyword arguments of orders.add_item without qty, name found by the text) for a row of «Позиции»: a position of the unload, or a tyre of the
-        point (code POINT_GOODS, chosen in the list: its name is the text). The price typed wins over the panel's; the price the list or the catalog
-        put in the field and nobody changed (`sale_auto`, the same text) is the panel's: priced now by the account of the window."""
+        """(keyword arguments of orders.add_item without qty, name found by the text, journal records of where it came from: order_search.notes,
+        a warning for the page: Located.warning) for a row of «Позиции»: a position of the unload or of the base of positions, or a tyre of the point
+        (code POINT_GOODS, chosen in the list: its name is the text). The price typed wins over the panel's; the price the list or the catalog put
+        in the field and nobody changed (`sale_auto`, the same text) is the panel's: priced now by the account of the window."""
         if code == orders.POINT_GOODS:
-            return order_offers.point_item_args(conn, text, sale_unit), ""
-        goods_id, by_text = typed_goods(conn, code, text, stock)
-        args = offer_item(conn, goods_id, account_id)
+            return order_offers.point_item_args(conn, text, sale_unit), "", [], ""
+        found, by_text = typed_goods(conn, code, text, stock)
+        _conn, settings, parsed, ref = context(app)
+        manual = str(sale_unit or "") if own_point() is None else None      # ТЗ 94: the office may type the price the panel has not; never a point
+        try:
+            args = order_search.located_args(conn, settings, parsed, ref, found, local_now().date().isoformat(), account_id, manual_sale=manual)
+        except order_search.NotLocated as err:
+            raise orders.OrderError(order_search.first_line(err))
         if str(sale_unit or "").strip() and str(sale_unit).strip() != str(sale_auto or "").strip():
             args["sale_unit"] = sale_unit
-        return args, by_text
+        return args, by_text, order_search.notes(found, "item"), found.warning()
 
     def account_default(conn, fields) -> str:
         """The responsible of a new order made by hand: the manager of the point of the account of its chat («Чат Авито»), else the
@@ -581,8 +627,10 @@ def register(app) -> None:
         _conn, settings, parsed, ref = context(app)
         query = request.args.get("q", "").strip()
         account = window_account(conn, request.args) if len(query) >= 2 else None
-        items = order_search.suggestions(conn, settings, parsed, ref, query, local_now().date().isoformat(), account_id=account) if len(query) >= 2 else []
-        if items and own_point() is None:                                      # the tyres lying on «На ОТХ» (oth_sale): «на ОТХ: Бета 2 шт»
+        office = own_point() is None                                           # ТЗ 94: the office finds every position of the base, marked
+        items = order_search.suggestions(conn, settings, parsed, ref, query, local_now().date().isoformat(), account_id=account,
+                                         every=office) if len(query) >= 2 else []
+        if items and office:                                                   # the tyres lying on «На ОТХ» (oth_sale): «на ОТХ: Бета 2 шт»
             marks = oth_sale.find_hint(conn, [it["goods_id"] for it in items])
             items = [dict(it, oth=marks[str(it["goods_id"])]) if str(it["goods_id"]) in marks else it for it in items]
         if len(query) >= 2 and request.args.get("deal") == "stock":           # a deal of the point's stock: its tyre may be one the unload has not
@@ -801,6 +849,16 @@ def register(app) -> None:
             start, end = today.replace(day=1).isoformat(), today.isoformat()
         return start, end, request.args.get("pt", "").strip()[:80]
 
+    def _handed_args():
+        """The slice «Все / Только переданные точкой / Без переданных точкой» and the point that handed them over (ТЗ 95)."""
+        hs = request.args.get("hs", "")
+        hs = hs if hs in order_report.HANDED_SLICES else ""
+        hp = request.args.get("hp", "").strip()
+        hp = int(hp) if hp.isdigit() else None
+        if hp is not None and hs != "none":
+            hs = "only"                                                     # a chosen point: its handed clients
+        return hs, (hp if hs == "only" else None)
+
     @app.route("/orders/report")
     @login_required
     def orders_report():
@@ -809,13 +867,15 @@ def register(app) -> None:
         start, end, point = _report_args()
         names = [r[0] for r in conn.execute("SELECT DISTINCT %s FROM sale s LEFT JOIN point p ON p.id = s.point_id WHERE s.source = 'order'"
                                             " AND %s != ''" % (sales_store.POINT_NAME, sales_store.POINT_NAME))]        # the point's name now
-        report = order_report.build(conn, start, end, point)
-        every = order_report.build(conn, start, end) if point else report               # a point paid only for the clients it handed over
+        hs, hp = _handed_args()
+        report = order_report.build(conn, start, end, point, hs, hp)
+        every = order_report.build(conn, start, end) if point or hs else report         # a point paid only for the clients it handed over
         names = sorted(set(names) | {r["point"] for r in every["handoff"]["lines"] if r["point"] != order_report.NO_POINT})   # is chosen too (З8)
         rates, today = order_report.list_rates(conn), local_now().date().isoformat()
         return render_template("orders_report.html", report=report, start=start, end=end, point=point, point_names=names,
                                fee=order_report.rate_on(rates, "point_fee", today), owner_share=order_report.rate_on(rates, "owner_share", today),
-                               labels=order_report.share_labels(conn))
+                               labels=order_report.share_labels(conn), handed_slices=order_report.HANDED_SLICES, hs=hs, hp=hp,
+                               all_points=points.list_points(conn))
 
     @app.route("/orders/settings/money")
     @login_required
@@ -827,6 +887,13 @@ def register(app) -> None:
         return render_template("orders_money.html", rates=rates, today=today, fee=order_report.rate_on(rates, "point_fee", today),
                                owner_share=order_report.rate_on(rates, "owner_share", today), defaults=order_report.DEFAULTS,
                                handoff_fee=order_report.rate_on(rates, "handoff_fee", today), labels=order_report.share_labels(conn),
+                               oth_sale_fee=order_report.rate_on(rates, "oth_sale_fee", today), income_shown=order_report.income_shown(conn),
+                               income_switch=current_user()["role"] == "owner",
+                               kpi={name: order_report.rate_on(rates, name, today) for name in ("kpi_orders", "kpi_tyres", "kpi_bonus")},
+                               kpi_from=order_report.KPI_FROM, per_tyre_from=order_report.HANDOFF_PER_TYRE_FROM,
+                               issue_per_tyre_from=order_report.POINT_FEE_PER_TYRE_FROM,
+                               point_rates=order_report.list_point_rates(conn), point_rate_names=order_report.POINT_RATES,
+                               points=points.list_points(conn),
                                saved_labels=order_report.saved_share_labels(conn), label_defaults=order_report.SHARE_LABELS,
                                label_max=order_report.SHARE_LABEL_MAX)
 
@@ -845,14 +912,38 @@ def register(app) -> None:
             changed = order_report.set_share_labels(conn, request.form.get("owner_label", ""), request.form.get("partner_label", ""), now_iso(), author())   # UTC: the journal reads it so
             flash("Подписи долей сохранены." if changed else "Подписи не менялись.")
             return redirect(MONEY_PAGE)
+        if request.form.get("what") == "point_income":                  # «Показывать точкам страницу дохода»: the owner's own switch (ТЗ 80)
+            if current_user()["role"] != "owner":
+                abort(403)
+            on = request.form.get("on") == "1"
+            if order_report.set_income_shown(conn, on, now_iso(), author()):
+                flash("Точки видят страницу «Доход»." if on else "Страница «Доход» скрыта от точек.")
+            return redirect(MONEY_PAGE)
+        if request.form.get("what") == "point_rates":                   # «Индивидуальные настройки» of a point (ТЗ 95): from a date, as «Ставки»
+            try:
+                point_id = int(request.form.get("point_id", ""))
+                if request.form.get("reset") == "1":                       # every own rate back to the general one from the date
+                    values = {name: None for name in order_report.POINT_RATES}
+                else:
+                    values = {name: parse_amount(request.form[name]) for name in order_report.POINT_RATES if request.form.get(name, "").strip()}
+                if not values:
+                    raise ValueError("Впишите хотя бы одну ставку точки.")
+                changed = order_report.set_point_rates(conn, point_id, request.form.get("valid_from", "").strip()[:10], local_now().date().isoformat(),
+                                                       local_iso(), author(), values)
+            except ValueError as err:
+                flash(str(err) if str(err) not in ("not a number", "") and not str(err).startswith("invalid literal") else "Ставка: нужно число.")
+                return redirect(MONEY_PAGE)
+            flash("Ставки точки сохранены." if changed else "Ничего не записано: такие ставки уже действуют с этой даты.")
+            return redirect(MONEY_PAGE)
         def typed(name):                     # a field left as the form filled it is not sent: it would undo a rate already saved for a later date
             text = request.form.get(name, "").strip()
             return None if text == request.form.get(name + "_was", "").strip() else parse_amount(text)
         try:
-            fee, pct, handoff = typed("point_fee"), typed("owner_pct"), typed("handoff_fee")
+            fee, pct, handoff, oth = typed("point_fee"), typed("owner_pct"), typed("handoff_fee"), typed("oth_sale_fee")
+            kpi = {name: typed(name) for name in ("kpi_orders", "kpi_tyres", "kpi_bonus")}       # absent from an old form: None, not touched
             share = None if pct is None else pct / 100
             changed = order_report.set_rates(conn, request.form.get("valid_from", "").strip()[:10], local_now().date().isoformat(), local_iso(), author(),
-                                             point_fee=fee, owner_share=share, handoff_fee=handoff)
+                                             point_fee=fee, owner_share=share, handoff_fee=handoff, oth_sale_fee=oth, **kpi)
         except ValueError as err:
             flash(str(err) if str(err) != "not a number" else "Ставка: нужно число.")
             return redirect(MONEY_PAGE)
@@ -865,7 +956,8 @@ def register(app) -> None:
     def orders_report_export():
         start, end, point = _report_args()
         conn = get_conn()
-        resp = app.response_class(order_report.export_csv(order_report.build(conn, start, end, point), order_report.share_labels(conn)),
+        hs, hp = _handed_args()
+        resp = app.response_class(order_report.export_csv(order_report.build(conn, start, end, point, hs, hp), order_report.share_labels(conn)),
                                   mimetype="text/csv")
         resp.headers["Content-Disposition"] = 'attachment; filename="orders-report-%s_%s.csv"' % (start, end)
         resp.headers["Cache-Control"] = "no-store"
@@ -893,8 +985,32 @@ def register(app) -> None:
                 shown = _price_text(args["sale_unit"])                     # the main account's: priced again by the window's account if kept
                 rows.append({"goods_id": args["goods_id"], "query": args["name"], "name": args["name"], "qty": "1", "sale_unit": shown, "sale_auto": shown})
             except orders.OrderError as err:
-                flash(str(err), "error")
+                row = catalog_row(conn, goods_id) if own_point() is None else None
+                if row is None:
+                    flash(str(err), "error")
+                else:                                                     # ТЗ 94: out of the feed, without a price or the unload has it no more
+                    rows.append(row)
+                    if row["sale_unit"]:                                  # the base has its price: only its stock is to check
+                        flash("Позиции «%s» нет в выгрузке поставщика сегодня: заказ оформить можно, цена из базы позиций, "
+                              "проверьте наличие у поставщика." % row["name"][:120], "warning")
+                    else:
+                        flash("Позиция «%s» не в продаже (вне фида, без цены или нет в выгрузке): заказ оформить можно, впишите цену за шт. "
+                              "и проверьте наличие у поставщика." % row["name"][:120], "warning")
         return new_page(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, rows)
+
+    def wait_stage(conn, fields: dict) -> tuple:
+        """«Лист ожидания» of the new order's window (the owner 2026-11-26): «Поставить в ожидание» makes the order right on «Ожидает
+        наличие». It needs the client (a name or a phone) and the wishes in words; the journal names them. (stage, events) or OrderError."""
+        stage = next((s for s in orders.list_stages(conn) if s["code"] == "wait"), None)
+        if stage is None:
+            raise orders.OrderError("В воронке нет этапа «Ожидает наличие».")
+        wish = orders._clean("wait_wish", fields.get("wait_wish"), conn)
+        if not wish:
+            raise orders.OrderError("Лист ожидания: опишите, что ждёт клиент (размер, бренд, сезон, бюджет).")
+        if not (str(fields.get("client_name") or "").strip() or str(fields.get("client_phone") or "").strip()):
+            raise orders.OrderError("Лист ожидания: укажите имя или телефон клиента.")
+        analogs = "да" if orders._clean("wait_analogs", fields.get("wait_analogs"), conn) else "нет"
+        return stage, (("want", "Поставлен в лист ожидания. Ждёт: %s. Подойдут аналоги: %s." % (wish[:300], analogs)),)
 
     @app.route("/orders/new", methods=["POST"])
     @login_required
@@ -915,15 +1031,23 @@ def register(app) -> None:
                 raise orders.OrderError("В новом заказе не больше %d позиций: остальные добавьте в карточке." % MAX_NEW_ROWS)
             check_responsible(app, conn, fields.get("responsible"))
             fields["responsible"] = account_default(conn, fields)
-            items, account = [], window_account(conn, fields) if rows else None
+            items, account, records, warnings = [], window_account(conn, fields) if rows else None, [], []
             for row in rows:                                              # every position is checked before anything is written
-                args, by_text = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock", account,
-                                         row["sale_auto"])
+                args, by_text, notes, warning = row_item(conn, row["goods_id"], row["query"], row["sale_unit"], fields.get("deal_kind") == "stock",
+                                                         account, row["sale_auto"])
                 items.append(dict(args, qty=row["qty"]))
+                records += notes
+                if warning:
+                    warnings.append(warning)
                 if by_text:
                     found.append(by_text)
+            stage, events = wait_stage(conn, fields) if request.form.get("wait_on") == "1" else (None, ())
             stamp = local_iso()
-            card_id = orders.create_card_with_items(conn, fields, items, stamp, author(), require_contact=not items, scope_point=own_point())
+            card_id = orders.create_card_with_items(conn, fields, items, stamp, author(), require_contact=not items, scope_point=own_point(),
+                                                    stage=stage, events=events)
+            if records:                                                   # where a position came from (the base of positions, a moved code)
+                order_search.write_notes(conn, card_id, records, stamp, author())
+                conn.commit()
         except orders.OpenOrderExists as err:                            # the owner 2026-10-27: one open order per phone
             flash(str(err), "error")
             return new_page(conn, dict(request.form.items()), rows, busy=err.order_id)
@@ -932,9 +1056,13 @@ def register(app) -> None:
             return new_page(conn, dict(request.form.items()), rows)
         if found:
             flash("Добавлено по тексту: %s." % "; ".join(found))
+        for warning in warnings:
+            flash(warning, "error")
         named = deals.chat_of_field(conn, fields.get("avito_chat")) if can("chats", "edit") and fields.get("avito_chat") else None
         if named is not None:
             bind_chat(conn, card_id, named, "field", deliver=avito_deliver(conn, local_iso()))   # the chat is bound before the window offers the message
+        if fields.get("webmim_number") and fields.get("transfer_number"):
+            reconcile_saved_webmim(conn, card_id, fields)
         offer_send(conn, card_id, stamp)                                  # the rules of the first stage made a message: «Отправить клиенту?» at once
         return redirect("/orders/%d" % card_id)
 
@@ -953,7 +1081,11 @@ def register(app) -> None:
                 flash(str(err), "error")
                 return back(card_id)
             changes["cancel_reason"] = reason
-        asked = oth_offer(conn, card, stage_id) if stage_id is not None else None
+        target = next((s for s in orders.list_stages(conn) if s["id"] == stage_id), None)
+        # «Шины физически не приезжали?» of «Отменить заказ» (the owner 2026-11-25, point_arrival): «да» — the fee of the order is taken off;
+        # nothing to leave on «На ОТХ» then, the question of the point is not asked
+        no_arrival = request.form.get("no_arrival") == "yes" and target is not None and target["code"] == "cancel" and has_right("money")
+        asked = oth_offer(conn, card, stage_id) if stage_id is not None and not no_arrival else None
         if asked is not None:
             return ask_oth(card_id, asked, reason)
         going_back = back_offer(conn, card, stage_id) if stage_id is not None else None
@@ -972,6 +1104,12 @@ def register(app) -> None:
             stamp = local_iso()
             moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes)
             message, ok = ("Заказ перенесён." if moved else "Заказ уже на этом этапе."), True
+            if moved and no_arrival:
+                if point_arrival.mark_none(conn, card_id, stamp, author()):
+                    conn.commit()
+                    message += " Шины не приезжали: начисление точке за выдачу снято."
+                if own_point() is not None:
+                    point_log.record(conn, stamp, author(), own_point(), "move", card_id, "отмена: шины не приезжали")
             if moved:
                 order_oth.moved_by_hand(conn, card, stamp, author())      # «На возврат» by hand: the task (2026-11-04)
             if moved:                                                     # «Товар на точке» by hand: «можно забирать» as «приехал» (2026-10-30)
@@ -996,6 +1134,19 @@ def register(app) -> None:
         ost = request.form.get("ost")
         if own_point() is not None and ost in points.POINT_STAGES:                 # the cards of «Заказы» on a phone: back to the stage
             return redirect("/orders?ost=" + ost)
+        return redirect("/orders/%d" % card_id)
+
+    @app.route("/orders/<int:card_id>/arrival-back", methods=["POST"])
+    @login_required
+    def order_arrival_back(card_id):
+        """«Вернуть отметку» of «Шины физически не приезжали» (the review 2026-11-26): the fee of the order counts again; the money right."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if not has_right("money"):
+            abort(403)
+        if point_arrival.unmark_none(conn, card_id, local_iso(), author()):
+            conn.commit()
+            flash("Отметка снята: начисление точке за выдачу по заказу снова в расчёте.")
         return redirect("/orders/%d" % card_id)
 
     def _back_ask(card: dict):
@@ -1132,6 +1283,66 @@ def register(app) -> None:
             flash(str(err), "error")
         return redirect("/orders/%d" % card_id)
 
+    @app.route("/orders/<int:card_id>/chain", methods=["POST"])
+    @login_required
+    def order_chain_link(card_id):
+        """«Связать с заказом» (the owner 2026-11-19, task #83): another order of the client typed by its number joins this order's chain."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        typed = str(request.form.get("other") or "")[:40]
+        other = order_chain.find(conn, typed)
+        try:
+            if other is None:
+                raise orders.OrderError("Заказа с номером «%s» нет: впишите номер МИМ или номер заказа в панели." % typed.strip())
+            order_chain.link(conn, card_id, other, local_iso(), author())
+            flash("Заказы связаны: в карточке видны номера других заказов клиента.", "ok")
+        except orders.OrderError as err:
+            flash(str(err), "error")
+        return redirect("/orders/%d" % card_id)
+
+    @app.route("/orders/<int:card_id>/chain-unlink", methods=["POST"])
+    @login_required
+    def order_chain_unlink(card_id):
+        """«Отвязать» of the chain: this order leaves it, the others stay tied."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if order_chain.unlink(conn, card_id, local_iso(), author()):
+            flash("Заказ отвязан от других заказов клиента.", "ok")
+        return redirect("/orders/%d" % card_id)
+
+    @app.route("/orders/<int:card_id>/again", methods=["POST"])
+    @login_required
+    def order_again(card_id):
+        """«Добавить заказ этому клиенту»: a new order of the same client, tied (order_chain.again)."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        try:
+            new, made = order_chain.again(conn, card_id, local_iso(), author(), **_chain_staff(app, conn))
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return redirect("/orders/%d" % card_id)
+        if made:
+            flash("Создан новый заказ №%d этому же клиенту, он связан с заказом №%s. Добавьте шины." % (new, manager.label(orders.get_card(conn, card_id))), "ok")
+        else:
+            flash(TWIN_TEXT % new)
+        return redirect("/orders/%d" % new)
+
+    @app.route("/clients/<int:client_id>/new-order", methods=["POST"])
+    @login_required
+    def client_new_order(client_id):
+        """«Добавить заказ» of a client's card (CRM): tied to the client's newest order (order_chain.for_client)."""
+        conn = get_conn()
+        try:
+            new, made = order_chain.for_client(conn, client_id, local_iso(), author(), **_chain_staff(app, conn))
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return redirect("/clients/%d" % client_id)
+        if made:
+            flash("Создан новый заказ №%d этому клиенту. Добавьте шины." % new, "ok")
+        else:
+            flash(TWIN_TEXT % new)
+        return redirect("/orders/%d" % new)
+
     @app.route("/orders/<int:card_id>/arrived-message", methods=["POST"])
     @login_required
     def order_arrived_message(card_id):
@@ -1258,10 +1469,12 @@ def register(app) -> None:
             oth_parts=order_sheet.mim_parts(conn, card) if card["stage"]["code"] == "oth" and own_point() is None else None,   # its title and row (2026-11-07)
             back_ask=_back_ask(card),
             arrived_untold=_arrived_untold(conn, card),
+            chain=order_chain.others(conn, card_id),
             merge_into=order_merge_store.into(conn, card_id), merge_ref=order_merge_store.is_ref(conn, card_id), merge_sources=order_merge_store.sources(conn, card_id),
             merge_why=order_merge_store.why_not_unmerge(conn, card_id) if order_merge_store.is_target(conn, card_id) else None,
             merge_items=order_merge_store.items_of(conn, card_id), merge_unordered=order_merge_store.unordered(conn, card),
             oth_at_point=oth_sale.all_from_oth(conn, card) and own_point() is None and can_post("order_oth_at_point"),
+            arrival=dict(point_arrival.state(conn, card_id), money=has_right("money")),     # «Шины физически не приезжали?»
             oth_back=oth_sale.why_not(conn, card) is None and own_point() is None and can_post("order_oth_untake"), oth_offers=oth_sale.offers(conn, card) if own_point() is None and can_post("order_oth_take") else {}, oth_ask=_oth_ask(conn, card), was=shown, part=part, tags=no_account_tags(conn, orders.tag_list(typed["tags"]) if typed and "tags" in typed else card["tags"]), known_tags=no_account_tags(conn, _known_tags(conn)), days=int(orders._seconds_on_stage(card["entered_at"], local_now()) // 86400), stage_day=orders.stage_day(orders.stage_since(conn, card)), stage_at=card["entered_at"] if orders.stage_day(card["entered_at"]) == orders.stage_day(orders.stage_since(conn, card)) else "", stages=orders.list_stages(conn), points=points.list_points(conn),
             stage_ids={s["code"]: s["id"] for s in orders.list_stages(conn) if s["code"]},
             events=_with_stubs(events, links), totals=money, return_amount=_return_amount(values, money, card["items"], typed), return_kinds=orders.RETURN_KINDS, sources=orders.SOURCES, deal_kinds=orders.DEAL_KINDS if own_point() is None else POINT_DEAL_KINDS, marks=orders.MARKS,
@@ -1354,6 +1567,81 @@ def register(app) -> None:
             flash(str(err), "error")
         return back(card_id, "supplier")
 
+    def reconcile_saved_webmim(conn, card_id, changed) -> None:
+        card = orders.get_card(conn, card_id)
+        number = str(card["webmim_number"]).strip().lstrip("№").strip()
+        transfer = card["transfer_number"]
+        if (own_point() is not None or card["deal_kind"] != "webmim" or card["stage"]["kind"] != "open"
+                or not number.isascii() or not number.isdigit() or not transfer
+                or webmim_match.current_server(conn) != "prod" or card_id in webmim_match.made_elsewhere(conn, "prod")
+                or card_id in oth_sale.borrowed_ids(conn, card_id)
+                or (card["items"] and not {"webmim_number", "transfer_number"}.intersection(changed))):
+            return
+
+        def client_of():
+            box = app.config.get("SECRET_BOX")
+            return None if box is None else webmim_match.client_for(conn, box, app.config.get("WEBMIM_HTTP") or urllib_transport, "prod")
+
+        stamp, who = local_iso(), author()
+        try:
+            order = webmim_match.read_number(conn, number, client_of, stamp)
+            invoice = order.get("invoice")
+            if invoice and invoice.casefold() != "".join(transfer.split()).casefold():
+                raise orders.OrderError("Номер перемещения в карточке отличается от номера счёта WebMIM.")
+            if not order["items"] or webmim_match.draft(order) or webmim_create.cancelled(order):
+                raise orders.OrderError("В WebMIM нет позиций оформленного заказа.")
+            if card["webmim_id"] and card["webmim_id"] != order["id"]:
+                raise orders.OrderError("Номер WebMIM относится к другому заказу поставщика.")
+            conn.execute("BEGIN IMMEDIATE")
+            latest = orders.get_card(conn, card_id)
+            if any(latest[k] != card[k] for k in ("webmim_id", "webmim_number", "transfer_number", "deal_kind", "stage_id")):
+                raise orders.OrderError("Карточка изменилась. Обновите её и повторите сохранение.")
+            webmim_match.remember_read_order(conn, order)
+            if set(webmim_match._pairs(conn, [order]).get(order["id"], ())) - {card_id}:
+                raise orders.OrderError("Этот заказ WebMIM связан с другой карточкой панели.")
+            if latest["items"]:
+                matched = webmim_match.card_block(conn, latest)
+                if matched["foreign"]:
+                    raise orders.OrderError("Заказ WebMIM не соответствует этой карточке.")
+                conn.commit()
+                if matched["differences"]:
+                    flash("Позиции отличаются. Подробности в блоке «WebMIM».", "warning")
+                else:
+                    flash("Позиции и количество совпадают с WebMIM.", "ok")
+                return
+            _conn, settings, parsed, ref = context(app)
+            account_id = window_account(conn, {}, card_id)
+            lines = []
+            for item in order["items"]:
+                try:
+                    offer = order_search.locate(conn, parsed, goods_id=item["goods_id"]).offer
+                except order_search.NotLocated:
+                    params = terms_store.get_params(conn)
+                    args = dict(goods_id=item["goods_id"], name=item["name"], brand_key="", season="all",
+                                diameter=0, territory="", sale_unit=None, terms={},
+                                fee_pct=params["fee_pct"], promo_pct=params["promo_pct"])
+                else:
+                    args = order_offers.offer_args(conn, settings, parsed, ref, offer, stamp[:10], account_id)
+                lines.append(dict(args, qty=item["qty"], supplier_price=item["price"], name=item["name"] or args["name"]))
+            awaiting_prices = any(line["sale_unit"] is None for line in lines)
+            if awaiting_prices and orders._needs_placed(latest["stage"], orders._placed_stage(conn)):
+                raise orders.OrderError("На этом этапе нельзя загрузить позиции без цены продажи.")
+            for line in lines:
+                orders.add_item(conn, card_id, now=stamp, author=who, commit=False, awaiting_sale_price=awaiting_prices, **line)
+            from .. import order_webmim
+            order_webmim.snapshot(conn, card_id, stamp, fresh=True)
+            orders.add_event(conn, card_id, stamp, who, "webmim", "Позиции загружены из заказа WebMIM.")
+            conn.commit()
+            flash("Позиции загружены из WebMIM. Укажите цены продажи вручную." if awaiting_prices
+                  else "Позиции и количество загружены из WebMIM. Проверьте цену продажи.", "ok")
+        except orders.OrderError as err:
+            conn.rollback()
+            flash("Номера сохранены. Сверка с WebMIM: %s" % err, "warning")
+        except Exception:
+            conn.rollback()
+            log.exception("WebMIM item import for order %s", card_id)
+            flash("Номера сохранены. Не удалось загрузить позиции из WebMIM.", "warning")
+
     @app.route("/orders/<int:card_id>/save", methods=["POST"])
     @login_required
     def order_save(card_id, part=None):
@@ -1365,6 +1653,7 @@ def register(app) -> None:
             changes["codes_written_off_at"] = (card["codes_written_off_at"] or local_now().date().isoformat()) if ticked == "0" else ""
         number_before = card["webmim_number"]
         lacking_before = {t["id"] for t in engine.list_tasks(conn, card_id, ("error",)) if t["kind"] == "message"}
+        vk_before = point_before(conn, card_id)
         if changes.get("responsible") == card["responsible"]:
             changes.pop("responsible")                                       # the form shows who answers now: sending that back names nobody new
         # the row of «Позиции» chosen or typed and not added by «+»: «Сохранить» adds it with the rest (the owner 2026-10-23, order №428).
@@ -1381,6 +1670,12 @@ def register(app) -> None:
             if "stage_id" in request.form or request.form.get("tab") != "money":
                 return card_page(conn, card, dict(changes, **typed_row))  # the window comes back with what was typed: nothing saved, nothing moved
             return back(card_id, "money")
+        if own_point() is None and has_right("money") and "source_point" in request.form:   # «Откуда клиент» = a point (ТЗ 92): money
+            try:
+                point_payouts.set_source_point(conn, card_id, request.form.get("source_point", ""), request.form.get("source_point_was", ""),
+                                               local_iso(), author())
+            except point_payouts.PayoutError as err:
+                flash(str(err), "error")
         if can("chats", "edit"):                                          # the chat of the order: unlink, move here, bind the offered or the typed one;
             # before the row: the row is priced by the account of the chats the order has after this press (order_offers.account_for)
             unlink, moved, offered = (_int(request.form.get(k)) for k in ("chat_unlink", "chat_move", "chat_bind"))
@@ -1410,6 +1705,7 @@ def register(app) -> None:
             flash("Поля заказа сохранены. Позиция не выбрана: начните вводить модель и выберите шину из списка.", "error")
         else:
             flash("Сохранено.", "ok")
+        point_fixed(conn, card_id, vk_before)                             # the fields and the typed row saved: the point's VK messages
         row = orders._row(conn, card_id)
         typed_number = bool(row["webmim_number"]) and "webmim_number" in changed     # the transfer number from MIM's cabinet, at the end
         if row["webmim_number"] and (("webmim_number" in changed and not number_before) or "webmim_id" in changed):
@@ -1417,6 +1713,8 @@ def register(app) -> None:
             _conn, _settings, parsed, _ref = context(app)
             prices, source = order_offers.webmim_purchase(conn, orders.get_card(conn, card_id), parsed, app.config)
             orders.refresh_purchase(conn, card_id, prices, source, local_iso(), author())
+        if not typed_row and "stage_id" not in request.form and {"webmim_number", "transfer_number"}.intersection(request.form):
+            reconcile_saved_webmim(conn, card_id, changed)
         if lacking_before:                                                # a lacking value typed (the transfer number): the window opens
             engine.refresh_tasks(conn, card_id, local_iso())
             if any(t["id"] in lacking_before for t in engine.list_tasks(conn, card_id, ("pending",))):
@@ -1496,11 +1794,13 @@ def register(app) -> None:
         if changes.get("responsible") == card["responsible"]:
             changes.pop("responsible")                                       # as «Сохранить»: who answers now is nobody new
         lacking_before = {t["id"] for t in engine.list_tasks(conn, card_id, ("error",)) if t["kind"] == "message"}
+        vk_before = point_before(conn, card_id)
         try:
             check_responsible(app, conn, changes.get("responsible"), card["responsible"])
             changed = orders.update_card(conn, card_id, changes, local_iso(), author())
         except orders.OrderError as err:
             return jsonify(ok=False, error=str(err)), 400
+        point_fixed(conn, card_id, vk_before)
         if changed and lacking_before:                                    # a lacking value typed (the phone): the waiting messages, as «Сохранить»
             engine.refresh_tasks(conn, card_id, local_iso())
             if any(t["id"] in lacking_before for t in engine.list_tasks(conn, card_id, ("pending",))):
@@ -1557,6 +1857,23 @@ def register(app) -> None:
             client = AvitoClient(client_id, client_secret, http=app.config.get("AVITO_HTTP") or urllib_transport, allow_write=True)
             chats_store.send_reply(conn, client, chat_row, text, token, stamp, author())
         return deliver
+
+    def point_before(conn, card_id) -> dict:
+        """What the point's VK messages of the order are made from, before a change (vk_point_fix.snapshot); {} for a point's own save."""
+        return {} if own_point() is not None else vk_point_fix.snapshot(conn, card_id, local_iso())
+
+    def point_fixed(conn, card_id, before: dict) -> None:
+        """The order saved (committed): the messages the panel sent to the point in VK are made right — the client, the positions, the dates…
+        (vk_point_fix; the owner 2026-11-24/25). Only this order; nothing for a point's own save. Never fails the save."""
+        if not before or own_point() is not None:
+            return
+        try:
+            box, http = app.config.get("SECRET_BOX"), vk_point_fix.short_http(app.config.get("VK_HTTP") or urllib_transport)
+            send, edit = vk_send.sender_for(conn, box, http=http), vk_send.editor_for(conn, box, http=http)
+        except Exception:                                                 # noqa: BLE001  a key that cannot be read: nothing to VK
+            log.exception("the key of the VK community could not be read")
+            return
+        vk_point_fix.order_changed(conn, card_id, before, local_iso(), author(), send, edit)
 
     def vk_sender(conn, quiet=False):
         """send(peer_id, text, random_id=) through the VK community; None without the master key or the key of the community.
@@ -1698,9 +2015,14 @@ def register(app) -> None:
         code, text = form.get("goods_id", "").strip(), form.get("query", "").strip()
         if not text:                                     # a choice in the list fills the text too: a code alone is what a browser restored after «Назад»
             raise orders.OrderError("Позиция не выбрана: начните вводить модель и выберите шину из списка.")
-        args, by_text = row_item(conn, code, text, form.get("sale_unit", ""), orders._row(conn, card_id)["deal_kind"] == "stock",
-                                 window_account(conn, {}, card_id), form.get("sale_auto", ""))
-        orders.add_item(conn, card_id, qty=form.get("qty", "1"), now=local_iso(), author=author(), **args)
+        args, by_text, notes, warning = row_item(conn, code, text, form.get("sale_unit", ""), orders._row(conn, card_id)["deal_kind"] == "stock",
+                                                 window_account(conn, {}, card_id), form.get("sale_auto", ""))
+        stamp = local_iso()
+        orders.add_item(conn, card_id, qty=form.get("qty", "1"), now=stamp, author=author(), commit=False, **args)
+        order_search.write_notes(conn, card_id, notes, stamp, author())   # where it came from (the base of positions, a moved code)
+        conn.commit()
+        if warning:                                                       # added without a stock today: said on the page at once
+            flash(warning, "error")
         return by_text
 
     def point_tyre(conn, card_id, form):
@@ -1732,10 +2054,12 @@ def register(app) -> None:
             return back(card_id, "sale")
         if "was" in request.form:                                          # «+» of the card's window sends the whole window (the owner 2026-10-26:
             return order_save(card_id, part="items")                       # «Точка» was lost): its fields are saved as by «Сохранить», with the row
+        vk_before = point_before(conn, card_id)
         try:
             by_text = add_typed_item(conn, card_id, request.form)
             if by_text:
                 flash("Добавлено по тексту: %s." % by_text)
+            point_fixed(conn, card_id, vk_before)
         except orders.OrderError as err:
             flash(str(err))
         return back(card_id, "sale" if own_point() else "items")     # a point: its block «Продажа точки»
@@ -1775,7 +2099,9 @@ def register(app) -> None:
                 flash("Клиент взял все шины заказа №%d: заказ продолжается там, этот ушёл в «Отмену»." % whole, "ok")
                 tell_at_point(conn, whole, next(s for s in orders.list_stages(conn) if s["code"] == "at_point"), stamp)
                 return redirect("/orders/%d" % whole)
+            vk_before = point_before(conn, card_id)
             pieces = oth_sale.take(conn, card_id, item_id, source, local_iso(), author())
+            point_fixed(conn, card_id, vk_before)
             flash("Взято с ОТХ: %d шт. В WebMIM оформится только недостающее." % pieces)
         except orders.OrderError as err:
             flash(str(err))
@@ -1790,7 +2116,9 @@ def register(app) -> None:
         if item_id not in {i["id"] for i in card["items"]}:
             abort(404)
         try:
+            vk_before = point_before(conn, card_id)
             pieces = oth_sale.untake(conn, card_id, item_id, local_iso(), author())
+            point_fixed(conn, card_id, vk_before)
             flash("Возвращено на ОТХ: %d шт. Если шины нужны у поставщика, добавьте позицию заново." % pieces)
         except orders.OrderError as err:
             flash(str(err))
@@ -1832,7 +2160,7 @@ def register(app) -> None:
         card = orders.get_card(conn, card_id)
         sent, note = manager.tell_client_arrived(conn, card_id, avito_deliver(conn, now), now, author())     # without a WebMIM number, the text without it: order_manager
         told = order_notify.tell_point(conn, app.config.get("SECRET_BOX"), card, oth_sale.point_text(conn, card, now), now,
-                                       vk_http=app.config.get("VK_HTTP") or urllib_transport)
+                                       vk_http=app.config.get("VK_HTTP") or urllib_transport, remember=vk_point_fix.OTH_HOLD)
         flash("Заказ на «%s». %s Точке: %s." % (stage["name"], note, told), "ok" if sent else "error")
 
     def _storage(conn, card: dict):
@@ -1933,9 +2261,11 @@ def register(app) -> None:
         card = card_or_404(conn, card_id)
         if item_id not in {i["id"] for i in card["items"]}:
             abort(404)
+        vk_before = point_before(conn, card_id)
         try:
             purchase = request.form.get("supplier_price", "").strip() if has_right("money") else ""     # the purchase is money: only with the right
             orders.update_item(conn, item_id, request.form.get("qty"), request.form.get("sale_unit"), local_iso(), author(), supplier_price=purchase or None)
+            point_fixed(conn, card_id, vk_before)
         except orders.OrderError as err:
             flash(str(err))
         return back(card_id, "sale" if own_point() else "items")     # a point: its block «Продажа точки»
@@ -1947,8 +2277,10 @@ def register(app) -> None:
         card = card_or_404(conn, card_id)
         if item_id not in {i["id"] for i in card["items"]}:
             abort(404)
+        vk_before = point_before(conn, card_id)
         try:
             orders.remove_item(conn, item_id, local_iso(), author())
+            point_fixed(conn, card_id, vk_before)
         except orders.OrderError as err:
             flash(str(err))
         return back(card_id, "sale" if own_point() else "items")     # a point: its block «Продажа точки»

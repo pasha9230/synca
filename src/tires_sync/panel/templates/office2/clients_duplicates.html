@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{# «Возможные дубли» of the office in «Новый вид» (ТЗ №79 of the owner, 2026-11-24): the same head and tabs as office2/clients.html, so the
+   tab «Клиенты» is there to go back by and the page keeps its look (before, the old page was drawn without the tabs). The tab goes back
+   to the view of the list it came from (`list_url`: the search, the filters, the page). #}
+{% block title %}Возможные дубли · CRM · Tires Sync{% endblock %}
+{% block body_class %}o2 o2-crm-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1>CRM · Клиенты<span class="help-q" tabindex="0" data-tip="Клиенты с общим надёжным признаком: телефон, собеседник Авито, чат и заказ, телефон из переписки. Сами не склеиваются: «Склеить» переносит всё во второго слева, «Не тот же» убирает пару из списка.">?</span></h1></div></header>
+<nav class="tabs o2-tabs" aria-label="CRM"><a href="{{ list_url }}">Клиенты</a><a class="is-active" href="{{ dup_url }}" aria-current="page">Возможные дубли</a></nav>
+{% with o2 = True %}{% include "_clients_duplicates_table.html" %}{% endwith %}
+{% endblock %}

@@ -1,0 +1,16 @@
+{# «Уведомления точек» in the head of «Рабочее место» and «Оповещение» (routes_point_notify, the owner 2026-11-25), both views: the point
+   switches its own (off: who does it, required, and why); the office looking at a point sees the state and switches it on /points/notify.
+   `cls`: the button's class of the view, `back`: where the press comes back. #}
+{% macro notify_switch(notify, point, user, choose, cls, back) %}{% if point and notify %}
+{% if user.role == "point" %}<details class="notify-switch" data-notify-switch><summary class="{{ cls }}" data-notify-switch-state="{{ 'on' if notify.enabled else 'off' }}">{{ "Уведомления: вкл" if notify.enabled else "Уведомления выключены" }}</summary>
+<div class="notify-switch-pop">{% if notify.enabled %}<form method="post" action="/my-point/notify" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="on" value="0"><input type="hidden" name="back" value="{{ back }}">
+<p class="notify-switch-hint">Звук и уведомления браузера пропадут у всех на этой точке. Офис увидит, кто выключил.</p>
+<label class="field"><span class="label">Кто выключает (имя)</span><input class="input" name="who" required maxlength="60" autocomplete="off" placeholder="Например: Иван"></label>
+<label class="field"><span class="label">Причина (необязательно)</span><input class="input" name="reason" maxlength="200" autocomplete="off"></label>
+<button class="btn btn--danger btn--sm" data-notify-off>Выключить</button></form>
+{% else %}<p class="notify-switch-hint" data-notify-off-by>Выключил{% if notify.who %}: {{ notify.who }}{% endif %}{% if notify.at %}, {{ notify.at|short_dt }}{% endif %}{% if notify.reason %} · {{ notify.reason }}{% endif %}</p>
+<form method="post" action="/my-point/notify" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="on" value="1"><input type="hidden" name="back" value="{{ back }}">
+<label class="field"><span class="label">Кто включает (необязательно)</span><input class="input" name="who" maxlength="60" autocomplete="off"></label>
+<button class="btn btn--primary btn--sm" data-notify-on>Включить</button></form>{% endif %}</div></details>
+{% elif choose %}<span class="{{ cls }} notify-switch-office" data-notify-switch-state="{{ 'on' if notify.enabled else 'off' }}">{{ "Уведомления: вкл" if notify.enabled else "Уведомления выключены" }}{% if can("orders") %} · <a href="/points/notify?p={{ point.id }}" data-notify-office>изменить</a>{% endif %}</span>{% endif %}
+{% endif %}{% endmacro %}

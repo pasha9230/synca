@@ -30,8 +30,10 @@
 {# «Рабочее место» in the menu: the point only (the owner 2026-10-29); the owner and the partner open /my-point by its address,
    «История точек» is the tab «Точки» of «История» #}
 {% if current_user().role == "point" %}<nav class="sb-group">
-<a class="sb-link{% if path.startswith('/my-point') and not path.startswith('/my-point/handed') %} is-active{% endif %}" href="/my-point">{{ icon("layers") }}Рабочее место</a>
+<a class="sb-link{% if path.startswith('/my-point') and not path.startswith(('/my-point/handed', '/my-point/income', '/my-point/notices')) %} is-active{% endif %}" href="/my-point">{{ icon("layers") }}Рабочее место</a>
+{% set nm = notice_marks() %}<a class="sb-link{% if path.startswith('/my-point/notices') %} is-active{% endif %}" href="/my-point/notices" data-notices-link>{{ icon("alert") }}Оповещение{% if nm.returns %}<span class="sb-count sb-count--red" data-returns-mark>{{ returns_mark }}</span>{% endif %}{% if nm.urgent %}<span class="sb-count sb-count--red" data-task-mark title="Задача офиса на сегодня">!</span>{% endif %}</a>
 <a class="sb-link{% if path.startswith('/my-point/handed') %} is-active{% endif %}" href="/my-point/handed">{{ icon("users") }}Переданные клиенты</a>
+{% if point_income_on() %}<a class="sb-link{% if path.startswith('/my-point/income') %} is-active{% endif %}" href="/my-point/income">{{ icon("chart") }}Доход</a>{% endif %}
 {% include "_nav_tasks.html" %}
 </nav>{% endif %}
 {% if can("home") %}<nav class="sb-group">
@@ -40,6 +42,7 @@
 {% if can("orders") or can("chats") or can("calls") or can("alerts") %}{% call sb_section("sales", "Продажи") %}
 {% if can("orders") and current_user().role != "point" %}<a class="sb-link{% if path.startswith('/orders') and not path.startswith(('/orders/report', '/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders">{{ icon("clipboard") }}Заказы</a>{% endif %}{# the point: hidden (the owner 2026-11-02) #}
 {% if current_user().role != "point" %}{% include "_nav_tasks.html" %}{% endif %}
+{% if can("orders") and current_user().role != "point" %}<a class="sb-link{% if path.startswith('/points/notify') %} is-active{% endif %}" href="/points/notify">{{ icon("alert") }}Уведомления точек</a>{% endif %}{# «Уведомления точек» (routes_point_notify, 2026-11-25) #}
 {% if can("chats") %}<a class="sb-link{% if path.startswith('/chats') %} is-active{% endif %}" href="/chats">{{ icon("chat") }}Чаты{% if nav.chat_wait %}<span class="sb-count">{{ nav.chat_wait }}</span>{% endif %}</a>{% endif %}
 {% if can("calls") %}<a class="sb-link{% if path.startswith('/calls') %} is-active{% endif %}" href="/calls">{{ icon("clock") }}Звонки</a>{% endif %}
 {% if can("clients") %}<a class="sb-link{% if path.startswith('/clients') %} is-active{% endif %}" href="/clients">{{ icon("users") }}CRM</a>{% endif %}
@@ -59,7 +62,8 @@
 <a class="sb-link{% if path.startswith('/analytics') %} is-active{% endif %}" href="/analytics">{{ icon("arrow-up") }}Продажи и воронка</a>
 {% if can("analytics") and has_right("money") %}<a class="sb-link{% if path.startswith('/economics') and not path.startswith('/economics/ads') %} is-active{% endif %}" href="/economics">{{ icon("chart") }}Юнит-экономика</a>
 <a class="sb-link{% if path.startswith('/economics/ads') %} is-active{% endif %}" href="/economics/ads">{{ icon("chart") }}Аналитика рекламы</a>
-<a class="sb-link{% if path.startswith('/orders/report') %} is-active{% endif %}" href="/orders/report">{{ icon("report") }}Отчёт по заказам</a>{% endif %}
+<a class="sb-link{% if path.startswith('/orders/report') %} is-active{% endif %}" href="/orders/report">{{ icon("report") }}Отчёт по заказам</a>
+<a class="sb-link{% if path.startswith('/points/payouts') %} is-active{% endif %}" href="/points/payouts">{{ icon("layers") }}Пункты выдачи</a>{% endif %}
 {% endcall %}{% endif %}
 {% if can("setup") or can("users") %}{% call sb_section("setup", "Настройка") %}
 {% if can("setup") %}<a class="sb-link{% if path.startswith('/connections') or path.startswith('/accounts') %} is-active{% endif %}" href="/connections">{{ icon("plug") }}Подключения</a>
@@ -122,7 +126,7 @@
 <div id="toasts" aria-live="polite"></div>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% if session.get("user") and can("alerts") %}<script src="{{ url_for('static', filename='bell.js') }}"></script>{% endif %}
-{% if session.get("user") and current_user().role == "point" %}<script src="{{ url_for('static', filename='notify.js') }}"></script>{% elif session.get("user") and current_user().role not in ("client", "viewer") %}<script src="{{ url_for('static', filename='notify.js') }}" data-feed="/tasks/feed"></script>{# the office: its own tasks «Позвонить…» ring (order_call) #}{% endif %}
+{% if session.get("user") and current_user().role == "point" %}<script src="{{ url_for('static', filename='notify.js') }}" data-csrf="{{ csrf_token() }}"></script>{# data-csrf: «Разрешите уведомления» counts its asks (routes_point_notify) #}{% elif session.get("user") and current_user().role not in ("client", "viewer") %}<script src="{{ url_for('static', filename='notify.js') }}" data-feed="/tasks/feed"></script>{# the office: its own tasks «Позвонить…» ring (order_call) #}{% endif %}
 {% if session.get("user") %}<script src="{{ url_for('static', filename='topbar.js') }}"></script>
 <script src="{{ url_for('static', filename='tour.js') }}"></script>{% endif %}
 {% block scripts %}{% endblock %}

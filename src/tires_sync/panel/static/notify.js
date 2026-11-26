@@ -96,17 +96,21 @@
       if (!r.ok || r.redirected) throw new Error(r.status);                    // an expired login answers with the login page
       return r.json();
     }).then(function (data) {
+      changed(data.rev);
       var items = once(data.items || []), keys = items.map(function (it) { return it.key; });
       var who = String(data.who || ""), stored = readSeen(who), seen = stored === undefined ? memory : stored;
       memory = keys;
       writeSeen(who, keys);
+      var quiet = !!(data.notify && data.notify.on === false);              // the office or the point switched them off (point_notify)
+      if (data.notify && data.notify.ask > 0) offerSoon();
       if (!seen) return;                                  // the first look: what is there now is not new
       var known = {};
       seen.forEach(function (k) { known[k] = true; });
       var added = items.filter(function (it) { return !known[it.key]; });
       if (!added.length) return;
-      ring();
       refreshSoon();
+      if (quiet) return;                                  // no sound, no notification: the page and the bell still show it
+      ring();
       added.slice(0, MAX_SHOWN).forEach(tell);
       if (added.length > MAX_SHOWN) tell({key: "more", title: "Ещё " + (added.length - MAX_SHOWN), text: FEED === "/my-point/feed" ? "Новое на «Рабочем месте»" : "Новые задачи", href: FEED === "/my-point/feed" ? "/my-point" : "/tasks"});
     }).catch(function () { /* no connection: the bell shows it; the next look tries again */ });
@@ -117,7 +121,7 @@
   var SCROLL = "tires.mypoint.scroll", LAST = "tires.mypoint.reloaded";
   var active = Date.now(), sending = false, waiting = null, reloaded = 0;
   var BUSY = ".modal-backdrop.is-open, dialog[open], [aria-modal='true'].is-open, details.mp-refuse[open], details.mp-handover[open], " +
-             "details.pt-menu[open], details.mp-more[open], #bell-pop:not([hidden]), [aria-busy='true']";
+             "details.pt-menu[open], details.mp-more[open], details.notify-switch[open], #bell-pop:not([hidden]), [aria-busy='true']";
 
   function session(name, value) {
     try {
@@ -131,8 +135,21 @@
     if (!el || !el.matches) return false;
     return el.matches("textarea, select, [contenteditable=''], [contenteditable='true'], input:not([type=button]):not([type=submit]):not([type=reset]):not([type=hidden])");
   }
+  function edited() {                                     // a field typed in and left (the search, «Другой»): a reload would wipe the text
+    try {
+      if (typeof document.querySelectorAll !== "function") return false;     // no such API: nothing to keep
+      var fields = document.querySelectorAll("input:not([type=hidden]), textarea") || [];
+      for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        if (!f) continue;
+        var box = f.type === "checkbox" || f.type === "radio";
+        if (box ? ("defaultChecked" in f && f.checked !== f.defaultChecked) : ("defaultValue" in f && f.value !== f.defaultValue)) return true;
+      }
+    } catch (e) { /* an odd field: never blocks the refresh for good */ }
+    return false;
+  }
   function idle() {                                       // the point does nothing: no press, key or scroll lately, no window, no field, no form going
-    if (Date.now() - active < IDLE || sending || typing()) return false;
+    if (Date.now() - active < IDLE || sending || typing() || edited()) return false;
     return !document.querySelector(BUSY);
   }
   function soon() {                                       // not more often than once in 30 s, this load and the one before
@@ -155,6 +172,12 @@
     if (PAGE && !waiting) tryRefresh();
   }
   function moved() { active = Date.now(); }
+  // Офис поменял состав, клиента, даты, комментарий заказа точки (решение владельца 2026-11-25): отпечаток ленты не тот, что у страницы, —
+  // страница обновляется тихо (без звука и уведомления), по тем же правилам простоя.
+  function changed(rev) {
+    var holder = PAGE && document.querySelector("[data-point-rev]");
+    if (holder && rev && holder.getAttribute("data-point-rev") !== String(rev)) refreshSoon();
+  }
 
   if (PAGE) {
     ["click", "keydown", "touchstart", "pointerdown", "wheel", "input", "scroll"].forEach(function (name) {
@@ -173,12 +196,59 @@
     } catch (e) { /* nothing kept */ }
   }
 
+  // --- «Разрешите уведомления» (the owner 2026-11-25): until the browser is answered, at most 3 times a day (the server counts them,
+  // point_notify.ask), never while one types or a window is open; «Разрешить» asks the browser by the press itself ----------------------
+  var CSRF = (me && me.getAttribute("data-csrf")) || "", offered = false, offerWait = null;
+  function send(url, fields) {
+    var body = new FormData();
+    body.append("csrf", CSRF);
+    Object.keys(fields || {}).forEach(function (k) { body.append(k, fields[k]); });
+    return fetch(url, {method: "POST", credentials: "same-origin", body: body, headers: {"Accept": "application/json"}})
+      .then(function (r) { if (!r.ok || r.redirected) throw new Error(r.status); return r.json(); });
+  }
+  function answered() {
+    showState();
+    if (supported && Notification.permission !== "default" && CSRF) send("/my-point/notify/answer", {permission: Notification.permission}).catch(function () {});
+  }
+  function askBrowser() {
+    unlock();
+    var asked = Notification.requestPermission(answered);
+    if (asked && asked.then) asked.then(answered);
+  }
+  function calm() { return !typing() && !document.querySelector(BUSY); }
+  function offerSoon() {
+    if (offered || offerWait || FEED !== "/my-point/feed" || !supported || Notification.permission !== "default" || !CSRF) return;
+    if (!document.createElement || !document.body) return;
+    offerWait = setTimeout(function () { offerWait = null; offer(); }, 3000);
+  }
+  function offer() {
+    if (offered || Notification.permission !== "default") return;
+    if (!calm()) { offerWait = setTimeout(function () { offerWait = null; offer(); }, 5000); return; }     // typing: later, quietly
+    offered = true;                                       // one ask per page load at most; the server says if one is due at all
+    send("/my-point/notify/ask", {}).then(function (got) {
+      if (!got || !got.ok) return;
+      var box = document.createElement("div");
+      box.className = "notify-ask";
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-label", "Разрешите уведомления");
+      box.setAttribute("data-notify-ask", "");
+      var text = document.createElement("p");
+      text.textContent = "Разрешите уведомления, чтобы не пропустить заказы, возвраты и задачи офиса.";
+      var yes = document.createElement("button"), no = document.createElement("button");
+      yes.type = no.type = "button";
+      yes.className = "btn btn--primary btn--sm";
+      yes.textContent = "Разрешить";
+      no.className = "btn btn--secondary btn--sm";
+      no.textContent = "Позже";
+      yes.addEventListener("click", function () { box.remove(); askBrowser(); });
+      no.addEventListener("click", function () { box.remove(); });
+      box.appendChild(text); box.appendChild(yes); box.appendChild(no);
+      document.body.appendChild(box);
+    }).catch(function () { /* no connection: the next page asks */ });
+  }
+
   if (button && supported) {
-    button.addEventListener("click", function () {
-      unlock();
-      var asked = Notification.requestPermission(showState);
-      if (asked && asked.then) asked.then(showState);
-    });
+    button.addEventListener("click", askBrowser);
   }
   unlock();                                               // a site the browser trusts may sound at once; otherwise after a press
   check();

@@ -218,14 +218,24 @@
     mark();
   });
 
+  var filterCount = form.querySelector("[data-oc-filter-count]");
+  function updateFilterCount() {
+    if (!filterCount) return;
+    var prices = form.elements.pf.value.trim() || form.elements.pt.value.trim();
+    var count = form.querySelectorAll(".oc-advanced input[type=checkbox]:checked").length + (prices ? 1 : 0);
+    filterCount.textContent = " · " + count;
+    filterCount.hidden = !count;
+  }
+
   form.addEventListener("change", function (e) {
     var t = e.target;
     if (t.closest(".oc-ms-in, [data-oc-ms]") || t.hasAttribute("data-oc-num") || t.hasAttribute("data-oc-bm")) return;
-    if (t.hasAttribute("data-oc-mixed")) { now(); return; }    // «Разноширокие»: other fields, the page anew at once
+    if (t.matches("[data-oc-mixed], [data-oc-all-brands]")) { now(); return; }    // These filters change the other controls.
+    updateFilterCount();
     later();
   });
   Array.prototype.forEach.call(form.querySelectorAll("[data-oc-num]"), function (n) {
-    n.addEventListener("input", function () { if (/^\d*$/.test(n.value.trim())) later(); });
+    n.addEventListener("input", function () { if (/^\d*$/.test(n.value.trim())) { updateFilterCount(); later(); } });
   });
   form.addEventListener("submit", function (e) { e.preventDefault(); found("Подбираем…"); load(); });
 })();

@@ -423,9 +423,11 @@ def send_point_task(conn, task_id, text: str, send, now: str, author: str, point
     conn.commit()
     if claim.rowcount != 1:
         raise OrderError("Эта задача уже выполняется или выполнена.")
+    peer, body = str(point["vk_peer_id"]).strip(), text
     try:
         from .order_manager import signed
-        send(str(point["vk_peer_id"]).strip(), signed(text) if bot else text, random_id=vk_random_id(task))
+        body = signed(text) if bot else text
+        message_id = send(peer, body, random_id=vk_random_id(task))
     except BaseException as err:
         conn.rollback()
         conn.execute("UPDATE order_task SET status = 'pending', done_at = NULL WHERE id = ? AND status = 'running'", (task_id,))
@@ -434,6 +436,9 @@ def send_point_task(conn, task_id, text: str, send, now: str, author: str, point
             raise vk_send.VkError("%s Неизвестно, ушло ли: повторите тем же нажатием, текст не меняйте (ВК не задвоит его)." % err) from None
         raise
     conn.execute("UPDATE order_task SET body = ? WHERE id = ? AND status = 'running'", (text, task_id))
+    from . import vk_point_fix                                     # its number: corrected when the order's data change
+    vk_point_fix.remember(conn, task["order_id"], peer, message_id, body.strip(), vk_point_fix.TASK, now,
+                          template=lambda card: message_body(conn, task, card))     # rebuilt by it when the order changes
     _finish(conn, task, "done", "%s (точка «%s»)%s" % (SENT_TO_POINT, point["name"], "" if text.strip() == str(task["body"] or "").strip() else ", текст изменён"),
             now, author, text)
     return point["name"]

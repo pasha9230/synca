@@ -13,7 +13,7 @@
 {% from "_oth_mim.html" import mim_head %}{% if oth_parts %}<p class="strong" data-oth-title>{{ mim_head(oth_parts) }}</p>{# «На ОТХ»: as on the board, no inner number (2026-11-07) #}{% elif oth_title %}<p class="strong" data-oth-title>{{ oth_title }}{% if entity.ref == "№%d"|format(c.id) %} · №{{ c.id }}{% endif %}</p>{% endif %}{# «На ОТХ»: a purchase of WebMIM, its client changes (2026-11-06) #}
 {% include "_order_unsent.html" %}
 {% with autosend_order=c.id %}{% include "_order_autosend.html" %}{% endwith %}{# no block «Автосообщение клиенту» (the owner 2026-11-09): the waiting ones only, with «Отменить» #}
-<div class="ocard-layout">
+<div class="ocard-layout" data-keep-place>
 <div class="ocard-main">
 {% if origin %}<div class="row" style="gap:var(--s-2);align-items:center"><span class="badge badge--warn" data-origin>{{ origin.text }}</span><span class="small muted">{{ origin.hint }}</span></div>{% endif %}{# the manager of a point: an order not from the point's own Avito account (orders.origin_labels) #}
 {% if back_ask %}<div class="flash flash--info" id="oth-back" role="alert" data-oth-back><div class="flash-text stack"><b>{{ back_ask.question }}</b>
@@ -97,6 +97,7 @@
 <div><button class="btn btn--secondary btn--sm">Сохранить даты</button></div></form>
 {% else %}<dl class="small">{% for key, label in marks.items() %}<dt>{{ label }}</dt><dd>{{ c[key] or "—" }}</dd>{% endfor %}</dl>{% endif %}
 </div>{% endcall %}
+{% if arrival and arrival.none %}<div class="flash flash--info" data-arrival-none><div class="flash-text">Отмечено: шины физически не приезжали на точку — выплата точке за выдачу по заказу снята.{% if arrival.money %} <form method="post" action="/orders/{{ c.id }}/arrival-back" class="inline" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--link btn--sm" data-arrival-back>Вернуть отметку</button></form>{% endif %}</div></div>{% endif %}
 {% if c.stage.code not in ("cancel", "return") and can_post("order_move") %}{% include "_order_finish.html" %}{% endif %}
 </div>
 <div class="ocard-side">
@@ -107,7 +108,7 @@
 {% call entity_ui.section("Лента событий") %}
 {% if can_post("order_note") %}<form method="post" action="/orders/{{ c.id }}/note" class="card-body row" style="gap:var(--s-2)">{{ csrf }}
 <textarea class="textarea grow" name="text" rows="1" maxlength="2000" placeholder="Заметка по заказу" aria-label="Заметка"></textarea><button class="btn btn--secondary btn--sm">Добавить</button></form>{% endif %}
-<ul class="feed card-body">{% for e in events %}<li class="{{ 'is-note' if e.kind == 'note' else '' }}{{ ' is-red' if e.level == 'red' else '' }}"{% if e.level == 'red' %} data-red{% endif %}><time title="{{ e.at|dt }}">{{ e.at|short_dt }}</time><b>{{ author_label(e.author) }}</b> · {{ e.text }}{% if e.avito_link %} <a class="btn btn--secondary btn--xs" href="{{ e.avito_link }}" target="_blank" rel="noopener noreferrer">Открыть чат в Авито</a>{% endif %}</li>{% endfor %}</ul>
+<ul class="feed card-body">{% for e in events %}<li class="{{ 'is-note' if e.kind == 'note' else '' }}{{ ' is-red' if e.level == 'red' else '' }}"{% if e.level == 'red' %} data-red{% endif %}><div class="feed-clip" data-clip><time title="{{ e.at|dt }}">{{ e.at|short_dt }}</time><b>{{ author_label(e.author) }}</b> · {{ e.text }}{% if e.avito_link %} <a class="btn btn--secondary btn--xs" href="{{ e.avito_link }}" target="_blank" rel="noopener noreferrer">Открыть чат в Авито</a>{% endif %}</div></li>{% endfor %}</ul>
 {% endcall %}
 </div>
 </div>

@@ -35,7 +35,7 @@ def test_issued_after_the_agreement_then_undone_keeps_the_marks_and_the_task_as_
     assert before[0] and before[3] and orders.get_card(conn, card)["stage"]["code"] == orders.RETURN_GIVEN
     ask(conn, card)
     mine = manager(app, conn, pid)
-    press(mine, card, "oth_issued")
+    press(mine, card, "oth_issued", tab="return")                                  # agreed: its card is in «На возврат» (2026-11-21)
     assert orders.get_card(conn, card)["stage"]["code"] == "done" and order_oth.return_plan(conn, card) is None
     undo(mine, conn, card, clock)
     assert orders.get_card(conn, card)["stage"]["code"] == orders.RETURN_GIVEN

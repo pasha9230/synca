@@ -130,6 +130,12 @@ def _filter(parsed, args, season, studs):
     origin = _origin(args)
     if origin:
         shown = service._Filtered({g: o for g, o in shown.offers.items() if origin_of(o) == origin}, getattr(shown, "issues", {}))
+    runflat, commercial = args.get("rf") == "1", args.get("commercial") == "1"
+    if runflat or commercial:
+        shown = service._Filtered({
+            goods_id: offer for goods_id, offer in shown.offers.items()
+            if (not runflat or offer.runflat) and (not commercial or offer.car_type.upper() in ("C", "LT"))
+        }, getattr(shown, "issues", {}))
     return shown
 
 
@@ -363,7 +369,10 @@ def register(app) -> None:
         sort = args.get("o") if args.get("o") in service.SORT_KEYS else "brand"
         descending = args.get("r") == "1"
         parsed, view_only = tochki_feed.catalog_view(conn, parsed, app.config["UNLOAD_PATH"])      # 4tochki before its switch: shown, never published
-        parsed = service.hide_excluded(parsed, raw, conn, ref)                                    # 4tochki: worked brands only
+        standard = service.hide_excluded(parsed, raw, conn, ref)
+        all_brands = args.get("all_brands") == "1"
+        parsed = service.hide_excluded(parsed, raw, conn, ref, all_brands=True) if all_brands else standard
+        preview_only = parsed.offers.keys() - standard.offers.keys()
         filtered = _filter(parsed, args, season, studs)
         held_all = _held_offers(conn, settings, app.config["UNLOAD_PATH"])                    # an old second unload: shown, never published
         held_ids = {o.goods_id for o, _ in held_all}
@@ -371,7 +380,7 @@ def register(app) -> None:
         capped = tochki_feed.config(conn)["supplier_id"]
         groups = service.catalog_groups(
             conn, effective, filtered, ref, args.get("q", ""), "all" if status in ("nopair", "problem") else status, sort, descending, base_raw=raw,
-            gone=gone, view_only=view_only, capped_supplier=capped, twins_from=parsed)
+            gone=gone, view_only=view_only, capped_supplier=capped, twins_from=standard, preview_only=preview_only)
         held = []
         if status in ("all", "feed", "no"):
             published = {re.sub(r"-x\d+$", "", g) for acc in connections.list_feed_accounts(conn) for g in store.load_published(conn, acc["id"])}
@@ -439,7 +448,8 @@ def register(app) -> None:
             row = {i["goods_id"]: i for i in shown}
             mixed = dict(mixed, kits=[(row[a["goods_id"]], row[b["goods_id"]]) for a, b in mixed["kits"]],
                          front=[row[i["goods_id"]] for i in mixed["front"]], rear=[row[i["goods_id"]] for i in mixed["rear"]])
-        return dict(conn=conn, parsed=parsed, effective=effective, staged=staged, items=shown, held_ids=held_ids,
+        return dict(conn=conn, parsed=parsed, standard=standard, effective=effective, staged=staged, items=shown, held_ids=held_ids,
+                    preview_only=preview_only,
                     all_ids=[i["goods_id"] for i in items],                # every position of the filter, every page («все по фильтру»)
                     market_on=market_on, market_over=market_over, market_stopped=market_on and routes_market.stopped(conn),
                     page_size=size, total=total, brands=len({i["brand"] for i in items}), page=page, pages=pages, season=season or "",
@@ -515,6 +525,9 @@ def register(app) -> None:
         counts = {}
         for offer in b["parsed"].offers.values():                            # the brands on view (after the owner's exclusions), before the filters
             counts[offer.brand_key] = counts.get(offer.brand_key, 0) + 1
+        feed_counts = {}
+        for offer in b["standard"].offers.values():
+            feed_counts[offer.brand_key] = feed_counts.get(offer.brand_key, 0) + 1
         names = {sp["id"]: sp["name"] for sp in suppliers}
 
         def label(key):                                                   # one brand at two suppliers: two rows, named apart
@@ -529,13 +542,13 @@ def register(app) -> None:
         return render_template(
             office_page("catalog.html"), size={k: " ".join(map(str, _nums(args, k) or ())) for k in ("w", "h", "d")}, q=args.get("q", ""),
             size_text=(args.get("size") or "")[:client_catalog.MAX_TEXT], size_unknown=view["unknown"], brand_choices=brand_choices, chosen_brands=view["brands"],
-            without_brands=view["without"], feed_brands=_feed_brands(conn, counts, suppliers) if can_post("connections_excluded_brand") else None,
+            without_brands=view["without"], feed_brands=_feed_brands(conn, feed_counts, suppliers) if can_post("connections_excluded_brand") else None,
             size_options=options, supplier_tabs=supplier_tabs, wait=wait,
             pick=client_catalog.size_pick("/catalog", here, {k: _nums(args, k) or () for k in ("w", "h", "d")}, options),
-            mim=_mim_block(args, here, options, brand_choices, view),
+            mim=_mim_block(args, here, options, brand_choices, view, b),
             recent=client_catalog.recent_links("/catalog", _pairs(args, ("wait",)), client_catalog.recent_sizes(conn, current_user()["login"])), **b)
 
-    def _mim_block(args, here, options, brand_choices, view) -> dict:
+    def _mim_block(args, here, options, brand_choices, view, b) -> dict:
         """The block of the filters of the office's «Новый вид» as the catalog of MIM (lane office-catalog-mim, the owner 2026-11-11; the
         client's «Вид 2» the sample): the three glued fields of ANY size (client_catalog.size_pick2), «Производитель» with «Кроме», the
         axes of «Разноширокие», «Импортные / Отечественные», «В наличии от», «Цена от / до». The values only: office2/catalog.html draws it."""
@@ -547,11 +560,19 @@ def register(app) -> None:
             return [{"key": key, "name": name, "label": labels.get(key, re.sub(r"^S\d+:", "", key)),
                      "url": client_catalog._url("/catalog", [(k, v) for k, v in rest if not (k == name and v == key)])} for key in on]
         mixed = args.get("mixed") == "1"
+        active = (mixed or any(_nums(args, key) for key in ("w", "h", "d"))
+                  or bool((args.get("size") or "").strip()) or bool(service.search_terms(args.get("q", "")))
+                  or view["brands"] or view["without"] or _origin(args) or _num(args, "sn")
+                  or _num(args, "pf") is not None or _num(args, "pt") is not None
+                  or args.get("rf") == "1" or args.get("commercial") == "1"
+                  or b["season"] or b["studs"] or b["status"] != "all" or b["own_only"] or b["market_over"])
         return {"pick2": client_catalog.size_pick2("/catalog", here, {k: _nums(args, k) or () for k in ("w", "h", "d")}, options),
                 "brands": chips("b") + chips("xb"), "brand_mode": "x" if args.get("bm") == "x" or (view["without"] and not view["brands"]) else "",
-                "mixed": mixed, "axes": [(p, label, client_catalog.axis_of(args, p)) for p, label in client_catalog.AXES],
+                "mixed": mixed, "all_brands": args.get("all_brands") == "1", "axes": [(p, label, client_catalog.axis_of(args, p)) for p, label in client_catalog.AXES],
                 "origin": _origin(args), "origins": ORIGINS, "stock_min": _num(args, "sn"), "price_from": _num(args, "pf"),
-                "price_to": _num(args, "pt"), "reset": "/catalog" + ("?sup=%d" % _num(args, "sup") if _num(args, "sup") else "")}
+                "price_to": _num(args, "pt"), "runflat": args.get("rf") == "1", "commercial": args.get("commercial") == "1",
+                "filters_active": bool(active),
+                "reset": client_catalog._url("/catalog", [(k, args[k]) for k in ("sup", "all_brands", "o", "r", "n") if args.get(k)])}
 
     def _feed_brands(conn, counts, suppliers):
         """«Бренды в фиде» of the owner: every brand on view and every brand taken off, with what one button does to it. The change is the
@@ -616,7 +637,9 @@ def register(app) -> None:
     @app.route("/catalog/table")
     @login_required
     def catalog_table():
-        return render_template(office_page("_catalog_table.html"), **table_context(request.args))
+        context = table_context(request.args)
+        template = "office2/_catalog_table.html" if context["mixed"] else office_page("_catalog_table.html")
+        return render_template(template, **context)
 
     def _names(conn, ids):
         parsed = load_merged(conn, active_settings(conn), current_app.config["UNLOAD_PATH"])
@@ -869,9 +892,11 @@ def register(app) -> None:
             if not accounts or any(a not in feed for a in accounts):
                 raise ValueError("Отметьте аккаунты, где поставить цену.")
             if form.get("all") == "1":                                   # the filter again, as it stands: never more than was shown
-                found = build(MultiDict(parse_qsl(form.get("filter", ""), keep_blank_values=True)))["all_ids"]
+                selection = build(MultiDict(parse_qsl(form.get("filter", ""), keep_blank_values=True)))
+                found = selection["all_ids"]
                 if _ids_fp(found) != form.get("fp", ""):
                     raise ValueError("По фильтру сейчас другие позиции (%d), чем были на странице: обновите страницу и повторите." % len(found))
+                found = [g for g in found if g not in selection["preview_only"]]
             else:
                 found = form.getlist("g")
             offers, purchases, away, other = _bulk_positions(conn, sorted({str(g) for g in found if str(g or "").strip()}))

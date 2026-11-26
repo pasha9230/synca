@@ -2,7 +2,7 @@
 «Вид 2» the sample): three glued fields of ANY size with chips, typed digits narrow the list, Tab takes the typed value and goes on
 (static/office_catalog.js), the rows asked anew without «Показать»; «Производитель» with «Только / Кроме»; the season with «Всесезонные»;
 «Импортные / Отечественные» by the country, «В наличии от N шт.», «Цена от / до»; «Разноширокие» — «Комплект N», then each axis alone;
-winter with studs as one icon. The old view of the office and the client's catalog stay as they were."""
+winter with studs as one icon. Both office views share the filter toolbar."""
 from __future__ import annotations
 
 import logging
@@ -22,10 +22,10 @@ from tires_sync.panel import client_catalog as cc, routes_catalog
 JS = Path(__file__).resolve().parents[1] / "src" / "tires_sync" / "panel" / "static" / "office_catalog.js"
 
 
-def tire(code, w, h, d, model="Test Model", country="Россия", season="Зимняя", rest="12", price="5000", name="IKON", studs=False):
+def tire(code, w, h, d, model="Test Model", country="Россия", season="Зимняя", rest="12", price="5000", name="IKON", studs=False, car_type=""):
     full = "%s %d/%d/%d T 94 %s%s" % (name, w, h, d, model, " Ш." if studs else "")
     return commodity_xml(NNOMMODIF=code[1:], SMNFCODE=code, SMODEL=model, SBRANDCOUNTRY=country, SSEASON=season, SWIDTH=str(w), SHEIGHT=str(h),
-                         SDIAMETR=str(d), NREST=rest, NPRICE_DELAYED=price, SMODIFNAME=full, SMODIFNAME_ORIG=full)
+                         SDIAMETR=str(d), NREST=rest, NPRICE_DELAYED=price, SMODIFNAME=full, SMODIFNAME_ORIG=full, SCARTYPE=car_type)
 
 
 ROWS = (tire("C1", 225, 45, 18), tire("C2", 255, 40, 18), tire("C3", 205, 55, 16, country="Корея", season="Всесезонная", rest="4", price="3000"),
@@ -87,7 +87,7 @@ def test_the_block_has_three_glued_fields_in_tab_order_and_no_show_button(tmp_pa
     app, owner, conn = catalog(tmp_path)
     html = get(owner, "?w=225&w=255&h=40")
     box = filters(html)
-    assert 'data-oc' in box and "data-autosubmit" not in box and "<details" not in box
+    assert 'data-oc' in box and "data-autosubmit" not in box and '<details class="oc-advanced">' in box
     glue = re.search(r'<div class="oc-glue" role="group" aria-label="Размер">(.*?)</div>\{?', box, re.S)
     assert glue and re.findall(r'id="f-(\w)" name="\w"', box) == ["w", "h", "d"]                      # Tab: ширина → профиль → диаметр
     assert re.findall(r'data-oc-n>(\d+)<', box)[:2] == ["2", "1"]                                        # the counters
@@ -160,10 +160,10 @@ def test_winter_with_studs_is_one_icon(tmp_path):
     assert 'title="Зима, шипы"' in filters(get(owner))                                        # the filter «Шипы» draws the same icon
 
 
-def test_the_old_view_of_the_office_is_kept(tmp_path):
+def test_the_old_view_shares_the_filters_and_keeps_the_results(tmp_path):
     app, owner, conn = catalog(tmp_path, state="off")
     html = get(owner, "?w=225")
-    assert "office_catalog.js" not in html and "oc-ms" not in html and codes(html) == ["C1", "C5"]
+    assert "office_catalog.js" in html and 'id="f-w"' in html and codes(html) == ["C1", "C5"]
 
 
 # ---- the script --------------------------------------------------------------------------------------------------------------------
@@ -233,3 +233,78 @@ def test_tab_takes_the_typed_values_and_the_rows_come_without_a_reload(served):
             assert ">C3<" in page.inner_html("#items")
         finally:
             b.close()
+
+
+@pytest.mark.parametrize("state", ["all", "off"])
+def test_catalog_toolbar_positions_and_advanced_filters(tmp_path, state):
+    rows = (tire("C1", 225, 45, 18, model="Test Model RunFlat"),
+            tire("C2", 255, 40, 18, car_type="C"),
+            tire("C3", 205, 55, 16))
+    app, owner, conn = catalog(tmp_path, rows=rows, state=state)
+    page = get(owner, "?rf=1")
+    box = re.search(r'<form[^>]*data-oc>(.*?)</form>', page, re.S).group(1)
+    assert box.index('name="q"') < box.index('class="card oc-panel"')
+    assert box.index('name="c"') < box.index('Производитель')
+    assert 'name="size"' not in box
+    advanced = re.search(r'<details class="oc-advanced">(.*?)</details>', box, re.S).group(1)
+    for name in ("pf", "pt", "rf", "commercial", "own"):
+        assert 'name="%s"' % name in advanced
+    assert codes(page) == ["C1"]
+    assert codes(get(owner, "?commercial=1")) == ["C2"]
+    assert codes(get(owner, "?commercial=1&rf=1")) == []
+    mixed = get(owner, "?mixed=1&fw=225&rw=255")
+    assert "Передняя ось" in mixed and "Задняя ось" in mixed
+    assert 'aria-label="Недавние размеры"' not in mixed
+
+
+def test_toolbar_stays_inside_the_viewport_in_both_size_modes(served):
+    with sync_api.sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(executable_path=CHROMIUM) if os.path.exists(CHROMIUM) else playwright.chromium.launch()
+        except Exception as err:
+            pytest.skip("no Chromium: %s" % err)
+        try:
+            ctx = browser.new_context(viewport={"width": 375, "height": 850})
+            ctx.add_cookies([{"name": "session", "value": served["cookie"], "domain": "127.0.0.1", "path": "/"}])
+            page = ctx.new_page()
+            page.goto(served["base"] + "/catalog")
+            switch = page.get_by_role("switch", name="Все бренды поставщика")
+            with page.expect_navigation():
+                switch.check()
+            assert "all_brands=1" in page.url and switch.is_checked()
+            with page.expect_navigation():
+                switch.uncheck()
+            assert "all_brands=" not in page.url and not switch.is_checked()
+            reset = page.get_by_text("Сбросить фильтры", exact=True)
+            assert reset.count() == 1 and reset.is_disabled()
+            page.locator(".oc-advanced summary").click()
+            page.locator(".oc-filter-option", has_text="RunFlat").click()
+            page.get_by_role("link", name="Сбросить фильтры").wait_for(timeout=5000)
+            assert reset.count() == 1 and "rf=1" in page.url
+            with page.expect_navigation():
+                reset.click()
+            assert reset.is_disabled()
+            for mixed in (False, True):
+                toolbar = page.locator("form[data-oc]")
+                assert toolbar.locator(".oc-axis").count() == (2 if mixed else 0)
+                row = toolbar.locator(".oc-second-row")
+                stock = row.get_by_label("В наличии", exact=True)
+                status = row.get_by_label("Статус", exact=True)
+                assert stock.get_attribute("placeholder") == "1"
+                page.set_viewport_size({"width": 1182, "height": 850})
+                season = row.get_by_role("group", name="Сезон")
+                assert abs(stock.bounding_box()["y"] - status.bounding_box()["y"]) <= 1
+                assert abs(stock.bounding_box()["y"] - season.bounding_box()["y"]) <= 1
+                assert stock.bounding_box()["x"] < status.bounding_box()["x"]
+                page.set_viewport_size({"width": 375, "height": 850})
+                field = toolbar.locator('[name="rf"]')
+                assert not field.is_visible()
+                toolbar.locator(".oc-advanced summary").click()
+                assert field.is_visible()
+                assert toolbar.evaluate("(node) => node.scrollWidth <= node.clientWidth")
+                toolbar.locator(".oc-advanced summary").click()
+                if not mixed:
+                    with page.expect_navigation():
+                        toolbar.locator("[data-oc-mixed]").check()
+        finally:
+            browser.close()

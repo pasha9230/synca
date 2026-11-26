@@ -75,7 +75,7 @@ def test_the_point_has_no_account_button_and_its_list_keeps_one_place(w):
     manager, _ = person(w["app"], "point", w["rust"])
     place = lambda page: re.search(r'id="chats-live"[^>]* data-place="([^"]*)"', page).group(1)
     page = manager.get("/chats").get_data(as_text=True)
-    assert "Состояние: Открытые" in page and "Аккаунт:" not in page
+    assert "Состояние: Все" in page and "Аккаунт:" not in page
     assert place(page) == "?acc=%d" % w["rust_acc"]
     assert place(manager.get("/chats/%d?acc=%d" % (w["petr"]["id"], w["rust_acc"])).get_data(as_text=True)) == place(page)
     assert "Аккаунт: Все аккаунты" in w["owner"].get("/chats").get_data(as_text=True)              # the owner keeps the button

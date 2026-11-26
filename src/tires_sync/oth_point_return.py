@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -211,7 +212,9 @@ def _agree_marked_oth(conn, card: dict, day: str, now: str, author: str) -> int:
 
 
 def act_for_orders(conn, ids, day, filename: str, data: bytes, today, now: str, author: str) -> Dict[str, object]:
-    """The act of a return for several orders of one point (E3). Everything is checked first (the orders, one point, the date, the PDF);
+    """The act of a return for several orders of one point (E3); «Согласованы» of /oth (the owner 2026-11-22): no file — the orders are
+    agreed for the date without the act, of any points (the act of each pair «point + date» may be attached later). Everything is checked
+    first (the orders, one point with a file, the date, the PDF);
     then every order is agreed for the date (order_oth.agree, as «Согласовано»: an order agreed for this date already stays as it is) and the
     PDF is kept on the pair «point + date». {"date", "point", "agreed": [ids], "failed": {id: why}, "replaced"}. OthError / ActError: nothing done."""
     from . import oth_return_act
@@ -227,7 +230,8 @@ def act_for_orders(conn, ids, day, filename: str, data: bytes, today, now: str, 
         if not can_act(conn, card):
             raise order_oth.OthError("Заказ №%d не на согласовании и не на возврате: обновите страницу." % card_id)
         cards.append(card)
-    if len({c["point_id"] for c in cards}) > 1:
+    with_act = bool(data or filename)                         # the owner 2026-11-22: «Согласованы» agrees without the act too (it may come later)
+    if with_act and len({c["point_id"] for c in cards}) > 1:
         raise order_oth.OthError("Выбраны заказы разных точек. Один акт — на одну точку и дату: отметьте заказы одной точки.")
     day = order_oth.check_return_day(day, today)
     for card in cards:
@@ -235,7 +239,8 @@ def act_for_orders(conn, ids, day, filename: str, data: bytes, today, now: str, 
         if plan is not None and plan["return_date"] != day:
             raise order_oth.OthError("Заказ №%d уже согласован на %s: снимите согласование в его карточке или выберите эту дату." % (
                 card["id"], _day(plan["return_date"])))
-    oth_return_act.check(filename, data)
+    if with_act:
+        oth_return_act.check(filename, data)
     point_id = cards[0]["point_id"]
     agreed, failed = [], {}
     for card in cards:
@@ -249,7 +254,36 @@ def act_for_orders(conn, ids, day, filename: str, data: bytes, today, now: str, 
             conn.rollback()
             failed[card["id"]] = str(err)
     replaced = False
-    if agreed:                                                                       # nothing agreed: no act of the pair either
+    if agreed and with_act:                                                          # nothing agreed: no act of the pair either
         _act, replaced = oth_return_act.save(conn, point_id, day, filename, data, now, author)
-    return {"date": day, "point": point_id, "agreed": agreed, "failed": failed, "replaced": replaced}
+    return {"date": day, "point": point_id, "agreed": agreed, "failed": failed, "replaced": replaced, "act": with_act}
 
+
+
+def sent_back(conn, ids, now: str, author: str) -> Dict[str, object]:
+    """«Вернули поставщику» of /oth (the owner 2026-11-22): the office marks the orders of «На возврат» (agreed, the act not signed) as given
+    to the supplier, each as the point's «Подписал акт и отдал» does (order_oth.sign_act: the plan signed, the refund, the stage). An order
+    not agreed or signed already is left out with its reason; the others still go. {"done": [ids], "failed": {id: why}}."""
+    wanted = sorted({int(i) for i in ids if str(i).strip().isdigit()})
+    if not wanted:
+        raise order_oth.OthError("Отметьте галочками заказы, которые отдали поставщику.")
+    done, failed = [], {}
+    for card_id in wanted:
+        try:
+            card = orders.get_card(conn, card_id)
+            plan = order_oth.return_plan(conn, card_id)
+            if card["stage"]["code"] not in order_oth.RETURNING or plan is None or plan["signed_at"]:
+                failed[card_id] = "не на возврате: обновите страницу"
+                continue
+            point = (card.get("point") or {}).get("name") or ""
+            if order_oth.sign_act(conn, card, point, now, author, by_office=True):
+                done.append(card_id)
+            else:
+                failed[card_id] = "заказ только что изменили"
+        except (order_oth.OthError, orders.OrderError) as err:
+            conn.rollback()
+            failed[card_id] = str(err)
+        except sqlite3.Error:                                        # a busy base: this order not marked, the others still go (review)
+            conn.rollback()
+            failed[card_id] = "база занята, попробуйте ещё раз через минуту"
+    return {"done": done, "failed": failed}

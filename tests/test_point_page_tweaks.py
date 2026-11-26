@@ -75,7 +75,7 @@ def test_notify_js_looks_for_idleness_before_it_refreshes():
 HARNESS = r"""
 const vm = require("vm"), fs = require("fs");
 const [file, how, path] = process.argv.slice(2);
-let clock = 100000, step = 0, timers = [], tick = null, busy = how === "modal", field = how === "focus";
+let clock = 100000, step = 0, timers = [], tick = null, busy = how === "modal", field = how === "focus", typed = how === "typed";
 const on = {}, won = {}, session = {}, local = {}, replaced = [];
 const feeds = [[], [{key: "order-1", title: "Новый заказ", text: "", href: "/my-point"}]];
 if (how === "soon") session["tires.mypoint.reloaded"] = String(clock + 6000);
@@ -83,7 +83,8 @@ const ctx = {
   console, JSON, Math, Number, String,
   Date: {now: () => clock},
   document: {querySelector: s => (s.includes(".modal-backdrop") && busy ? {} : null), readyState: "complete",
-             activeElement: {matches: () => field}, addEventListener: (n, fn) => { on[n] = fn; }},
+             activeElement: {matches: () => field}, addEventListener: (n, fn) => { on[n] = fn; },
+             querySelectorAll: s => (typed && s.includes("textarea") ? [{type: "search", value: "70", defaultValue: ""}] : [])},   // a field typed in and left
   localStorage: {getItem: k => (k in local ? local[k] : null), setItem: (k, v) => { local[k] = String(v); }},
   sessionStorage: {getItem: k => (k in session ? session[k] : null), setItem: (k, v) => { session[k] = String(v); }, removeItem: k => { delete session[k]; }},
   location: {pathname: path, href: "https://example.com" + path + "?tab=moving&q=7001#order-1", replace: u => replaced.push(u)},
@@ -108,7 +109,7 @@ const later = () => { const t = timers; timers = []; t.forEach(fn => fn()); };
   if (how === "asked") won.submit({defaultPrevented: true});          // the panel's window asks first: nothing sent yet
   tick(); await settle(); await settle();
   const first = replaced.length;
-  busy = false; field = false; clock += 31000; later();               // the point is idle again
+  busy = false; field = false; typed = false; clock += 31000; later();               // the point is idle again
   process.stdout.write(JSON.stringify({first, after: replaced, scroll: session["tires.mypoint.scroll"] || null}));
 })();
 """
@@ -133,7 +134,7 @@ def test_news_on_an_idle_point_refreshes_the_page_keeping_the_tab_search_and_scr
     assert '"y":640' in got["scroll"] and "tab=moving&q=7001" in got["scroll"]
 
 
-@pytest.mark.parametrize("how", ["click", "modal", "focus", "soon"])
+@pytest.mark.parametrize("how", ["click", "modal", "focus", "soon", "typed"])
 def test_a_busy_point_is_not_refreshed_until_it_is_idle(tmp_path, how):
     got = run(tmp_path, how)
     assert got["first"] == 0 and got["after"] == ["https://example.com/my-point?tab=moving&q=7001"]  # waited, then once

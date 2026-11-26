@@ -345,6 +345,76 @@ def person(app, conn, role, point_id=None):
     return client
 
 
+def test_saving_both_mim_numbers_imports_items_without_moving_the_order(panel):
+    app, conn = panel
+    snap(conn, (wm(71, 371, "07.10.26 10:00:00"), [("100", 4, 3281), ("101", 2, 3532)]))
+    mine = card(conn)
+    stage = orders.get_card(conn, mine)["stage_id"]
+    client = app.test_client()
+    tok = login(client)
+    url = "/orders/%d/save" % mine
+    post(client, url, tok, webmim_number="371")
+    assert not orders.get_card(conn, mine)["items"]
+    post(client, url, tok, transfer_number="26R-1234567")
+    post(client, url, tok, webmim_number="371", transfer_number="26R-1234567")
+    saved = orders.get_card(conn, mine)
+    assert saved["stage_id"] == stage
+    assert [(i["goods_id"], i["qty"], i["supplier_price"]) for i in saved["items"]] == [
+        ("100", 4, 3281), ("101", 2, 3532),
+    ]
+    page = client.get("/orders/%d" % mine).get_data(as_text=True)
+    assert "Позиции и количество совпадают" in page
+    assert "Добавленные шины: второй заказ WebMIM" not in page
+
+
+@pytest.mark.parametrize("with_items", [False, True])
+def test_webmim_save_preserves_existing_items_and_does_not_import_a_partial_order(panel, with_items):
+    app, conn = panel
+    snap(conn, (wm(71, 371, "07.10.26 10:00:00"), [("100", 4, 3281), ("missing", 2, -1)]))
+    mine = card(conn, goods=[("100", 1)] if with_items else [])
+    client = app.test_client()
+    response = post(client, "/orders/%d/save" % mine, login(client),
+                    webmim_number="371", transfer_number="26R-1234567")
+    assert response.status_code == 302
+    saved = orders.get_card(conn, mine)
+    assert saved["webmim_number"] == "371" and saved["transfer_number"] == "26R-1234567"
+    assert [(i["goods_id"], i["qty"]) for i in saved["items"]] == ([("100", 1)] if with_items else [])
+
+
+def test_import_without_catalog_match_waits_for_manual_sale_prices(panel):
+    app, conn = panel
+    snap(conn, (wm(71, 371, "07.10.26 10:00:00"), [("100", 6, 5801.52), ("rim", 4, 2539.35)]))
+    mine = card(conn)
+    client = app.test_client()
+    tok = login(client)
+    post(client, "/orders/%d/save" % mine, tok, webmim_number="371", transfer_number="26R-1234567")
+    saved = orders.get_card(conn, mine)
+    assert [(i["goods_id"], i["qty"], i["supplier_price"], i["sale_unit"]) for i in saved["items"]] == [
+        ("100", 6, 5801.52, 0), ("rim", 4, 2539.35, 0),
+    ]
+    placed = orders._placed_stage(conn)
+    assert "цены продажи в позициях" in orders.missing_for(saved, placed, placed)
+    assert "Укажите цену" in client.get("/orders/%d" % mine).get_data(as_text=True)
+    for item in saved["items"]:
+        orders.update_item(conn, item["id"], item["qty"], 7000, NOW, "owner")
+    assert "цены продажи в позициях" not in orders.missing_for(orders.get_card(conn, mine), placed, placed)
+
+
+def test_missing_snapshot_reads_a_new_order_from_webmim(panel):
+    app, conn = panel
+    box = SecretBox(Fernet.generate_key())
+    app.config["SECRET_BOX"] = box
+    connections.set_config(conn, "webmim_orders", 0, {"server": "prod", "login": "api-bot"}, NOW, "owner")
+    connections.set_secret(conn, box, "webmim_orders", 0, "password", "pw-SECRET-1", NOW, "owner")
+    row = dict(wm(71, 371, "07.10.26 10:00:00"), invoiceNumber="26R-1234567")
+    app.config["WEBMIM_HTTP"] = ScriptedHttp(TOKEN, page([row], 1), items(("100", 4, 3281)), (200, {}))
+    mine = card(conn)
+    client = app.test_client()
+    post(client, "/orders/%d/save" % mine, login(client), webmim_number="371", transfer_number="26R-1234567")
+    assert [(i["goods_id"], i["qty"]) for i in orders.get_card(conn, mine)["items"]] == [("100", 4)]
+    assert order_row(conn, "71")[3]
+
+
 def test_the_card_shows_the_block_and_the_button_writes(panel):
     app, conn = panel
     snap(conn, (wm(71, 371, "07.10.26 10:00:00", phone="89111112233"), [("A", 4, 4000)]))

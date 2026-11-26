@@ -108,7 +108,9 @@ def test_a_renamed_point_is_one_line_with_its_new_name_and_the_totals_do_not_cha
     assert order_report.build(conn, "2026-08-01", "2026-10-31", point="Бета-2")["lines"][0]["sale"] == new["sale"]
 
 
-def test_the_fixed_sum_of_a_handed_over_client_stays_in_the_renamed_points_line(tmp_path):
+def test_the_fixed_sum_of_a_handed_over_client_stays_in_the_renamed_points_line(tmp_path, monkeypatch):
+    monkeypatch.setattr(order_report, "BONUS_FROM", "2026-10-01")          # an October base: the bonuses start 2026-12-01 (the owner 2026-11-25)
+    monkeypatch.setattr(order_report, "HANDOFF_PER_TYRE_FROM", "2026-11-27")   # per order before, as the base was written
     conn, ids = _with_points(tmp_path)
     order_report.set_rates(conn, "2026-10-01", "2026-10-01", NOW, "owner", handoff_fee=50)
     conn.execute("INSERT INTO order_handoff (order_id, message_id, point_id, created_at) VALUES (301, 'vk-1', ?, ?)", (ids["Гамма"], NOW))

@@ -8,7 +8,8 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
 from . import connections, store
@@ -278,6 +279,7 @@ def purchases_view(conn, client: dict) -> List[dict]:
     marks = ",".join("?" * len(ids))
     points = dict(conn.execute("SELECT c.id, p.name FROM order_card c JOIN point p ON p.id = c.point_id WHERE c.id IN (%s)" % marks, ids))
     names = dict(conn.execute("SELECT id, name FROM point"))
+    numbers = dict(conn.execute("SELECT id, webmim_number FROM order_card WHERE id IN (%s)" % marks, ids))     # «№ MIM» by the panel's (the owner 25.11)
 
     def line(name, qty, unit, deleted: bool) -> dict:
         size = SIZE_IN_TITLE.search(name or "")
@@ -301,41 +303,87 @@ def purchases_view(conn, client: dict) -> List[dict]:
             items[order_id].append(line(name, qty, unit, True))
             live[order_id].add(item_id)
     views = [{"id": o["id"], "created": o["created_at"], "stage": o["stage"], "won": o["kind"] == "won", "lost": o["kind"] == "lost",
-              "deleted": False, "point": points.get(o["id"], ""), "items": items[o["id"]],
+              "deleted": False, "point": points.get(o["id"], ""), "items": items[o["id"]], "webmim": numbers.get(o["id"]) or "",
               "total": round(sum(i["sum"] for i in items[o["id"]] if not i["deleted"]), 2)} for o in client["orders"]]
     views += [{"id": o["id"], "created": o["created_at"], "stage": o["stage"], "won": False, "lost": False, "deleted": True,
-               "point": names.get(o["point_id"], "") if o["point_id"] else "", "items": items[o["id"]], "total": 0.0} for o in gone]
+               "point": names.get(o["point_id"], "") if o["point_id"] else "", "items": items[o["id"]], "total": 0.0, "webmim": ""} for o in gone]
     return sorted(views, key=lambda v: v["id"], reverse=True)
+
+
+def _phone_needles(query: str) -> List[str]:
+    """What a query looks for in the client's phones (E.164), in any writing (+7, 8, brackets, spaces, dashes): the whole phone, or its digits
+    (and with «8» in front read as «7»: «8 900 111» finds +7 900 111…). Only a query written as a phone; three digits and more, four for a
+    bare number (a short one is an order's number, as on the board: orders.board_matches)."""
+    from .orders import BOARD_PHONE                                         # the orders read the clients: imported here
+    text = " ".join(str(query or "").split())
+    digits = re.sub(r"\D", "", text)
+    if not digits or not BOARD_PHONE.fullmatch(text):
+        return []
+    whole = normalize(text)
+    if whole:
+        return [whole]
+    if len(digits) < (4 if text.isdigit() else 3):
+        return []
+    return [digits] + (["7" + digits[1:]] if digits[0] == "8" and len(digits) > 1 else [])
+
+
+def _query_sql(conn, query: str, fold: bool) -> tuple:
+    """The SQL of the search by the name, the car (the brand and the model, the year) and the phones: (an expression of `c`, its arguments)."""
+    if fold:
+        conn.create_function("fold", 1, lambda text: (text or "").casefold())
+    name, car = ("fold(c.name)", "fold(c.car_brand || ' ' || c.car_model)") if fold else ("c.name", "(c.car_brand || ' ' || c.car_model)")
+    text = "%" + _like(query.casefold() if fold else query) + "%"
+    sql = "(%s LIKE ? ESCAPE '\\' OR %s LIKE ? ESCAPE '\\' OR c.car_year = ?" % (name, car)
+    args = [text, text, int(query) if re.fullmatch(r"\d{4}", query) else None]
+    for needle in _phone_needles(query):
+        sql += " OR c.id IN (SELECT client_id FROM client_phone WHERE phone LIKE ? ESCAPE '\\')"
+        args.append("%" + _like(needle) + "%")
+    return sql + ")", args
+
+
+def _like(text: str) -> str:
+    """The text as itself in a LIKE … ESCAPE '\\': «%» and «_» of a query are letters, not «anything» (the review of ТЗ №79)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _tag_sql(tag: str) -> tuple:
+    tag = str(tag or "").strip()
+    if tag == HANDED:
+        return " AND " + _HANDED_SQL.format(c="c.id"), []
+    if tag:
+        return " AND c.id IN (SELECT client_id FROM client_tag WHERE tag = ?)", [tag]
+    return "", []
 
 
 def list_clients(conn, query: str = "", limit: int = 200, fold: bool = False, tag: str = "") -> List[dict]:
     """The clients by the name, a phone or the car, the newest first; `fold`: in any case (SQLite's LIKE folds the Latin letters only);
     `tag`: only the clients with it («передан точкой» is read from the handoffs)."""
-    where, args = "WHERE c.merged_into IS NULL", []
+    where, args = "c.merged_into IS NULL", []
     query = str(query or "").strip()
     if query:
-        phone = normalize(query)
-        digits = re.sub(r"\D", "", query)
-        if fold:
-            conn.create_function("fold", 1, lambda text: (text or "").casefold())
-        name, car = ("fold(c.name)", "fold(c.car_brand || ' ' || c.car_model)") if fold else ("c.name", "(c.car_brand || ' ' || c.car_model)")
-        where += " AND (%s LIKE ? OR %s LIKE ? OR c.car_year = ? OR c.id IN (SELECT client_id FROM client_phone WHERE phone LIKE ?))" % (name, car)
-        text = "%" + (query.casefold() if fold else query) + "%"
-        args += [text, text, int(query) if re.fullmatch(r"\d{4}", query) else None, "%" + (phone or digits or query) + "%"]
-    tag = str(tag or "").strip()
-    if tag == HANDED:
-        where += " AND " + _HANDED_SQL.format(c="c.id")
-    elif tag:
-        where += " AND c.id IN (SELECT client_id FROM client_tag WHERE tag = ?)"
-        args.append(tag)
-    rows = conn.execute("SELECT c.id, c.name, (SELECT COUNT(*) FROM client_order o JOIN order_card k ON k.id = o.order_id WHERE o.client_id = c.id), "
+        sql, args = _query_sql(conn, query, fold)
+        where += " AND " + sql
+    sql, more = _tag_sql(tag)
+    ids = [r[0] for r in conn.execute("SELECT c.id FROM client c WHERE %s%s ORDER BY c.id DESC LIMIT ?" % (where, sql), args + more + [limit])]
+    return _describe(conn, ids)
+
+
+def _describe(conn, ids: List[int]) -> List[dict]:
+    """The rows of the list of the clients `ids` (a page: a few hundred at most), in the order of `ids`: the counts, a phone, the car, the
+    tags, the last touch."""
+    if not ids:
+        return []
+    rows = conn.execute("SELECT c.id, c.name, %s, "              # «Заказов»: as the filter counts them, the cancelled left out (the review of ТЗ №79)
                         "(SELECT COUNT(*) FROM client_chat h JOIN avito_chat a ON a.id = h.chat_row WHERE h.client_id = c.id), (SELECT MIN(phone) FROM client_phone p WHERE p.client_id = c.id), "
                         "(SELECT COUNT(*) FROM client_call l WHERE l.client_id = c.id), c.car_brand, c.car_model, c.car_year, %s, "
                         "MAX(COALESCE((SELECT MAX(k.call_at) FROM client_call l JOIN avito_call k ON k.id = l.call_row WHERE l.client_id = c.id), ''), "
                         "COALESCE((SELECT MAX(a.last_at) FROM client_chat h JOIN avito_chat a ON a.id = h.chat_row WHERE h.client_id = c.id), ''), "
                         "COALESCE((SELECT MAX(k.created_at) FROM client_order o JOIN order_card k ON k.id = o.order_id WHERE o.client_id = c.id), '')) "
-                        "FROM client c %s ORDER BY c.id DESC LIMIT ?" % (_HANDED_SQL.format(c="c.id"), where), args + [limit])
-    found = [dict(zip(("id", "name", "orders", "chats", "phone", "calls", "car_brand", "car_model", "car_year", "handed", "last"), r)) for r in rows]
+                        "FROM client c WHERE c.id IN (%s)" % (_LIVE_ORDERS.format(what="COUNT(*)"), _HANDED_SQL.format(c="c.id"),
+                                                             ",".join("?" * len(ids))), list(ids))
+    by_id = {r[0]: r for r in rows}
+    found = [dict(zip(("id", "name", "orders", "chats", "phone", "calls", "car_brand", "car_model", "car_year", "handed", "last"), by_id[i]))
+             for i in ids if i in by_id]
     tags: Dict[int, List[str]] = defaultdict(list)
     if found:
         for client_id, name in conn.execute("SELECT client_id, tag FROM client_tag WHERE client_id IN (%s)" % ",".join("?" * len(found)), [r["id"] for r in found]):
@@ -344,6 +392,177 @@ def list_clients(conn, query: str = "", limit: int = 200, fold: bool = False, ta
         r["tags"] = sorted(tags[r["id"]], key=lambda t: (t != PRAGMATIC, t.casefold())) + ([HANDED] if r.pop("handed") else [])
         r["car"] = car_text(r)
     return found
+
+
+# ---- the list of the office with its filters (ТЗ №79 of the owner, 2026-11-24) -------------------------------------------------------
+# Every filter and the search act together; an empty value is «all». The state lives in the address (GET), the page of the duplicates
+# carries it there and back. One query of the ids over the whole base (no row read twice), the heavy columns only for the page shown.
+
+LIST_PAGE = 100
+CHAT_SEARCH_LAST = 50_000             # the search in the text of the chats looks in the last this many messages (no full-text index here)
+ORIGINS = {"vk": "ВК", "point": "Точка", "call": "Звонок", "shop": "Каталог клиента", "manual": "Вручную"}   # + «a<id>»: an Avito account
+NAMED = {"yes": "Есть имя", "no": "Нет имени"}
+ORDER_COUNTS = {"0": "0", "1": "1", "2": "2 и более"}
+DATE_KINDS = {"first": "Появился в базе", "last": "Последний заказ"}
+# the client's orders that count for the filter «Заказы» and «Последний заказ»: every one but those of a stage «отказ» (the cancelled)
+_LIVE_ORDERS = ("(SELECT {what} FROM client_order o JOIN order_card k ON k.id = o.order_id JOIN order_stage g ON g.id = k.stage_id "
+                "WHERE o.client_id = c.id AND g.kind != 'lost')")
+
+
+@dataclass
+class ListFilter:
+    query: str = ""
+    tag: str = ""
+    origin: str = ""                  # a key of ORIGINS or «a<account id>»
+    named: str = ""                   # a key of NAMED
+    orders: str = ""                  # a key of ORDER_COUNTS
+    date_kind: str = "first"          # a key of DATE_KINDS
+    date_from: str = ""               # YYYY-MM-DD, both ends included
+    date_to: str = ""
+    page: int = 1
+
+    @property
+    def active(self) -> bool:
+        return bool(self.query or self.tag or self.origin or self.named or self.orders or self.date_from or self.date_to)
+
+    def pairs(self, page: bool = True) -> list:
+        """The GET parameters of this view (the empty ones left out): the links of the pages, of the tabs and the way back."""
+        out = [("q", self.query), ("tag", self.tag), ("src", self.origin), ("nm", self.named), ("ord", self.orders),
+               ("dk", self.date_kind if self.date_kind != "first" else ""), ("df", self.date_from), ("dt", self.date_to),
+               ("p", str(self.page) if page and self.page > 1 else "")]
+        return [(k, v) for k, v in out if v]
+
+
+def _day(text) -> str:
+    try:
+        return date.fromisoformat(str(text or "").strip()[:10]).isoformat()
+    except ValueError:
+        return ""
+
+
+def list_filter(args) -> ListFilter:
+    """The filters of the list from the GET parameters (a dict or Flask's args), each checked: a value not known is «all»."""
+    get = lambda key: str(args.get(key) or "").strip()
+    origin = get("src")
+    if origin not in ORIGINS and not re.fullmatch(r"a\d{1,9}", origin):
+        origin = ""
+    try:
+        page = max(1, min(int(get("p") or 1), 100_000))
+    except ValueError:
+        page = 1
+    since, until = _day(get("df")), _day(get("dt"))
+    if since and until and since > until:
+        since, until = until, since
+    return ListFilter(get("q")[:80], get("tag")[:TAG_MAX], origin, get("nm") if get("nm") in NAMED else "",
+                      get("ord") if get("ord") in ORDER_COUNTS else "", get("dk") if get("dk") in DATE_KINDS else "first", since, until, page)
+
+
+def origin_options(conn) -> List[tuple]:
+    """The values of the filter «Откуда»: every Avito account, then the other ways a client comes."""
+    return [("a%d" % a["id"], "Авито · %s" % a["name"]) for a in connections.list_accounts(conn)] + list(ORIGINS.items())
+
+
+def first_touch(conn) -> Dict[int, tuple]:
+    """{client: (the moment it first came, where from)} of every client not joined away, in three reads of the links (never a query per
+    client). The earliest of its links: a chat (its Avito account «a<id>»; its start, else its last message), a call («call»), an order
+    (a handoff of VK «vk» or of a point «point», the client's catalog «shop», else typed by hand «manual»); at one moment a chat goes before
+    a call and a call before an order. A client with no link: its own creation, «manual». The times are Moscow's (ISO), as kept."""
+    from .chats import iso                                                  # the chats read the clients: imported here
+    best: Dict[int, tuple] = {}
+
+    def seen(client_id, at, rank, origin):
+        at = str(at or "")[:19]
+        if at and (client_id not in best or (at, rank) < best[client_id][:2]):
+            best[client_id] = (at, rank, origin)
+
+    for client_id, account_id, created_ts, last_at in conn.execute(
+            "SELECT l.client_id, a.account_id, a.created_ts, a.last_at FROM client_chat l JOIN avito_chat a ON a.id = l.chat_row"):
+        seen(client_id, iso(created_ts) if created_ts else last_at, 0, "a%d" % account_id)
+    for client_id, at in conn.execute("SELECT l.client_id, k.call_at FROM client_call l JOIN avito_call k ON k.id = l.call_row"):
+        seen(client_id, at, 1, "call")
+    for client_id, at, source, handoff in conn.execute(
+            "SELECT l.client_id, k.created_at, k.source, s.kind FROM client_order l JOIN order_card k ON k.id = l.order_id "
+            "LEFT JOIN order_handoff_source s ON s.order_id = k.id"):
+        seen(client_id, at, 2, "vk" if handoff == "vk" else "point" if handoff else "shop" if source == "shop" else "manual")
+    out = {}
+    for client_id, created in conn.execute("SELECT id, created_at FROM client WHERE merged_into IS NULL"):
+        at, _, origin = best.get(client_id) or (str(created or "")[:19], 9, "manual")
+        out[client_id] = (at, origin)
+    return out
+
+
+def _order_hits(conn, query: str) -> set:
+    """The clients with an order the search of the board finds (orders.board_matches, one rule for both): the order's number, its WebMIM
+    number, the transfer number (26R-…), a supplier's article (four characters and more, any case), a position, the phone and the name
+    typed into the order. One read of the orders and of their positions."""
+    from . import orders
+    wanted = orders.board_query(query)
+    if not wanted[0]:
+        return set()
+    articles = orders.board_articles(conn)
+    first: Dict[int, str] = {}
+    names: Dict[int, tuple] = defaultdict(tuple)
+    for order_id, name, qty in conn.execute("SELECT order_id, name, qty FROM order_item ORDER BY id"):
+        first.setdefault(order_id, "%s × %d" % (name, qty))
+        names[order_id] += (name,)
+    hits = set()
+    for client_id, order_id, name, phone, number, transfer in conn.execute(
+            "SELECT l.client_id, k.id, k.client_name, k.client_phone, k.webmim_number, k.transfer_number FROM client_order l "
+            "JOIN order_card k ON k.id = l.order_id"):
+        if client_id not in hits and orders.board_matches(wanted, order_id, name or "", phone or "", first.get(order_id, ""), number or "",
+                                                          transfer or "", articles.get(order_id, ()), names.get(order_id, ())):
+            hits.add(client_id)
+    return hits
+
+
+def _chat_hits(conn, query: str) -> set:
+    """The clients whose chat has the words: the name of the person in Avito, the last message of every chat, and the text of the last
+    CHAT_SEARCH_LAST messages (a range of the rowid: no read of the whole history). Only a query with a letter, of three characters and
+    more: a number is an order's or a phone (the prices in the chats would find everybody)."""
+    text = " ".join(str(query or "").split()).casefold()
+    if len(text) < 3 or not re.search(r"[^\W\d_]", text):
+        return set()
+    conn.create_function("fold", 1, lambda value: (value or "").casefold())
+    hits = {r[0] for r in conn.execute("SELECT l.client_id FROM client_chat l JOIN avito_chat a ON a.id = l.chat_row "
+                                       "WHERE instr(fold(a.peer_name), ?) > 0 OR instr(fold(a.last_text), ?) > 0", (text, text))}
+    last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM avito_message").fetchone()[0]
+    hits.update(r[0] for r in conn.execute(
+        "SELECT DISTINCT l.client_id FROM avito_message m JOIN client_chat l ON l.chat_row = m.chat_row WHERE m.id > ? "
+        "AND m.kind NOT IN ('system', 'deleted') AND instr(fold(m.text), ?) > 0", (last - CHAT_SEARCH_LAST, text)))
+    return hits
+
+
+def list_page(conn, f: ListFilter) -> dict:
+    """The list of the office: the clients of every filter of `f` and of its search, the newest first, LIST_PAGE a page. {"rows", "total",
+    "page", "pages"}; a page past the last shows the last. The search finds the name, the car, the phones (list_clients), the orders
+    (_order_hits) and the chats (_chat_hits)."""
+    where, args = "c.merged_into IS NULL", []
+    sql, more = _tag_sql(f.tag)
+    where, args = where + sql, args + more
+    if f.named:
+        where += " AND TRIM(c.name) %s ''" % ("!=" if f.named == "yes" else "=")
+    if f.orders:
+        where += " AND " + _LIVE_ORDERS.format(what="COUNT(*)") + {"0": " = 0", "1": " = 1", "2": " >= 2"}[f.orders]
+    if f.date_kind == "last" and (f.date_from or f.date_to):
+        last = _LIVE_ORDERS.format(what="MAX(substr(k.created_at, 1, 10))")
+        for day, sign in ((f.date_from, ">="), (f.date_to, "<=")):
+            if day:
+                where += " AND %s %s ?" % (last, sign)
+                args.append(day)
+    hit, hit_args, extra = "1", [], set()
+    if f.query:
+        hit, hit_args = _query_sql(conn, f.query, True)
+        extra = _order_hits(conn, f.query) | _chat_hits(conn, f.query)
+    ids = [r[0] for r in conn.execute("SELECT c.id, %s FROM client c WHERE %s ORDER BY c.id DESC" % (hit, where), hit_args + args)
+           if r[1] or r[0] in extra]
+    if f.origin or (f.date_kind == "first" and (f.date_from or f.date_to)):
+        first = first_touch(conn)
+        ids = [i for i in ids if i in first and (not f.origin or first[i][1] == f.origin)
+               and (f.date_kind != "first" or ((not f.date_from or first[i][0][:10] >= f.date_from)
+                                               and (not f.date_to or first[i][0][:10] <= f.date_to)))]
+    pages = max(1, -(-len(ids) // LIST_PAGE))
+    page = min(f.page, pages)
+    return {"rows": _describe(conn, ids[(page - 1) * LIST_PAGE:page * LIST_PAGE]), "total": len(ids), "page": page, "pages": pages}
 
 
 # ---- the CRM of a manager of a point (the owner 2026-10-26) ---------------------------------------------------------------------------

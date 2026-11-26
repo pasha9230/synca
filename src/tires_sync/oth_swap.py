@@ -108,7 +108,9 @@ def _swap(conn, card: dict, name: str, phone: str, now: str, author: str, from_o
     fee = handed_fee(conn, a)
     old_name, old_phone = card["client_name"], card["client_phone"]
     orders.update_card(conn, a, {"client_name": name, "client_phone": phone, "avito_chat": ""}, now, author, commit=False, link_client=False)
-    who = "№%d (%s)" % (old_client, ", ".join(v for v in (old_name, old_phone) if v) or "без имени") if old_client else \
+    # the point's VK messages of the old client stay as they were (vk_point_fix): the new client's own message is kept when it goes
+    conn.execute("DELETE FROM vk_point_message WHERE order_id = ?", (a,))
+    who ="№%d (%s)" % (old_client, ", ".join(v for v in (old_name, old_phone) if v) or "без имени") if old_client else \
         "без карточки клиента (%s)" % (", ".join(v for v in (old_name, old_phone) if v) or "без имени")
     orders.add_event(conn, a, now, author, "field", "Клиент сменён: %s → %s" % (who, ", ".join(v for v in (name, phone) if v)))
     if fee:
@@ -147,6 +149,8 @@ def to_client(conn, card_id, name: str, phone: str, now: str, author: str) -> No
         if busy is not None:
             raise _error("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, busy["id"]))
         _audit(conn, now, author, _swap(conn, card, name, phone, now, author))
+        from .oth_sale import credit_seller
+        credit_seller(conn, card["id"], author, now, commit=False)         # sold from OTH to a new client: the seller answers (2026-11-20)
         if not orders.move_card(conn, card["id"], stage["id"], now, author, commit=False):
             raise _error("Клиент не сменён: заказ только что изменили. Обновите страницу.")
     except orders.OrderError:
@@ -237,6 +241,8 @@ def take_client(conn, card_id, line_id, from_item, now: str, author: str) -> int
         if not orders.move_card(conn, b["id"], cancel["id"], now, author, changes={"cancel_reason": CLIENT_TOOK % a_id}, fire_rules=False,
                                 journal=False, commit=False):
             raise _error("Шины не взяты: заказ №%d только что изменили. Обновите страницу." % b["id"])
+        from .oth_sale import credit_seller
+        credit_seller(conn, a_id, author, now, commit=False)               # B's client bought A's tyres from OTH: the seller answers (2026-11-20)
         if not orders.move_card(conn, a_id, stage["id"], now, author, commit=False):
             raise _error("Шины не взяты: заказ №%d только что изменили. Обновите страницу." % a_id)
     except orders.OrderError:
@@ -265,6 +271,12 @@ def swaps(conn) -> Dict[int, dict]:
     return {int(d["order"]): d for d in _history(conn)}
 
 
+def handed_orders(conn) -> Set[int]:
+    """The orders of a client a point handed over: its handoff (order_handoff) or «Откуда клиент» = the point (order_source_point, ТЗ 92).
+    The one list of «чей клиент» for the fee, the swap and the merge."""
+    return {r[0] for r in conn.execute("SELECT order_id FROM order_handoff UNION SELECT order_id FROM order_source_point")}
+
+
 def fee_handed(conn) -> Tuple[Set[int], Dict[int, int]]:
     """(the orders whose own fee of a handed client is off: the client changed, and every order B whose client went to an order A — by any swap,
     not only the last one of A (oth-return-fixes: a second swap of A never makes the first B pay for itself again); the orders that pay the fee of
@@ -272,7 +284,7 @@ def fee_handed(conn) -> Tuple[Set[int], Dict[int, int]]:
     (order_merge.handed)."""
     history = _history(conn)
     found = {int(d["order"]): d for d in history}
-    handed = {r[0] for r in conn.execute("SELECT order_id FROM order_handoff")}
+    handed = handed_orders(conn)
     moved = {a: int(d["from_order"]) for a, d in found.items() if d.get("from_order") and int(d["from_order"]) in handed}
     gave = {int(d["from_order"]) for d in history if d.get("from_order")}          # B: its client (and fee) went to A, never paid by B
     return (set(found) | gave) - set(moved), moved
@@ -287,4 +299,4 @@ def handed_fee(conn, order_id) -> bool:
         return True
     if order_id in off:
         return False
-    return bool(conn.execute("SELECT 1 FROM order_handoff WHERE order_id = ?", (order_id,)).fetchone()) or order_id in order_merge.handed(conn)
+    return order_id in handed_orders(conn) or order_id in order_merge.handed(conn)
