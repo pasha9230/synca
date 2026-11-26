@@ -262,7 +262,7 @@ def test_the_more_menu_of_the_phone_keeps_the_alerts_page(w):
     flag(w["conn"], "all")
     html = w["point"].get("/my-point").get_data(as_text=True)
     more = html[html.index('class="p2-more-list"'):].split("</details>")[0]
-    assert 'href="/alerts"' in more and 'href="/my-point?notes=1"' in more and 'action="/logout"' in more
+    assert 'href="/alerts"' in more and 'href="/my-point/notices"' in more and 'action="/logout"' in more     # «Оповещение» (2026-11-25)
     assert 'href="/orders"' not in more
 
 

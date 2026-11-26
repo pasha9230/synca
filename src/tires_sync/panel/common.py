@@ -356,6 +356,10 @@ SECTION_OF.update(points_payouts_page="analytics", points_payouts_settle="orders
                   points_payouts_request_close="orders", points_payouts_bulk="orders", order_arrival_back="orders")
 NEEDS.update(points_payouts_settle="money", points_payouts_unsettle="money", points_payouts_adjust="money", points_payouts_request_close="money",
              points_payouts_bulk="money", order_arrival_back="money")
+# «Уведомления точек» and «Оповещение» (routes_point_notify, the owner 2026-11-25): the point its own (POINT_PAGES); the office looks and
+# switches on /points/notify («Заказы»: «смотреть» to look, «менять» to switch — the observer looks only)
+SECTION_OF.update(mypoint_notify="mypoint", mypoint_notify_ask="mypoint", mypoint_notify_answer="mypoint", mypoint_notices="mypoint",
+                  mypoint_notice_task="mypoint", points_notify="orders")
 SECTION_OF.update(feed_update_now="orders")
 NEEDS.update(feed_update_now="supplier")
 # «На возврат» of a position on the page «На ОТХ» (the owner 2026-11-07): the owner and the partner, as «Согласовано с поставщиком»; the page itself
@@ -398,6 +402,8 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "mypoint_income",                             # «Доход»: its own sums, while the owner's switch is on (ТЗ 80)
                          "mypoint_income_request",                     # «Вычли с кассы и получили бонусы»: a request to the office (ТЗ 95)
                          "order_label_file",                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
+                         "mypoint_notify", "mypoint_notify_ask", "mypoint_notify_answer",   # its own notifications (2026-11-25)
+                         "mypoint_notices", "mypoint_notice_task",     # «Оповещение»: its week, return, the office's tasks (2026-11-25)
                          "whatsnew_page"}                              # «Что нового»: the point's items
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)

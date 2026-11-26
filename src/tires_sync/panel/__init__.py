@@ -393,6 +393,8 @@ def create_app(config: dict) -> Flask:
     routes_ads_bid.register(app)
     routes_mypoint.register(app)
     routes_point_payouts.register(app)
+    from . import routes_point_notify                                  # «Уведомления точек», «Оповещение» (2026-11-25)
+    routes_point_notify.register(app)
     routes_avito_webhook.register(app)
     routes_search.register(app)
     routes_sheet.register(app)
