@@ -219,6 +219,7 @@ def _paid(conn) -> Dict[int, dict]:
 # «Этап: «A» → «B»» with the names of the stages)
 JOURNAL_FROM = "2026-10-23"
 _MOVE = re.compile(r"^Этап: «(.*)» → «(.*)»$")
+_CREATED = re.compile(r"^Заказ создан на этапе «(.*)»$")             # orders.create_card
 
 
 def _journal_arrivals(conn, skip: set) -> Dict[int, dict]:
@@ -239,11 +240,11 @@ def _journal_arrivals(conn, skip: set) -> Dict[int, dict]:
     back = {names[c] for c in GONE_BACK if c in names}
     waiting = {names[c] for c in WAITING if c in names}
     moves: Dict[int, List[tuple]] = {}
-    for order_id, at, text in conn.execute("SELECT order_id, at, text FROM order_event WHERE kind = 'stage' AND at >= ? ORDER BY order_id, at, id",
-                                           (JOURNAL_FROM,)):
-        found = _MOVE.match(str(text or ""))
-        if found:
-            moves.setdefault(order_id, []).append((str(at), found.group(1), found.group(2)))
+    for order_id, at, kind, text in conn.execute("SELECT order_id, at, kind, text FROM order_event WHERE kind IN ('stage', 'created') "
+                                                 "AND at >= ? ORDER BY order_id, at, id", (JOURNAL_FROM,)):
+        found = (_MOVE if kind == "stage" else _CREATED).match(str(text or ""))
+        if found:                                                         # made right on a stage (a merge, a waitlist, a chat, the shop)
+            moves.setdefault(order_id, []).append((str(at),) + ((found.group(1), found.group(2)) if kind == "stage" else ("", found.group(1))))
     cards = {r[0]: r[1] for r in conn.execute("SELECT id, point_id FROM order_card")}
     stored: Dict[int, int] = {}                                           # the order → its record of storage (oth_storage.record_of)
     for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE ?", (oth_storage.OF.replace("%d", "%"),)):
@@ -268,7 +269,7 @@ def _journal_arrivals(conn, skip: set) -> Dict[int, dict]:
                     left = at
                 elif left is None and (kinds.get(now) in ("closed", "won") or (kinds.get(now) == "lost" and record is None)):
                     left = at
-        if came_at is None or came_at[:10] >= ARRIVAL_FROM:
+        if came_at is None:                                               # 26.11 too: before the deploy of order_arrival
             continue
         if record is not None:
             mark = oth_storage.record(conn, record) or {}

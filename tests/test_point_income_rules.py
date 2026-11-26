@@ -116,6 +116,23 @@ def test_the_arrivals_before_the_table_are_read_from_the_journal(tmp_path, monke
     assert got[first] == ("2026-11-18", 300)
 
 
+def test_an_order_made_on_the_point_before_the_table_is_read_from_its_creation(tmp_path):
+    from tires_sync import order_merge
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    nov = "2026-11-10T10:00:00"
+    one, two = card(conn, a, qty=2, phone="+7 900 000 00 98"), card(conn, a, qty=2, phone="+7 900 000 00 98")
+    go(conn, one, "placed", "moving", "at_point", when=nov)
+    go(conn, two, "placed", "moving", "at_point", when=nov)
+    new = order_merge.merge(conn, [one, two], stage(conn, "at_point"), nov, "o", client_from=one)    # «Заказ создан на этапе «На точке»»
+    go(conn, new, "cancel", when="2026-11-12T10:00:00")
+    late = card(conn, a, phone="+7 900 000 00 99")
+    go(conn, late, "placed", "moving", "at_point", "cancel", when="2026-11-26T03:00:00")   # 26.11 before the deploy of the table
+    _before_the_table(conn, one, two, new, late)
+    got = {e["order"]: (e["day"], e["issue"], e["issue_pieces"]) for e in order_report.point_income(conn, "2026-11-01", "2026-11-30", a)["orders"]}
+    assert got == {new: ("2026-11-12", 300, 4), late: ("2026-11-26", 300, 4)}             # the sources of the merge: nothing
+
+
 def _give_back(conn, cid, when):
     """«На возврат»: the tyres go back to the supplier (the agreement of the return is the office's, not of this test)."""
     assert orders.move_card(conn, cid, stage(conn, "return_given"), when, "o", internal_return_restore=True)
