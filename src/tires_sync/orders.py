@@ -1422,6 +1422,16 @@ def client_words(event: dict) -> bool:
     return event.get("kind") == "chat" and str(event.get("text") or "").startswith(("Клиент написал", "Клиент звонил"))
 
 
+EMPTY_SQL = ("c.client_name = '' AND c.client_phone = '' AND c.avito_chat = '' AND NOT EXISTS (SELECT 1 FROM order_item i WHERE i.order_id = c.id) "
+             "AND NOT EXISTS (SELECT 1 FROM order_want w WHERE w.order_id = c.id) AND NOT EXISTS (SELECT 1 FROM avito_chat a WHERE a.order_id = c.id)")
+
+
+def empty_ids(conn) -> set:
+    """The empty orders of «Новый заказ» (the review 2026-11-26): «Новый заказ» of «Заказы» makes the card at once; until a name, a phone,
+    a chat, a position or a line «Что нужно клиенту» is in it, it is on no board and in no count of the analytics."""
+    return {r[0] for r in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'new' AND " + EMPTY_SQL)}
+
+
 def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", query: str = "", with_sums: bool = True, returning: str = "") -> dict:
     """The board: the cards by stage with their sums of sale, the columns' sums and «Сумма в работе»; `with_sums=False` (the manager of a point,
     the owner 2026-10-26): every sum is None — not counted, not given. A card of «На возврат» has its label (order_oth.label_of);
@@ -1450,8 +1460,9 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     intercity = {r[0] for r in conn.execute("SELECT order_id FROM order_intercity WHERE enabled = 1")}     # «В другой город» (2026-11-02)
     since = order_oth.migrated_since(conn)                                      # the day of the stage of a migrated order (2026-11-06)
     gone = unlinked_orders(conn)                                                # «На возврат» and after: «клиента нет» (the owner 2026-11-09)
+    blank = empty_ids(conn)                                                     # an empty «Новый заказ»: not on the board (2026-11-26)
     for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim, wish, analogs, other_sizes in rows:
-        if sid not in columns:
+        if sid not in columns or cid in blank:
             continue
         tag_names = tag_list(tags)
         if point_id and pid != point_id:

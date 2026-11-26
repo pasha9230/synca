@@ -183,3 +183,42 @@ def test_a_line_typed_in_the_card_is_saved_with_the_window(w):
     assert [(x["width"], x["season"]) for x in card["wants"]] == [(205, "winter")] and card["stage"]["code"] == "wait"
     post(w["owner"], "/orders/%d/save" % card_id, w["tok"], was=was, want_add="1", want_width="195", want_profile="65", want_radius="15", want_qty="4")   # «Добавить строку»
     assert len(order_wait.list_wants(conn, card_id)) == 2
+
+
+def test_a_point_may_not_make_a_blank_order(w):
+    conn = w["conn"]
+    before = conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0]
+    reply = post(person(w, "pt1"), "/orders/blank", "tok")
+    assert reply.status_code in (302, 403) and "/orders/" not in reply.headers.get("Location", "").replace("/orders/blank", "")
+    assert conn.execute("SELECT COUNT(*) FROM order_card").fetchone()[0] == before
+
+
+def test_an_empty_order_is_on_no_board_and_in_no_analytics_until_filled(w):
+    from datetime import datetime
+    from tires_sync import analytics
+    conn = w["conn"]
+    counted = len(analytics._cards(conn))
+    card_id = int(post(w["owner"], "/orders/blank", w["tok"]).headers["Location"].rsplit("/", 1)[1])
+    assert card_id in orders.empty_ids(conn) and len(analytics._cards(conn)) == counted
+    shown = [c["id"] for col in orders.board(conn, datetime(2026, 11, 26, 12))["columns"] for c in col["cards"]]
+    assert card_id not in shown
+    assert post(w["owner"], "/orders/blank", w["tok"]).headers["Location"].endswith("/orders/%d" % card_id)   # the own empty one, again
+    orders.update_card(conn, card_id, {"client_name": "Олег"}, NOW, "o")
+    shown = [c["id"] for col in orders.board(conn, datetime(2026, 11, 26, 12))["columns"] for c in col["cards"]]
+    assert card_id in shown and len(analytics._cards(conn)) == counted + 1 and card_id not in orders.empty_ids(conn)
+    fresh = int(post(w["owner"], "/orders/blank", w["tok"]).headers["Location"].rsplit("/", 1)[1])
+    assert fresh != card_id                                                         # filled: the next press makes a new one
+
+
+def test_a_refused_line_says_it_once(w):
+    import html
+    import re
+    conn = w["conn"]
+    card_id = _card(conn)
+    page = w["owner"].get("/orders/%d" % card_id).get_data(as_text=True)
+    assert 'name="want_add" value="1" formnovalidate' in page
+    was = html.unescape(re.search(r'name="was" value="([^"]*)"', page).group(1))
+    post(w["owner"], "/orders/%d/save" % card_id, w["tok"], was=was, want_add="1", want_brand="Ikon", want_qty="4")
+    with w["owner"].session_transaction() as s:
+        texts = [f[1] for f in s.get("_flashes", [])]
+    assert "Сохранено." not in texts and len([t for t in texts if "не добавлена" in t]) == 1, texts

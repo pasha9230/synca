@@ -46,8 +46,10 @@ def chat_day(created_ts) -> str:
 
 
 def _cards(conn) -> List[dict]:
+    """The orders counted; an empty «Новый заказ» (orders.EMPTY_SQL: «Новый заказ» of «Заказы» left unfilled) is none (the review 2026-11-26)."""
     rows = conn.execute("SELECT c.id, c.created_at, c.source, c.responsible, c.point_id, p.name, s.kind, s.code FROM order_card c "
-                        "JOIN order_stage s ON s.id = c.stage_id LEFT JOIN point p ON p.id = c.point_id ORDER BY c.id")
+                        "JOIN order_stage s ON s.id = c.stage_id LEFT JOIN point p ON p.id = c.point_id "
+                        "WHERE NOT (s.code = 'new' AND " + orders.EMPTY_SQL + ") ORDER BY c.id")
     return [dict(zip(("id", "created_at", "source", "responsible", "point_id", "point", "kind", "code"), r)) for r in rows]
 
 

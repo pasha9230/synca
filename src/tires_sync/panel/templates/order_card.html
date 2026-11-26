@@ -81,7 +81,7 @@
 <div class="strong">Добавить строку</div>
 {% set w = {"brand": "", "model": "", "width": "", "profile": "", "radius": "", "season": "", "studded": "", "qty": 4, "code": "", "any_brand": c.wait_analogs == 1, "any_size": c.wait_other_sizes == 1} %}
 {% with wp="want_", wf='form="ow-main"' %}{% include "_order_want_fields.html" %}{% endwith %}
-<div><button class="btn btn--primary btn--sm" form="ow-main" name="want_add" value="1">{{ icon("plus") }}Добавить строку</button> <span class="small muted">или «Сохранить» в окне заказа: строка сохранится вместе с заказом</span></div></div>{% endif %}
+<div><button class="btn btn--primary btn--sm" form="ow-main" name="want_add" value="1" formnovalidate>{{ icon("plus") }}Добавить строку</button> <span class="small muted">или «Сохранить» в окне заказа: строка сохранится вместе с заказом</span></div></div>{% endif %}
 </div></details>
 {% include "_order_supplier.html" %}
 {% include "_order_webmim.html" %}

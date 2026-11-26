@@ -1046,14 +1046,13 @@ def register(app) -> None:
     def order_blank():
         """«Новый заказ» of «Заказы» (the owner 2026-11-26: one card of an order whatever it comes from): an empty order on the first stage,
         made at once like «Создать заказ» of a chat and «Добавить заказ» of CRM, and its card opens — the same card, fields and settings.
-        A double press within a minute opens the same empty order (no second one)."""
+        The person's own empty order (orders.EMPTY_SQL: a double press, or one left unfilled) opens instead: empty orders never pile up;
+        an empty one is on no board and in no analytics (orders.empty_ids)."""
         conn = get_conn()
         stamp = local_iso()
         orders.ensure_pipeline(conn, stamp)
-        twin = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.created_by = ? AND s.code = 'new' "
-                            "AND c.client_name = '' AND c.client_phone = '' AND c.avito_chat = '' AND c.created_at >= ? AND NOT EXISTS "
-                            "(SELECT 1 FROM order_item i WHERE i.order_id = c.id) ORDER BY c.id DESC LIMIT 1",
-                            (author(), (local_now() - timedelta(seconds=order_chain.TWIN_SECONDS)).isoformat(timespec="seconds"))).fetchone()
+        twin = conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.created_by = ? AND s.code = 'new' AND "
+                            + orders.EMPTY_SQL + " ORDER BY c.id DESC LIMIT 1", (author(),)).fetchone()
         if twin:
             return redirect("/orders/%d" % twin[0])
         card_id = orders.create_card(conn, {"source": "avito", "deal_kind": "webmim", "responsible": author()}, stamp, author(), require_contact=False)
@@ -1806,13 +1805,18 @@ def register(app) -> None:
         part = part or request.form.get("tab", "") or ("wants" if new_want or request.form.get("want_add") else "")
         return back(card_id, part if part in ORDER_PARTS else "")
 
+    def unsaid(text: str) -> None:
+        """Take back a banner of this request not shown yet (a later one says it better)."""
+        session["_flashes"] = [f for f in session.get("_flashes", []) if f[1] != text]
+
     def typed_want(conn, card_id):
         """The new line of «Что нужно клиенту» is in the window's form (want_…, the owner 2026-11-26: a line typed and not added was lost):
         any size, brand, model or code typed adds it with «Сохранить» or «Добавить строку». Returns "added", "refused" (a red flash) or ""."""
         form = request.form
         if not any(form.get("want_" + k, "").strip() for k in ("width", "profile", "radius", "brand", "model", "code")):
             if form.get("want_add"):
-                flash("Строка не добавлена: укажите размер, бренд, модель или артикул.", "error")
+                unsaid("Сохранено.")
+                flash("Поля заказа сохранены. Строка не добавлена: укажите размер, бренд, модель или артикул.", "error")
             return ""
         if not can_post("order_want_add"):
             return ""
@@ -1822,7 +1826,8 @@ def register(app) -> None:
         try:
             order_wait.add_want(conn, card_id, data, local_iso(), author())
         except orders.OrderError as err:
-            flash("Строка «Что нужно клиенту» не добавлена: %s" % err, "error")
+            unsaid("Сохранено.")                                           # one banner: the fields are saved, the line is not
+            flash("Поля заказа сохранены. Строка «Что нужно клиенту» не добавлена: %s" % err, "error")
             return "refused"
         return "added"
 
