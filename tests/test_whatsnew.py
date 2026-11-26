@@ -63,7 +63,7 @@ def dot_on(client, url):
 SECTIONS = {"Главная", "Заказы", "Задачи", "Чаты", "Звонки", "CRM", "Уведомления", "Каталог", "Каталог для клиента", "Генерация", "Фиды", "На ОТХ",
             "Подключения", "Настройки заказов", "Шаблоны сообщений", "История", "Новый вид", "Пользователи", "Рабочее место", "Меню",
             "Сопоставления", "Аналитика рекламы",             # №5: two more items of the menu (base.html)
-            "Пункты выдачи", "Доход"}                          # №24, №25: the office's ledger of the points, the point's «Доход»
+            "Пункты выдачи", "Доход", "Сводки"}                          # №24, №25: the office's ledger of the points, the point's «Доход»  №34: «Сводки» of a point
 # never in an item a point or a client reads (the owner 2026-11-05); and in no item at all, the repository is public
 NOT_FOR_POINT = re.compile(r"закуп|наценк|прибыл|маржа|логин|аккаунт", re.IGNORECASE)
 PUBLIC_NEVER = re.compile(r"\+?\d[\d ()-]{9,}\d|https?://|\b[\w-]+\.(?:ru|com|net|org)\b", re.IGNORECASE)

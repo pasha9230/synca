@@ -301,6 +301,96 @@ def test_the_nav_and_the_head_lead_to_the_notices_page(tmp_path, clock, view):
     app, owner, tok, conn, a, b, mine = env(tmp_path, view)
     page = mine.get("/my-point").get_data(as_text=True)
     head = re.search(r"<header.*?</header>", page, re.S).group(0)
-    assert 'href="/my-point/notices"' in head and 'aria-label="Оповещения' in head
+    assert 'href="/my-point/notices"' in head and 'aria-label="Сводки' in head
     assert mine.get("/my-point/notices").status_code == 200 and owner.get("/my-point/notices?p=%d" % a).status_code == 200
     assert 'href="/points/notify"' in owner.get("/orders").get_data(as_text=True)
+
+
+# ---- «Сводки» (the owner 2026-11-26): the name, «Требует действия сейчас», one block of counts, «Другие точки» ------------------------------
+
+def staged(conn, point_id, code, number, delivery="", entered="2026-11-20T10:00:00", name="Клиент Тест"):
+    from tires_sync import orders
+    orders.ensure_pipeline(conn, "2026-11-01T10:00:00")
+    cid = orders.create_card(conn, {"client_name": name, "point_id": str(point_id)}, "2026-11-01T10:00:00", "чаты")
+    stage = conn.execute("SELECT id FROM order_stage WHERE code = ?", (code,)).fetchone()[0]
+    conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ?, delivery_date = ?, webmim_number = ? WHERE id = ?",
+                 (stage, entered, delivery, number, cid))
+    conn.commit()
+    return cid
+
+
+def test_the_page_is_called_summaries_everywhere_and_keeps_its_marks(tmp_path, clock, view):
+    app, owner, tok, conn, a, b, mine = env(tmp_path, view)
+    page = mine.get("/my-point/notices").get_data(as_text=True)
+    assert "<h1>Сводки</h1>" in page and "<title>Сводки" in page and "<h1>Оповещение</h1>" not in page
+    work = mine.get("/my-point").get_data(as_text=True)
+    head = re.search(r"<header.*?</header>", work, re.S).group(0)
+    assert 'aria-label="Сводки' in head and "Оповещения точки" not in work
+
+
+def test_what_needs_an_action_now_links_the_late_and_the_long_waiting_orders(tmp_path, clock, view):
+    app, owner, tok, conn, a, b, mine = env(tmp_path, view)
+    late = staged(conn, a, "moving", "5100001", delivery="2026-11-24")
+    staged(conn, a, "moving", "5100002", delivery="2026-11-26")                      # today: not late yet
+    stale = staged(conn, a, "at_point", "5100003", entered="2026-11-20T09:00:00")
+    staged(conn, a, "at_point", "5100004", entered="2026-11-24T09:00:00")            # two days: not yet
+    staged(conn, b, "moving", "5100005", delivery="2026-11-20")                      # another point's
+    page = mine.get("/my-point/notices").get_data(as_text=True)
+    assert 'data-act-late="%d"' % late in page and "5100002" not in page and "5100005" not in page
+    assert 'href="/my-point?tab=moving#order-%d"' % late in page and "2 дня назад" in page
+    assert 'data-act-stale="%d"' % stale in page and 'href="/my-point?tab=here#order-%d"' % stale in page and "5100004" not in page
+    assert "data-notices-no-returns" not in page
+
+
+def test_one_block_of_counts_the_week_and_the_month_without_rubles_while_the_income_is_hidden(tmp_path, clock, view):
+    app, owner, tok, conn, a, b, mine = env(tmp_path, view)
+    for order, at in ((1, "2026-11-17T10:00:00"), (2, "2026-11-25T10:00:00"), (3, "2026-11-02T10:00:00")):
+        conn.execute("INSERT INTO order_arrival (order_id, arrived_at, point_id, pieces) VALUES (?,?,?,4)", (order, at, a))
+    sold = staged(conn, a, "done", "5100010")
+    conn.execute("INSERT INTO order_event (order_id, at, author, kind, text) VALUES (?,?,?,?,?)", (sold, "2026-11-18T10:00:00", "gamma", "point", pn_sold()))
+    acting = staged(conn, a, "done", "5100011")                                          # the owner working as the point: not the point's sale
+    conn.execute("INSERT INTO order_event (order_id, at, author, kind, text) VALUES (?,?,?,?,?)",
+                 (acting, "2026-11-18T10:00:00", "Владелец за точку «Альфа»", "point", pn_sold()))
+    conn.commit()
+    page = mine.get("/my-point/notices").get_data(as_text=True)
+    assert 'data-week="received">1<' in page and 'data-month="received">3<' in page
+    assert 'data-week="oth">1<' in page and 'data-month="oth">1<' in page
+    assert "data-summary-money" not in page and "₽" not in page.split("data-notices-week")[1].split("</section>")[0]
+    assert "считается с 01.12" in page
+
+
+def pn_sold():
+    from tires_sync import order_report
+    return order_report.OTH_SOLD_EVENT
+
+
+def test_the_rubles_show_while_the_point_sees_its_income(tmp_path, clock):
+    from tires_sync import order_report
+    app, owner, tok, conn, a, b, mine = env(tmp_path)
+    order_report.set_income_shown(conn, True, NOW, "admin")
+    conn.commit()
+    page = mine.get("/my-point/notices").get_data(as_text=True)
+    assert "data-summary-money" in page and 'href="/my-point/income"' in page
+
+
+def test_other_points_show_names_and_counts_only_and_the_owner_hides_the_tab(tmp_path, clock, view):
+    app, owner, tok, conn, a, b, mine = env(tmp_path, view)
+    early = staged(conn, b, "at_point", "5100020", delivery="2026-11-10", name="Секретный Клиент")
+    conn.execute("INSERT INTO order_arrival (order_id, arrived_at, point_id, pieces) VALUES (?,?,?,4)", (early, "2026-11-11T10:00:00", b))
+    slow = staged(conn, b, "at_point", "5100021", delivery="2026-11-10")
+    conn.execute("INSERT INTO order_arrival (order_id, arrived_at, point_id, pieces) VALUES (?,?,?,4)", (slow, "2026-11-14T10:00:00", b))
+    conn.commit()
+    assert "Бета" not in mine.get("/my-point/notices").get_data(as_text=True)          # the own tab: the own point only
+    page = mine.get("/my-point/notices?tab=others").get_data(as_text=True)
+    row = re.search(r'<tr data-compare-point="%d".*?</tr>' % b, page, re.S).group(0)
+    assert "Бета" in row and "<td>2</td>" in row and "50%" in row
+    assert 'data-compare-point="%d" data-mine' % a in page
+    assert "Секретный" not in page and "5100020" not in page and "₽" not in page.split("data-compare")[1]
+    week = mine.get("/my-point/notices?tab=others&period=week").get_data(as_text=True)
+    assert "16.11–22.11" in week
+    assert post(mine, "/points/notify", "tok", what="compare", on="0").status_code == 403    # the owner's switch only
+    post(owner, "/points/notify", tok, what="compare", on="")
+    hidden = mine.get("/my-point/notices?tab=others").get_data(as_text=True)
+    assert "data-compare-table" not in hidden and "data-summary-tabs" not in hidden and "<h1>Сводки</h1>" in hidden
+    post(owner, "/points/notify", tok, what="compare", on="1")
+    assert "data-compare-table" in mine.get("/my-point/notices?tab=others").get_data(as_text=True)

@@ -206,6 +206,8 @@ def audit_text(entry: dict) -> str:
         return "Точка №%s: «Вычли с кассы и получили бонусы» — %s ₽, запрос офису" % (d.get("point", "?"), d.get("amount", "?"))
     if action == "order_source_point":
         return "Заказ №%s: откуда клиент — точка %s" % (d.get("order", "?"), d.get("name") or "не указана")
+    if action == "point_compare_shown":
+        return "Вкладка «Другие точки» в «Сводках» точек: %s" % ("показывается" if d.get("on") else "скрыта")
     if action == "point_income_shown":
         return "Страница «Доход» у точек: %s" % ("показывается" if d.get("on") else "скрыта")
     if action == "inquiry":

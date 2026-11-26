@@ -31,7 +31,7 @@
    «История точек» is the tab «Точки» of «История» #}
 {% if current_user().role == "point" %}<nav class="sb-group">
 <a class="sb-link{% if path.startswith('/my-point') and not path.startswith(('/my-point/handed', '/my-point/income', '/my-point/notices')) %} is-active{% endif %}" href="/my-point">{{ icon("layers") }}Рабочее место</a>
-{% set nm = notice_marks() %}<a class="sb-link{% if path.startswith('/my-point/notices') %} is-active{% endif %}" href="/my-point/notices" data-notices-link>{{ icon("alert") }}Оповещение{% if nm.returns %}<span class="sb-count sb-count--red" data-returns-mark>{{ returns_mark }}</span>{% endif %}{% if nm.urgent %}<span class="sb-count sb-count--red" data-task-mark title="Задача офиса на сегодня">!</span>{% endif %}</a>
+{% set nm = notice_marks() %}<a class="sb-link{% if path.startswith('/my-point/notices') %} is-active{% endif %}" href="/my-point/notices" data-notices-link>{{ icon("alert") }}Сводки{% if nm.returns %}<span class="sb-count sb-count--red" data-returns-mark>{{ returns_mark }}</span>{% endif %}{% if nm.urgent %}<span class="sb-count sb-count--red" data-task-mark title="Задача офиса на сегодня">!</span>{% endif %}</a>
 <a class="sb-link{% if path.startswith('/my-point/handed') %} is-active{% endif %}" href="/my-point/handed">{{ icon("users") }}Переданные клиенты</a>
 {% if point_income_on() %}<a class="sb-link{% if path.startswith('/my-point/income') %} is-active{% endif %}" href="/my-point/income">{{ icon("chart") }}Доход</a>{% endif %}
 {% include "_nav_tasks.html" %}

@@ -1,30 +1,30 @@
 {% extends "base.html" %}
 {% from "_ui.html" import icon %}
 {% from "_notify_switch.html" import notify_switch %}
-{# «Оповещение» of a point (routes_point_notify.mypoint_notices, the owner 2026-11-25): today (a return: «Есть возвраты!»), the open tasks
-   the office set to the point (a red «!» from their day on) with «Прочитал» / «Выполнено» (both recorded for the office), the last calendar
-   week (came, handed out, clients handed over) and the alerts of the point; the switch of its notifications on top. Nothing of money. #}
+{% from "_point_summary.html" import tabs, act_block, totals, others with context %}
+{# «Сводки» of a point (was «Оповещение»; routes_point_notify.mypoint_notices, the owner 2026-11-25, 2026-11-26): «Требует действия
+   сейчас» (a return today, «Едут» past the delivery day, waiting at the point long), the office's tasks with «Прочитал» / «Выполнено», the
+   one block of counts (the last week, this month, KPI; rubles only while «Доход» is open to the point), the alerts; the tab «Другие точки»
+   (the owner's switch). Blocks: _point_summary.html. #}
 {% block viewport %}width=device-width, initial-scale=1{% endblock %}
 {% block body_class %}pt-ui{% endblock %}
-{% block title %}Оповещение · Tires Sync{% endblock %}
+{% block title %}Сводки · Tires Sync{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endblock %}
 {% block content %}
 {% set pq = ("?p=%d"|format(point.id)) if choose and point else "" %}
 <div class="pt mp-wrap">
 <header class="pt-top mp-head">
 <a class="btn btn--secondary btn--sm pt-back" href="/my-point{{ pq }}" data-back>← Рабочее место</a>
-<div class="mp-title"><h1>Оповещение</h1>{% if point %}<span class="mp-sub">{{ point.name }} · важное, задачи офиса и итоги недели</span>{% endif %}</div>
+<div class="mp-title"><h1>Сводки</h1>{% if point %}<span class="mp-sub">{{ point.name }} · что сделать сейчас, задачи офиса и итоги</span>{% endif %}</div>
 <div class="pt-top-actions">{{ notify_switch(notify, point, user, choose, "btn btn--secondary btn--sm", "/my-point/notices" ~ pq) }}</div>
 </header>
 {% if choose and points %}<form method="get" action="/my-point/notices" class="mp-choose" data-autosubmit><label class="field"><span class="label">Точка</span><select class="select" name="p">{% for p in points %}<option value="{{ p.id }}"{% if point and p.id == point.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><noscript><button class="btn btn--secondary">Показать</button></noscript></form>{% endif %}
 {% if not point %}<p class="mp-empty">Точек пока нет: их заводит владелец в «Подключения → Точки».</p>
 {% else %}
-<section class="mp-handoff" aria-labelledby="nt-today-h" data-notices-today><h2 id="nt-today-h">Сегодня</h2>
-{% if returns %}<p data-notices-returns><span class="badge badge--err">{{ returns_mark }}</span> <b>Возврат поставщику: {{ returns|length }} {{ plural(returns|length, "заказ", "заказа", "заказов") }}</b> <span class="mp-sub">№ {{ returns|join(", № ") }}</span></p>
-<a class="btn btn--secondary btn--sm" href="/my-point?tab=return{{ ('&p=%d'|format(point.id)) if choose else '' }}">Перейти к возвратам</a>
-{% else %}<p class="mp-sub" data-notices-no-returns>Сегодня возвратов нет.</p>{% endif %}
-{% if not notify.enabled %}<p class="mp-hint" data-notices-off>Уведомления точки выключены{% if notify.who %} ({{ notify.who }}{% if notify.at %}, {{ notify.at|short_dt }}{% endif %}){% endif %}: звука и уведомлений браузера нет.</p>{% endif %}
-</section>
+{{ tabs(tab, compare_on, pq) }}
+{% if tab == "others" %}{{ others(False, period, cmp_start, cmp_end, cmp_rows, month_name, on_time_days, point, choose) }}
+{% else %}
+{{ act_block(False, point, choose, returns, act, notify, late_days, stale_days) }}
 <section class="mp-handoff" aria-labelledby="nt-tasks-h" data-notices-tasks><h2 id="nt-tasks-h">Задачи офиса{% if office_tasks %} <span class="mp-count">{{ office_tasks|length }}</span>{% endif %}</h2>
 {% if office_tasks %}<ul class="mp-handed-list">{% for t in office_tasks %}<li class="mp-handed-item" data-office-task="{{ t.id }}"><div class="mp-handed-who">
 <span class="mp-name">{{ t.kind_label }}{% if t.title %}: {{ t.title }}{% endif %}{% if t.urgent %} <span class="badge badge--err" data-task-urgent>!</span>{% endif %}</span>
@@ -35,12 +35,10 @@
 <details class="mp-more"><summary class="btn btn--primary btn--sm">Выполнено</summary><form method="post" action="/my-point/notices/task/{{ t.id }}/done" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><label class="field"><span class="label">Что сделано (необязательно)</span><input class="input" name="result" maxlength="300" autocomplete="off"></label><button class="btn btn--primary btn--sm" data-task-done-btn>Отметить выполненной</button></form></details></div>{% endif %}
 </li>{% endfor %}</ul>
 {% else %}<p class="mp-sub">Открытых задач от офиса нет.</p>{% endif %}</section>
-<section class="mp-handoff" aria-labelledby="nt-week-h" data-notices-week><h2 id="nt-week-h">Прошлая неделя <span class="mp-sub">{{ week.start|day }}–{{ week.end|day }}</span></h2>
-<ul class="mp-handed-list"><li class="mp-handed-item"><div class="mp-handed-who">Приехало на точку</div><b data-week="received">{{ week.received }}</b></li>
-<li class="mp-handed-item"><div class="mp-handed-who">Выдано клиентам</div><b data-week="issued">{{ week.issued }}</b></li>
-<li class="mp-handed-item"><div class="mp-handed-who">Передано клиентов</div><b data-week="handed">{{ week.handed }}</b></li></ul></section>
-{% if alerts %}<section class="mp-handoff mp-alerts" aria-labelledby="nt-alerts-h"><h2 id="nt-alerts-h">Оповещения</h2>
+{{ totals(False, week, month, kpi, kpi_from, rubles, point, choose) }}
+{% if alerts %}<section class="mp-handoff mp-alerts" aria-labelledby="nt-alerts-h"><h2 id="nt-alerts-h">Оповещения по заказам</h2>
 <ul class="mp-handed-list">{% for n in alerts %}<li class="mp-handed-item"><div class="mp-handed-who"><span class="mp-sub">{{ n.at|short_dt }}{% if n.order_id %} · заказ №{{ n.order_id }}{% endif %}</span><span class="mp-note-text">{{ n.text }}</span></div></li>{% endfor %}</ul></section>{% endif %}
+{% endif %}
 {% endif %}
 {% with section="notices" %}{% include "_point_nav.html" %}{% endwith %}
 </div>
