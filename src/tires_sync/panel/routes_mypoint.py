@@ -77,12 +77,12 @@ def _cards(conn, point_id) -> list:
     return [orders.get_card(conn, card_id) for card_id in ids if card_id not in mine]
 
 
-def _arrival(conn, point_id, now: str):
-    """«Заказ должен был приехать — отметьте» (arrival_remind, the owner 2026-11-27): the point's own person makes the showing, the office
-    working as the point only sees the last one. Never raises: a busy base shows no reminder."""
+def _arrival(conn, point_id, now: str, seen: bool = True):
+    """«Заказ должен был приехать — отметьте» (arrival_remind, the owner 2026-11-27): the point's own person makes the showing — by opening
+    the page, or by the feed of a tab in front (`seen`) — the office working as the point only sees the last one. Never raises."""
     from .. import arrival_remind
     try:
-        return arrival_remind.current(conn, point_id, now, record=own_point() is not None and current_user()["as_point"] is None)
+        return arrival_remind.current(conn, point_id, now, record=seen and own_point() is not None and current_user()["as_point"] is None)
     except Exception:                                                           # noqa: BLE001 - a hint; the page itself opens
         conn.rollback()
         logging.getLogger("tires_sync.panel").exception("the arrival reminder of point %s", point_id)
@@ -1065,7 +1065,8 @@ def register(app) -> None:
             items.append({"key": "return-day-%s-%s" % (today["date"].replace("-", ""), today["sound"]), "title": order_oth.RETURN_DAY_TITLE,
                           "text": "%s Заказы: %s." % (order_oth.RETURN_DAY_BODY, ", ".join("№ %s" % n for n in today["orders"])),
                           "href": "/my-point?tab=return"})
-        late = _arrival(conn, point_id, now)                                    # «Заказ должен был приехать — отметьте» (2026-11-27)
+        # «Заказ должен был приехать — отметьте» (2026-11-27): a background tab (no «seen=1» of notify.js) shows only a showing made already
+        late = _arrival(conn, point_id, now, seen=request.args.get("seen") == "1")
         if late:
             items.append({k: late[k] for k in ("key", "title", "text", "href")})
         items += [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"

@@ -24,13 +24,17 @@ PER_DAY = 2                              # showings a calendar day per point
 GAP_HOURS = 3                            # between two showings
 SHOWN_KEY = "arrival_remind:%d:%s"       # app_state, per point and day: {"shown": [at, ...], "orders": [the numbers of the last showing]}
 KIND = "arrival_remind"                  # point_event
-TITLE = "Заказ должен был приехать — отметьте"
+TITLE = "Заказ должен был приехать — отметьте «Приехал»"
 BODY = "Шины уже на точке — нажмите «Приехал». Ещё не приехали — напишите в офис."
 HREF = "/my-point?tab=moving"
 
 TASK_DAYS = 3                            # the office's task: this many days and more past the delivery day
 TASK_KEY = "arrival_late_task:%d:%s"     # app_state, per order and delivery day: the task's id (made once, even if closed by hand)
 TASK_TITLE = "Заказ едет дольше срока"
+OWN = "own"                              # TASK_KEY's value for a point's own sale: no task, not looked at again
+SINCE_KEY = "arrival_late_since"         # app_state: the first delivery day of the tasks (order_oth.SINCE_KEY's way)
+SINCE_FIRST_DAYS = 7                     # the first tick: its day minus this many days
+MAX_AGE_DAYS = 30                        # never a task for a delivery day older than this
 WAY = ("placed", "moving")
 
 log = logging.getLogger("tires_sync.arrival_remind")
@@ -100,13 +104,24 @@ def _day(iso: str) -> str:
     return "%s.%s.%s" % (iso[8:10], iso[5:7], iso[:4])
 
 
+def since(conn, now: str) -> str:
+    """The first delivery day the tasks look at: the first tick keeps SINCE_KEY = its day minus SINCE_FIRST_DAYS (no task for every old
+    order stuck on the way at the deploy); never older than MAX_AGE_DAYS before today."""
+    today = date.fromisoformat(now[:10])
+    conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (SINCE_KEY, (today - timedelta(days=SINCE_FIRST_DAYS)).isoformat()))
+    conn.commit()
+    kept = conn.execute("SELECT value FROM app_state WHERE key = ?", (SINCE_KEY,)).fetchone()[0][:10]
+    return max(kept, (today - timedelta(days=MAX_AGE_DAYS)).isoformat())
+
+
 def late_tasks(conn, now: str) -> int:
-    """The tick, any hour: one task per late order and delivery day (TASK_DAYS and more past it); then close_tasks. Returns how many made."""
+    """The tick, any hour: one task per late order and delivery day (TASK_DAYS and more past it, the day not before `since`); then
+    close_tasks. A point's own sale is marked once (OWN) and never looked at again. Returns how many made."""
     from . import order_manager, order_notify, order_points, orders, tasks
     limit = (date.fromisoformat(now[:10]) - timedelta(days=TASK_DAYS)).isoformat()
     rows = conn.execute("SELECT c.id, c.point_id, c.delivery_date FROM order_card c JOIN order_stage s ON s.id = c.stage_id "
-                        "WHERE s.code IN (?, ?) AND c.point_id IS NOT NULL AND c.delivery_date != '' AND c.delivery_date <= ? ORDER BY c.id",
-                        WAY + (limit,)).fetchall()
+                        "WHERE s.code IN (?, ?) AND c.point_id IS NOT NULL AND c.delivery_date != '' AND c.delivery_date <= ? "
+                        "AND c.delivery_date >= ? ORDER BY c.id", WAY + (limit, since(conn, now))).fetchall()
     made, own, owner = 0, {}, None
     for card_id, point_id, planned in rows:
         key = TASK_KEY % (card_id, str(planned)[:10])
@@ -115,6 +130,8 @@ def late_tasks(conn, now: str) -> int:
         if point_id not in own:
             own[point_id] = order_points.own_sales(conn, point_id)
         if card_id in own[point_id]:
+            conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, OWN))
+            conn.commit()
             continue
         try:
             card = orders.get_card(conn, card_id)
@@ -135,15 +152,20 @@ def late_tasks(conn, now: str) -> int:
 
 
 def close_tasks(conn, now: str) -> int:
-    """The open tasks of late_tasks whose order left «Заказ оформлен» / «Едет на точку»: done, with where the order is now."""
+    """The open tasks of late_tasks whose order left «Заказ оформлен» / «Едет на точку» (done, with where the order is now), or whose
+    delivery day is not the order's any more (done: the date changed; the new date has a task of its own when it is late)."""
     from . import tasks
     closed = 0
-    for task_id, stage in conn.execute(
-            "SELECT t.id, s.name FROM app_state a JOIN callback_task t ON t.id = CAST(a.value AS INTEGER) JOIN order_card c ON c.id = t.order_id "
-            "JOIN order_stage s ON s.id = c.stage_id WHERE a.key LIKE 'arrival_late_task:%' AND t.done_at IS NULL AND t.cancelled_at IS NULL "
-            "AND s.code NOT IN (?, ?)", WAY).fetchall():
+    for key, task_id, code, stage, planned in conn.execute(
+            "SELECT a.key, t.id, s.code, s.name, c.delivery_date FROM app_state a JOIN callback_task t ON t.id = CAST(a.value AS INTEGER) "
+            "JOIN order_card c ON c.id = t.order_id JOIN order_stage s ON s.id = c.stage_id WHERE a.key LIKE 'arrival_late_task:%' "
+            "AND a.value != ? AND t.done_at IS NULL AND t.cancelled_at IS NULL", (OWN,)).fetchall():
+        if code in WAY and key.endswith(":" + str(planned or "")[:10]):
+            continue
+        result = ("заказ перешёл на этап «%s»" % stage if code not in WAY else
+                  "дата доставки изменилась: %s" % (_day(str(planned)[:10]) if planned else "не указана"))
         try:
-            tasks.close(conn, task_id, "done", now, "система", "заказ перешёл на этап «%s»" % stage)
+            tasks.close(conn, task_id, "done", now, "система", result)
             closed += 1
         except tasks.TaskError:                                            # closed meanwhile
             conn.rollback()

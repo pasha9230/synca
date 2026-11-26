@@ -101,6 +101,15 @@ def test_the_page_and_the_feed_of_the_point_its_own_only_and_off_with_the_notifi
     assert 'data-act-late="' in notices and "5300001" in notices
 
 
+def test_a_background_tab_of_the_feed_makes_no_showing_a_tab_in_front_does(tmp_path, clock):
+    app, owner, tok, conn, a, b, mine = env(tmp_path)
+    late(conn, a)
+    assert not [i for i in mine.get("/my-point/feed").get_json()["items"] if i["key"].startswith("arrival-")]
+    assert not pn.history(conn, a, kind="arrival_remind")
+    [item] = [i for i in mine.get("/my-point/feed?seen=1").get_json()["items"] if i["key"].startswith("arrival-")]
+    assert "«Приехал»" in item["title"] and len(pn.history(conn, a, kind="arrival_remind")) == 1
+
+
 def test_the_office_working_as_the_point_makes_no_showing(tmp_path, clock):
     app, owner, tok, conn, a, b, mine = env(tmp_path)
     late(conn, a)
@@ -138,6 +147,45 @@ def test_a_task_closed_by_hand_is_not_made_again(tmp_path):
     tid = conn.execute("SELECT id FROM callback_task WHERE order_id = ?", (cid,)).fetchone()[0]
     tasks.close(conn, tid, "cancel", "2026-11-26T08:10:00", "admin")
     assert ar.late_tasks(conn, "2026-11-26T09:00:00") == 0 and not open_tasks(conn, cid)
+
+
+def test_no_task_for_the_old_orders_of_before_the_first_tick_nor_older_than_30_days(tmp_path):
+    app, owner, tok, conn, a, b, mine = env(tmp_path)
+    old = late(conn, a, "5300010", delivery="2026-11-18")                   # before the first tick's day minus 7 (19.11)
+    edge = late(conn, a, "5300011", delivery="2026-11-19")
+    assert ar.late_tasks(conn, "2026-11-26T08:00:00") == 1 and open_tasks(conn, edge) and not open_tasks(conn, old)
+    conn.execute("UPDATE app_state SET value = '2026-01-01' WHERE key = ?", (ar.SINCE_KEY,))
+    conn.commit()
+    ancient = late(conn, a, "5300012", delivery="2026-10-26")               # 31 days before 26.11
+    month = late(conn, a, "5300013", delivery="2026-10-27")                 # 30 days
+    ar.late_tasks(conn, "2026-11-26T09:00:00")
+    assert open_tasks(conn, month) and not open_tasks(conn, ancient)
+
+
+def test_a_new_delivery_day_closes_the_old_task(tmp_path):
+    app, owner, tok, conn, a, b, mine = env(tmp_path)
+    cid = late(conn, a, delivery="2026-11-22")
+    ar.late_tasks(conn, "2026-11-26T08:00:00")
+    [old] = open_tasks(conn, cid)
+    conn.execute("UPDATE order_card SET delivery_date = '2026-11-23' WHERE id = ?", (cid,))
+    conn.commit()
+    assert ar.late_tasks(conn, "2026-11-26T09:00:00") == 1
+    [new] = open_tasks(conn, cid)
+    assert "23.11.2026" in new and old != new
+    conn.execute("UPDATE order_card SET delivery_date = '2026-11-28' WHERE id = ?", (cid,))   # not late any more: no task
+    conn.commit()
+    assert ar.late_tasks(conn, "2026-11-26T10:00:00") == 0 and not open_tasks(conn, cid)
+
+
+def test_a_points_own_sale_is_marked_once(tmp_path, monkeypatch):
+    from tires_sync import order_points
+    app, owner, tok, conn, a, b, mine = env(tmp_path)
+    cid = late(conn, a, delivery="2026-11-20")
+    calls = []
+    monkeypatch.setattr(order_points, "own_sales", lambda c, p: calls.append(p) or {cid})
+    ar.late_tasks(conn, "2026-11-26T08:00:00")
+    ar.late_tasks(conn, "2026-11-26T09:00:00")
+    assert calls == [a] and not open_tasks(conn, cid)
 
 
 def test_the_tick_of_the_reservations_makes_the_tasks(tmp_path):

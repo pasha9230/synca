@@ -92,7 +92,9 @@
 
   var memory = null;                                      // what this page has seen when the browser keeps nothing
   function check() {
-    fetch(FEED, {credentials: "same-origin", headers: {"Accept": "application/json"}}).then(function (r) {
+    // «seen=1»: the tab is in front — only then may the feed count a showing of «Заказ должен был приехать» (arrival_remind, 2026-11-27)
+    var url = FEED + (FEED === "/my-point/feed" && document.visibilityState === "visible" ? "?seen=1" : "");
+    fetch(url, {credentials: "same-origin", headers: {"Accept": "application/json"}}).then(function (r) {
       if (!r.ok || r.redirected) throw new Error(r.status);                    // an expired login answers with the login page
       return r.json();
     }).then(function (data) {
