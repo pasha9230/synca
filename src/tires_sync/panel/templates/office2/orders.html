@@ -111,6 +111,7 @@
 {% else %}<div class="o2-items"><b class="o2-model">без позиций</b></div>{% endif %}
 {% if c.sum is not none %}<div class="o2-sum"><b>{{ c.sum|money }}</b></div>{% endif %}
 {% if c.point %}<div class="o2-meta">{{ c.point }}</div>{% endif %}
+{% if c.wait_wish or c.wait_analogs %}<div class="xs muted" data-wait-wish title="Лист ожидания: пожелания клиента">{% if c.wait_wish %}Ждёт: {{ c.wait_wish|truncate(90) }}{% endif %}{% if c.wait_analogs %} <span class="badge badge--neutral">подойдут аналоги</span>{% endif %}</div>{% endif %}
 {% if acc %}<div class="o2-tags o2-acc" data-account>{% for t in acc %}<span class="badge badge--brand">{{ t }}</span>{% endfor %}</div>{% endif %}
 <div class="o2-meta daymark{% if c.overdue %} is-over{% endif %}">{{ c.days }} дн.</div>
 {% set rest = c.tags|reject("in", acc)|list %}
