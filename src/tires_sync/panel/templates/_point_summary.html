@@ -1,0 +1,45 @@
+{# The blocks of «Сводки» of a point (routes_point_notify.mypoint_notices, point_summary; the owner 2026-11-26), both views: `p2` — «Новый вид».
+   «Требует действия сейчас» (a return today, «Едут» past the delivery day), the one block of counts (the last week beside this month, the KPI of the month), «Другие точки». The rubles
+   only with `rubles` (the point may see «Доход»); nothing of the purchase or the prices. #}
+{% macro open(p2, id, data) %}{% if p2 %}<section class="p2-box" aria-labelledby="{{ id }}" {{ data }}><div class="p2-section">{% else %}<section class="mp-handoff" aria-labelledby="{{ id }}" {{ data }}>{% endif %}{% endmacro %}
+{% macro close(p2) %}{% if p2 %}</div></section>{% else %}</section>{% endif %}{% endmacro %}
+
+{% macro tabs(tab, compare_on, pq) %}{% if compare_on %}<nav class="mp-tabs" aria-label="Сводки" data-summary-tabs>
+<a class="mp-tab{% if tab == 'mine' %} is-active{% endif %}" href="/my-point/notices{{ pq }}"{% if tab == 'mine' %} aria-current="page"{% endif %} data-tab="mine">Наша точка</a>
+<a class="mp-tab{% if tab == 'others' %} is-active{% endif %}" href="/my-point/notices?tab=others{{ pq|replace('?', '&') }}"{% if tab == 'others' %} aria-current="page"{% endif %} data-tab="others">Другие точки</a></nav>{% endif %}{% endmacro %}
+
+{% macro act_block(p2, point, choose, returns, act, notify) %}{% set sub = "p2-sub" if p2 else "mp-sub" %}{% set pp = ('&p=%d'|format(point.id)) if choose else '' %}
+{{ open(p2, "nt-today-h", "data-notices-today") }}<h2 id="nt-today-h">⚡ Требует действия сейчас</h2>
+{% if returns %}<p data-notices-returns><span class="badge badge--err p2-tag p2-tag--err">{{ returns_mark }}</span> <b>Возврат поставщику сегодня: {{ returns|length }} {{ plural(returns|length, "заказ", "заказа", "заказов") }}</b> <span class="{{ sub }}">№ {{ returns|join(", № ") }}</span>
+<a class="btn btn--secondary btn--sm" href="/my-point?tab=return{{ pp }}">Перейти к возвратам</a></p>{% endif %}
+{% if act %}<p data-act="late"><b>🚚 Должны были приехать — отметьте «Приехал»: {{ act|length }}</b><br><span class="{{ sub }}">Срок доставки прошёл. Шины уже на точке — нажмите «Приехал»; ещё не приехали — напишите в офис.</span></p>
+<ul class="{{ 'p2-list' if p2 else 'mp-handed-list' }}">{% for o in act %}<li{% if not p2 %} class="mp-handed-item"{% endif %} data-act-late="{{ o.id }}"><a href="/my-point?tab=moving{{ pp }}#order-{{ o.id }}">№ {{ o.label }}</a> <span class="{{ sub }}">{% if o.day %}доставка {{ o.day|day }} · {{ o.days }} {{ plural(o.days, "день", "дня", "дней") }} назад{% else %}в пути {{ o.hours }} {{ plural(o.hours, "час", "часа", "часов") }}, даты доставки нет{% endif %}{% if o.client %} · {{ o.client }}{% endif %}</span></li>{% endfor %}</ul>{% endif %}
+{% if not returns and not act %}<p class="{{ sub }}" data-notices-no-returns>Срочных дел нет: возвратов сегодня нет, все приезды отмечены. 👍</p>{% endif %}
+{% if not notify.enabled %}<p class="{{ sub }}" data-notices-off>Уведомления точки выключены{% if notify.who %} ({{ notify.who }}{% if notify.at %}, {{ notify.at|short_dt }}{% endif %}){% endif %}: звука и уведомлений браузера нет.</p>{% endif %}
+{{ close(p2) }}{% endmacro %}
+
+{% macro totals(p2, week, month, kpi, kpi_from, rubles, point, choose) %}{% set sub = "p2-sub" if p2 else "mp-sub" %}
+{{ open(p2, "nt-week-h", "data-notices-week") }}<h2 id="nt-week-h">📊 Итоги</h2>
+<div style="overflow-x:auto"><table class="table" data-summary>
+<thead><tr><th></th><th>Прошлая неделя<br><span class="{{ sub }}">{{ week.start|day }}–{{ week.end|day }}</span></th><th>{{ month.name|capitalize }}<br><span class="{{ sub }}">с {{ month.start|day }}, {{ month.start[11:16] }}</span></th></tr></thead>
+<tbody>
+<tr><td>Приехало на точку</td><td><b data-week="received">{{ week.received }}</b></td><td><b data-month="received">{{ month.received }}</b></td></tr>
+<tr><td>Выдано клиентам</td><td><b data-week="issued">{{ week.issued }}</b></td><td><b data-month="issued">{{ month.issued }}</b></td></tr>
+<tr><td>Передано клиентов</td><td><b data-week="handed">{{ week.handed }}</b></td><td><b data-month="handed">{{ month.handed }}</b></td></tr>
+<tr><td>Продано с ОТХ</td><td><b data-week="oth">{{ week.oth }}</b></td><td><b data-month="oth">{{ month.oth }}</b></td></tr>
+{% if rubles is not none %}<tr data-summary-money><td>Начислено</td><td><b data-week="money">{{ rubles.week|money }}</b></td><td><b data-month="money">{{ rubles.month|money }}</b></td></tr>{% endif %}
+</tbody></table></div>
+<p data-summary-kpi>🎯 <b>KPI за {{ month.name }}:</b> {% if kpi %}заказы {{ kpi.cycle_orders }} из {{ kpi.need_orders }} · шины {{ kpi.cycle_tyres }} из {{ kpi.need_tyres }}{% if kpi.cycles %} · закрыто циклов: {{ kpi.cycles }}{% endif %}{% if rubles is not none and kpi.bonus %} <span class="{{ sub }}">(премия +{{ kpi.bonus|money }} за цикл)</span>{% endif %}{% else %}<span class="{{ sub }}">считается с {{ kpi_from|day }}.{{ kpi_from[:4] }} — по переданным клиентам.</span>{% endif %}</p>
+{% if rubles is not none %}<p class="{{ sub }}"><a href="/my-point/income{{ ('?p=%d'|format(point.id)) if choose else '' }}">Подробнее — в «Доходе»</a></p>{% endif %}
+{{ close(p2) }}{% endmacro %}
+
+{% macro others(p2, period, start, end, rows, month_name, on_time_days, point, choose) %}{% set sub = "p2-sub" if p2 else "mp-sub" %}{% set pp = ('&p=%d'|format(point.id)) if choose else '' %}
+{{ open(p2, "nt-others-h", "data-compare") }}<h2 id="nt-others-h">🤝 Как дела у команды</h2>
+<p class="{{ sub }}">Все точки одной команды: смотрите, у кого как идёт, и подтягивайтесь друг за другом. Только цифры, без денег и клиентов.</p>
+<nav class="mp-tabs" aria-label="Период"><a class="mp-tab{% if period == 'month' %} is-active{% endif %}" href="/my-point/notices?tab=others{{ pp }}" data-period="month">{{ month_name|capitalize }}</a><a class="mp-tab{% if period == 'week' %} is-active{% endif %}" href="/my-point/notices?tab=others&period=week{{ pp }}" data-period="week">Прошлая неделя</a></nav>
+<p class="{{ sub }}">{{ start|day }}–{{ end|day }}</p>
+<div style="overflow-x:auto"><table class="table" data-compare-table><thead><tr><th>Точка</th><th>Приехало</th><th>Выдано</th><th>«Приехал» вовремя</th></tr></thead><tbody>
+{% for r in rows %}<tr data-compare-point="{{ r.id }}"{% if r.mine %} data-mine style="font-weight:600"{% endif %}><td>{{ r.name }}{% if r.mine %} <span class="{{ sub }}">· это мы</span>{% endif %}</td><td>{{ r.received }}</td><td>{{ r.issued }}</td><td>{% if r.pct is none %}—{% else %}{{ r.pct }}% <span class="{{ sub }}">({{ r.in_time }} из {{ r.dated }})</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="4">Точек пока нет.</td></tr>{% endfor %}</tbody></table></div>
+<p class="{{ sub }}">«Вовремя» — «Приехал» нажали в день доставки или на следующий день. Чем точнее отметки, тем быстрее клиенты узнают, что шины ждут их.</p>
+{{ close(p2) }}{% endmacro %}

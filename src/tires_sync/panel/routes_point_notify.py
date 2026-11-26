@@ -1,20 +1,21 @@
-"""«Уведомления точек» and «Оповещение» of a point (the owner 2026-11-25; tires_sync.point_notify has the rules).
+"""«Уведомления точек» and «Сводки» of a point (the owner 2026-11-25; tires_sync.point_notify has the rules).
 
 The point: /my-point/notify switches its own notifications (off: who does it, a name, is required), /my-point/notify/ask counts one ask
 «Разрешите уведомления» (notify.js shows it only when the server says yes), /my-point/notify/answer records what the browser answered,
-/my-point/notices is «Оповещение» (the week, the return today, the office's tasks with «Прочитал» / «Выполнено», the alerts of the point).
+/my-point/notices is «Сводки» (the week, the return today, the office's tasks with «Прочитал» / «Выполнено», the alerts of the point).
 Its own point only (own_point); nothing of the purchase or the prices.
 
 The office: /points/notify (section «Заказы»: to look «смотреть», to switch «менять» — never a point, the observer only looks) lists the
-points with their state, switches them, and shows the history of the switches and of the points' actions on «Оповещение», by point and days."""
+points with their state, switches them, and shows the history of the switches and of the points' actions on «Сводки», by point and days."""
 from __future__ import annotations
 
 from datetime import date
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
-from .. import order_points as points, point_notify as pn, tasks, users
-from .common import author, can, current_user, get_conn, login_required, own_point, safe_path
+from .. import order_points as points, order_report, point_notify as pn, point_summary as ps, tasks, users
+from . import income_view
+from .common import author, can, current_user, get_conn, has_right, login_required, now_iso, own_point, safe_path
 from .routes_design import point_page
 from .routes_orders import local_iso
 
@@ -40,12 +41,35 @@ def _real_point() -> bool:
 
 
 def notice_marks(point_id=None) -> dict:
-    """The marks of the button «Оповещение» (point_notify.marks) of `point_id`, the person's own point by default; once per request."""
+    """The marks of the button «Сводки» (point_notify.marks) of `point_id`, the person's own point by default; once per request."""
     pid = own_point() if point_id is None else point_id
     cache = g.setdefault("notice_marks", {})
     if pid not in cache:
         cache[pid] = pn.marks(get_conn(), pid, local_iso()[:10])
     return cache[pid]
+
+
+SWITCH_ROLES = ("owner", "partner", "chats")      # the owner 2026-11-26: the admin and the operator switch «Другие точки» and «Доход» of the points
+
+
+def _may_switch_points() -> bool:
+    return current_user()["role"] in SWITCH_ROLES and can("orders", "edit")
+
+
+def _compare(conn, point_id, now: str, issued) -> dict:
+    """«Другие точки» of «Сводки»: every point's counts of the last week or this period (?period=week), the names and the numbers only."""
+    today = now[:10]
+    period = "week" if request.args.get("period") == "week" else "month"
+    first = ps.month_start(now)
+    start, end = pn.last_week(today) if period == "week" else (first, today)
+    found = {}
+
+    def issued_of(pid):
+        if pid not in found:
+            found[pid] = issued(conn, pid, today)
+        return found[pid]
+    rows = ps.compare(conn, points.list_points(conn), start, end, issued_of, point_id)
+    return {"period": period, "cmp_start": start, "cmp_end": end, "cmp_rows": rows, "month_name": ps.month_name(first)}
 
 
 def register(app) -> None:
@@ -99,7 +123,7 @@ def register(app) -> None:
     @app.route("/my-point/notices")
     @login_required
     def mypoint_notices():
-        """«Оповещение»: the last week, the return today, the office's tasks, the state of the notifications and the alerts of the point."""
+        """«Сводки»: the last week, the return today, the office's tasks, the state of the notifications and the alerts of the point."""
         from .routes_mypoint import ALERTS_READ, _issued, _point_id
         conn = get_conn()
         point_id = _point_id(conn)
@@ -109,14 +133,30 @@ def register(app) -> None:
             abort(403)
         now = local_iso()
         today = now[:10]
+        compare_on = ps.compare_shown(conn)
+        tab = "others" if request.args.get("tab") == "others" and compare_on else "mine"
         values = {"point": point, "choose": own_point() is None, "points": points.list_points(conn) if own_point() is None else [],
                   "user": current_user(), "week": None, "returns": [], "office_tasks": [], "alerts": [], "notify": pn.state(conn, point_id),
-                  "can_switch": own_point() is not None}
+                  "can_switch": own_point() is not None, "tab": tab, "compare_on": compare_on, "act": [],
+                  "late_days": ps.LATE_DAYS, "moving_hours": ps.MOVING_HOURS, "on_time_days": ps.ON_TIME_DAYS}
+        if point is not None and tab == "others":
+            return render_template(point_page("mypoint_notices.html"), **values, **_compare(conn, point_id, now, _issued))
         if point is not None:
             start, end = pn.last_week(today)
-            week = pn.week_counts(conn, point_id, start, end)
-            week["issued"] = sum(1 for r in _issued(conn, point_id, today) if start <= str(r["at"])[:10] <= end)
-            week.update(start=start, end=end)
+            first = ps.month_start(now)                                         # the period: from the 1st day 08:00
+            issued = _issued(conn, point_id, today)
+            week = dict(ps.counts(conn, point_id, start, end, issued), start=start, end=end)
+            month = dict(ps.counts(conn, point_id, first, today, issued), start=first, end=today, name=ps.month_name(first))
+            show_money = order_report.income_shown(conn) if own_point() is not None else has_right("money")
+            kpi = rubles = None
+            if show_money or today >= order_report.KPI_FROM:                    # one count of the report: the KPI and the sums
+                report = order_report.build(conn, min(start, first[:10]), today)   # the count is by days: the calendar month
+                if today >= order_report.KPI_FROM:
+                    kpi = income_view._kpi(report, conn, point_id, today[:7], today)
+                if show_money:
+                    rubles = ps.money(conn, point_id, {"week": (start, end), "month": (first[:10], today)}, report)
+            values.update(month=month, kpi=kpi, rubles=rubles, kpi_from=order_report.KPI_FROM, show_money=show_money,
+                          act=ps.to_act(conn, point_id, now))
             found = pn.office_tasks(conn, point_id, today)
             own = set(tasks.point_managers(conn, point_id))
             main = current_app.config.get("AUTHOR", "")
@@ -136,7 +176,7 @@ def register(app) -> None:
     @app.route("/my-point/notices/task/<int:task_id>/<how>", methods=["POST"])
     @login_required
     def mypoint_notice_task(task_id, how):
-        """«Прочитал» / «Выполнено» of a task of the office on «Оповещение»: its own point's only; both are recorded."""
+        """«Прочитал» / «Выполнено» of a task of the office on «Сводки»: its own point's only; both are recorded."""
         if how not in ("read", "done"):
             abort(404)
         point_id = own_point()
@@ -165,6 +205,17 @@ def register(app) -> None:
         if own_point() is not None:
             abort(403)
         conn = get_conn()
+        what = request.form.get("what") if request.method == "POST" else None
+        if what in ("compare", "income"):                                   # the two switches of the points: SWITCH_ROLES
+            if not _may_switch_points():
+                abort(403)
+            on = request.form.get("on") == "1"
+            if what == "compare" and ps.set_compare_shown(conn, on, now_iso(), author()):
+                flash("Точки видят вкладку «Другие точки» в «Сводках»." if on else "Вкладка «Другие точки» скрыта от точек.", "info")
+            if what == "income" and order_report.set_income_shown(conn, on, now_iso(), author()):
+                conn.commit()
+                flash("Точки видят страницу «Доход»." if on else "Страница «Доход» скрыта от точек.", "info")
+            return redirect("/points/notify")
         if request.method == "POST":
             try:
                 point_id = int(request.form.get("p") or 0)
@@ -187,4 +238,6 @@ def register(app) -> None:
         kind = kind if kind in pn.KINDS else ""
         states = [dict(p, notify=pn.state(conn, p["id"])) for p in known]
         return render_template("points_notify.html", states=states, points=known, point_id=point_id, since=since, until=until, kind=kind,
-                               kinds=pn.KINDS, rows=pn.history(conn, point_id, since, until, kind), may_switch=can("orders", "edit"))
+                               kinds=pn.KINDS, rows=pn.history(conn, point_id, since, until, kind), may_switch=can("orders", "edit"),
+                               compare_on=ps.compare_shown(conn), income_on=order_report.income_shown(conn),
+                               points_switch=_may_switch_points())
