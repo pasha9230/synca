@@ -1175,6 +1175,12 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         raise _refuse_move(conn, card_id, now, author, "Чтобы перейти в «%s», заполните: %s." % (stage["name"], ", ".join(gaps)), journal)
     if card["sale_ids"] and stage["kind"] not in ("won", "closed"):
         raise _refuse_move(conn, card_id, now, author, "По заказу записана продажа: сначала сторнируйте её, потом переносите заказ.", journal)
+    requested_stage = stage["code"]
+    reason = (changes or {}).get("cancel_reason") or card.get("cancel_reason") or ""
+    refusal_kind = str(reason).partition(":")[0].strip().casefold()
+    if requested_stage in ("cancel", "oth") and refusal_kind in ("отменил клиент", "отказ клиента", "отказ клиента на точке"):
+        from . import clients
+        clients.mark_order_refusal(conn, card_id, now, author)
     stored = None                                                           # the record of storage this move makes (the owner 2026-11-10)
     try:
         if oth_split and stage["code"] == "oth" and card["stage"].get("code") not in RETURN_STAGES and oth_storage.splits(conn, card):
