@@ -367,7 +367,7 @@ def columns_of(both: bool) -> tuple:
 
 
 def hidden_columns(conn, login: str) -> List[str]:
-    saved = user_prefs.get(conn, login, COLUMNS_KEY, []) if login else []
+    saved = user_prefs.get(conn, login, COLUMNS_KEY, ["year"]) if login else ["year"]
     keys = [k for k, _ in COLUMNS]
     return [k for k in keys if isinstance(saved, list) and k in saved]
 

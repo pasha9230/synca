@@ -297,7 +297,7 @@ def register(app) -> None:
         f = values["f"]                             # «Недавние» and «Колонки» of the client's own page only (never the owner's preview)
         recent = cc.remember_sizes(conn, login, cc.searched_sizes(f.widths, f.heights, f.diameters, f.sizes), now().isoformat(timespec="seconds"))
         here = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS]
-        values.update(recent=[] if values.get("mixed") is not None else cc.recent_links("/shop", here, recent), hidden=cc.hidden_columns(conn, login) + ["year"] + ([] if values["wh_both"] else ["wh"]))
+        values.update(recent=[] if values.get("mixed") is not None else cc.recent_links("/shop", here, recent), hidden=cc.hidden_columns(conn, login) + ([] if values["wh_both"] else ["wh"]))
         return _page("shop.html", conn, login, **values)
 
     @app.route("/shop/filters-view", methods=["POST"])
