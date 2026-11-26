@@ -35,8 +35,6 @@ HANDOFF_PER_TYRE_FROM = BONUS_FROM
 # 300 ₽), always; the points are settled up to 2026-10-22, so the count by the rule (and the ledger, point_payouts.LEDGER_FROM) starts the
 # next day. The days before keep the old count (once an order): settled, never recounted
 POINT_FEE_PER_TYRE_FROM = "2026-10-23"
-# an arrival of a day before this one that the office settled the point for («Рассчитан») is not added afterwards (a closed period)
-OLD_RULE_BEFORE = POINT_FEE_PER_TYRE_FROM
 # KPI (ТЗ 95): in a calendar month, for every full cycle of kpi_orders closed orders AND kpi_tyres tyres of the clients the point handed
 # over, the premium kpi_bonus; the cycles are not limited: min(orders // kpi_orders, tyres // kpi_tyres) premiums (20 / 76 → 2). The rates
 # of a month are those in force on its first day. The premium is the point's on the day of the order that closes the cycle.
@@ -283,7 +281,6 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
     sold_ids = {_order_id(r["note"]) for items in grouped.values() for r in items} - {None}
     oth_sold = oth_sold_orders(conn, sold_ids)
     whole, taken = oth_pieces(conn, sold_ids)                                           # the tyres of a sale from «На ОТХ», by its point
-    closed = settled_before(conn)                                                       # «Рассчитан» before the rule: no new item
     fixed = fixes(conn)
     point_names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
     issues: Dict[tuple, List[tuple]] = {}                                               # point → (share, sum) of its fees for the issue
@@ -307,8 +304,8 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
                 theirs = _payout(payouts, got["handoff_to"], note, day)
                 theirs["handoff"], theirs["handoff_pieces"], theirs["handed"] = got["handoff"], got["handoff_pieces"], True
     for found in point_arrival.unsold(conn, start, end):                               # a chain ended with no sale: the arrival pays
-        if not kept_order(found["order"]) or (found["day"] < OLD_RULE_BEFORE and found["day"] <= closed.get(found["point_id"], "")):
-            continue                                                                    # a day the office settled by the old rule
+        if not kept_order(found["order"]) or found["day"] < POINT_FEE_PER_TYRE_FROM:
+            continue                                                                    # the end before 23.10: settled with the points
         key = ("id", found["point_id"])
         names.setdefault(key, point_names.get(found["point_id"]) or NO_POINT)
         mine = _payout(payouts, key, "Заказ №%d" % found["order"], found["day"])
@@ -493,13 +490,6 @@ def fee_parts(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str,
         if pieces - mine > 0:
             out["handoff"], out["handoff_pieces"] = handoff_fee(rates, by_point, to, day, pieces - mine)
     return out
-
-
-def settled_before(conn) -> Dict[int, str]:
-    """{point id: the last day before OLD_RULE_BEFORE of an item the office settled («Рассчитан», not cancelled)}: no new item of the chain
-    rule is added on such a day (a closed period never changes)."""
-    return {pid: day for pid, day in conn.execute("SELECT point_id, MAX(day) FROM point_paid WHERE cancelled_at IS NULL AND day < ? "
-                                                  "GROUP BY point_id", (OLD_RULE_BEFORE,))}
 
 
 def oth_pieces(conn, order_ids) -> tuple:

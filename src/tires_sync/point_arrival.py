@@ -25,9 +25,8 @@ from __future__ import annotations
 import re
 from typing import Dict, Iterable, List, Optional
 
-# the owner 2026-11-26: «с самого начала сотрудничества» — every arrival the panel wrote pays by the rule of the chain: order_arrival is
-# written from this day (the deploy of #74), nothing earlier exists; a day the office settled before the rule gets no new item
-# (order_report.OLD_RULE_BEFORE)
+# order_arrival is written from this day (the deploy of #74); the arrivals before it are read from the journal (_journal_arrivals). The
+# owner 2026-11-26: one fee, on the day of the end of the chain; an end before 2026-10-23 was settled (order_report.POINT_FEE_PER_TYRE_FROM)
 ARRIVAL_FROM = "2026-11-26"
 HERE = "at_point"
 BEFORE = ("new", "talk", "wait", "placed", "moving", "from_point")     # the stages before the tyres come: a move back there is an undo
@@ -224,7 +223,7 @@ _CREATED = re.compile(r"^Заказ создан на этапе «(.*)»$")    
 
 def _journal_arrivals(conn, skip: set) -> Dict[int, dict]:
     """Order → {point_id, day, pieces, left, arrived, journal} of the arrivals read from the journal (orders with no order_arrival, not in
-    `skip`): the first move to «На точке» of the last stay from JOURNAL_FROM on (a move back to a stage before it undoes the stay, as
+    `skip`): the first move to «На точке» of the last stay, whenever it was (the owner 2026-11-26: one fee, on the day of the end; only an end from JOURNAL_FROM on pays) (a move back to a stage before it undoes the stay, as
     `moved`); its end (left) — the first move after it to «На возврат» / «Вернули поставщику», «Отмена» with no record of storage, another
     closed stage or «Выполнено»; for an order cancelled into a record of storage, the record's move to «На возврат» / «Вернули
     поставщику» or its closing. The point is the order's now (none written then); the tyres — those of the record (its split), else the
@@ -241,7 +240,7 @@ def _journal_arrivals(conn, skip: set) -> Dict[int, dict]:
     waiting = {names[c] for c in WAITING if c in names}
     moves: Dict[int, List[tuple]] = {}
     for order_id, at, kind, text in conn.execute("SELECT order_id, at, kind, text FROM order_event WHERE kind IN ('stage', 'created') "
-                                                 "AND at >= ? ORDER BY order_id, at, id", (JOURNAL_FROM,)):
+                                                 "ORDER BY order_id, at, id"):    # an arrival of before 23.10 too
         found = (_MOVE if kind == "stage" else _CREATED).match(str(text or ""))
         if found:                                                         # made right on a stage (a merge, a waitlist, a chat, the shop)
             moves.setdefault(order_id, []).append((str(at),) + ((found.group(1), found.group(2)) if kind == "stage" else ("", found.group(1))))
@@ -279,6 +278,8 @@ def _journal_arrivals(conn, skip: set) -> Dict[int, dict]:
                     left = at
         else:
             pieces = own_pieces(conn, order_id)
+        if left and left[:10] < JOURNAL_FROM:                             # the end before 23.10: settled with the points
+            continue
         if pieces > 0:
             out[order_id] = {"point_id": cards[order_id], "day": str(left or came_at)[:10], "pieces": pieces, "left": bool(left),
                              "arrived": came_at[:10], "journal": True}

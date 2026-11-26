@@ -105,10 +105,16 @@ def test_the_arrivals_before_the_table_are_read_from_the_journal(tmp_path, monke
     go(conn, never, "placed", "moving", "cancel", when=nov)
     old = card(conn, a, phone="+7 900 000 00 97")
     go(conn, old, "placed", "moving", "at_point", "cancel", when="2026-10-20T10:00:00")     # settled with the points up to 22.10
-    _before_the_table(conn, cancelled, undone, returned, waiting, sold, never, old)
+    came_early = card(conn, a, phone="+7 900 000 00 89")                        # came before 23.10, the end after it: paid on the end
+    go(conn, came_early, "placed", "moving", "at_point", when="2026-10-20T10:00:00")
+    go(conn, came_early, "cancel", when="2026-10-25T10:00:00")
+    still = card(conn, a, phone="+7 900 000 00 88")                             # came before 23.10, no end yet
+    go(conn, still, "placed", "moving", "at_point", when="2026-10-20T10:00:00")
+    _before_the_table(conn, cancelled, undone, returned, waiting, sold, never, old, came_early, still)
     got = {e["order"]: (e["day"], e["issue"], e["issue_pieces"]) for e in order_report.point_income(conn, "2026-10-01", "2026-11-30", a)["orders"]}
-    assert got == {cancelled: ("2026-11-12", 300, 4), returned: ("2026-11-20", 150, 2), sold: ("2026-11-11", 300, 4)}
-    assert [w["order"] for w in order_report.waiting(conn, "2026-11-26", a)] == [waiting]
+    assert got == {cancelled: ("2026-11-12", 300, 4), returned: ("2026-11-20", 150, 2), sold: ("2026-11-11", 300, 4),
+                   came_early: ("2026-10-25", 300, 4)}                                      # old: its end before 23.10 was settled
+    assert sorted(w["order"] for w in order_report.waiting(conn, "2026-11-26", a)) == sorted([waiting, still])
     first, x = _on_oth(conn, monkeypatch, a, nov)                               # cancelled into a record of storage, given back
     _give_back(conn, x, "2026-11-18T10:00:00")
     _before_the_table(conn, first)
