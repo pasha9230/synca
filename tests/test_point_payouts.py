@@ -74,7 +74,7 @@ def test_the_point_page_debt_request_and_paid_hidden(tmp_path):
     search = mine.get("/my-point/income?pay=all&q=%E2%84%96+4").get_data(as_text=True)          # «№ 4»
     assert re.findall(r'<tr data-order="(\d+)">', search) == ["4"]
     bonus = mine.get("/my-point/income?tab=bonus&deal=done").get_data(as_text=True)
-    assert "БОНУС +200" in bonus.replace("\xa0", " ") and 'data-deal="done"' in bonus
+    assert "Бонус +200" in bonus.replace("\xa0", " ") and 'data-deal="done"' in bonus
 
 
 def test_the_switch_off_hides_the_request_too(tmp_path):
