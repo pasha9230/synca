@@ -68,7 +68,14 @@ def register(app) -> None:
             for cid, number, client in conn.execute("SELECT id, webmim_number, client_name FROM order_card WHERE id IN (%s)" % ",".join("?" * len(part)), part):
                 cards[cid] = {"label": number or str(cid), "client": client}
         totals = {k: round(sum(s[k] for s in summary.values()), 2) for k in ("issue", "bonus", "kpi", "adj", "total", "paid", "due")}
+        waiting = [w for w in order_report.waiting(conn, today, point_id) if w["point_id"] in names]   # «к начислению»: not in the sums
+        more = sorted({w["order"] for w in waiting} - set(cards))
+        for chunk in range(0, len(more), 500):
+            part = more[chunk:chunk + 500]
+            for cid, number, client in conn.execute("SELECT id, webmim_number, client_name FROM order_card WHERE id IN (%s)" % ",".join("?" * len(part)), part):
+                cards[cid] = {"label": number or str(cid), "client": client}
         return render_template("points_payouts.html", start=start, end=end, today=today, names=names, point_id=point_id, pay=pay,
+                               waiting=waiting, waiting_sum=round(sum(w["expected"] for w in waiting), 2),
                                summary=sorted(summary.values(), key=lambda s: s["point"]), totals=totals, rows=shown, cards=cards,
                                requests=point_payouts.open_requests(conn, today, report), ledger_from=point_payouts.LEDGER_FROM,
                                back=_back(start, end, str(point_id or ""), pay), fix_parts=order_report.FIX_PARTS)
