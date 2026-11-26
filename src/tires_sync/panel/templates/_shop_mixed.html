@@ -3,7 +3,7 @@
    sum of the set. Then «Только передняя ось», «Только задняя ось». The cells are those of the catalog's table (a phone: cards). #}
 {% from "_ui.html" import icon %}
 {% from "_shop_icons.html" import season_icons, cart_button %}
-{% set cols = 3 + (1 if "season" not in hidden else 0) + (1 if "wh" not in hidden else 0) + (1 if "stock" not in hidden else 0) + (1 if "price" not in hidden else 0) + (1 if cart else 0) %}
+{% set cols = 4 + (1 if "season" not in hidden else 0) + (1 if "wh" not in hidden else 0) + (1 if "stock" not in hidden else 0) + (1 if "price" not in hidden else 0) + (1 if cart else 0) %}
 {% macro line(r, axis) -%}
 <tr class="shop-kit-line{% if cart %} has-buy{% endif %}">
 <td class="c-photo w-thumb">{% if r.photo %}<img class="thumb" src="{{ r.photo }}" alt="" width="36" height="36" loading="lazy">{% else %}<div class="thumb">нет фото</div>{% endif %}</td>
