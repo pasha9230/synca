@@ -437,6 +437,20 @@ def issue_fee(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str,
     return fee, 0
 
 
+def waiting(conn, today: str, point_id: Optional[int] = None) -> List[dict]:
+    """«К начислению» (the owner 2026-11-26): the chains whose tyres came and have no end yet (point_arrival.waiting), with the fee of the
+    issue they are expected to get (issue_fee on today, or the day they came if later). Never in a sum of the report, the ledger or «Доход»:
+    the fee is counted when the chain ends. [{order, point_id, arrived, pieces, expected}], oldest first."""
+    rates, by_point = list_rates(conn), _by_point(list_point_rates(conn))
+    out = []
+    for found in point_arrival.waiting(conn):
+        if point_id is not None and found["point_id"] != int(point_id):
+            continue
+        fee, _ = issue_fee(rates, by_point, ("id", found["point_id"]), max(today, found["arrived"]), found["pieces"])
+        out.append(dict(found, expected=fee))
+    return sorted(out, key=lambda e: (e["arrived"], e["order"]))
+
+
 def handoff_fee(rates: List[dict], by_point: Dict[int, List[dict]], to, day: str, pieces: int) -> tuple:
     """(the bonus, the tyres it is paid for) of a handed-over client's order issued on `day` with `pieces` tyres: handoff_fee a tyre from
     HANDOFF_PER_TYRE_FROM (ТЗ 92: «1 шина = 50 ₽, комплект 200 ₽»), before it once per order (tyres 0). The one place of that rule."""

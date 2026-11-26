@@ -434,6 +434,31 @@ def test_the_income_page_folds_the_filters_and_tells_the_rule(tmp_path):
     assert "data-income-filters" in bonus and "data-income-about" not in bonus
 
 
+def test_a_chain_with_no_end_is_shown_to_be_counted_and_not_in_the_sums(tmp_path):
+    app, owner, tok, conn, a, b = panel(tmp_path)
+    switch(owner, tok, True)
+    mine = manager(app, conn, a)
+    total = re.compile(r'data-income="total">([^<]*)<')
+    before = total.search(mine.get("/my-point/income?pay=all").get_data(as_text=True)).group(1)
+    for n in range(9):                                                               # past the orders the fixture sold (№1–6)
+        card(conn, b, phone="+7 900 000 01 %02d" % n)
+    cid = card(conn, a)
+    go(conn, cid, "placed", "moving", "at_point")
+    returned = card(conn, a, qty=2, phone="+7 900 000 00 62")
+    go(conn, returned, "placed", "moving", "at_point", "oth")
+    conn.commit()
+    assert [(w["order"], w["expected"]) for w in order_report.waiting(conn, "2026-12-15", a)] == [(cid, 300), (returned, 150)]
+    page = mine.get("/my-point/income?pay=all").get_data(as_text=True)
+    assert "data-income-waiting" in page and "к начислению" in page and "450" in page
+    assert total.search(page).group(1) == before                                    # not in «Всего» before the end
+    office = owner.get("/points/payouts?from=%s&to=%s&pay=all" % (START, END)).get_data(as_text=True)
+    assert "data-payout-waiting" in office and 'data-waiting="%d|%d"' % (a, returned) in office
+    _give_back(conn, returned, "2026-12-14T10:00:00")
+    conn.commit()
+    assert [w["order"] for w in order_report.waiting(conn, "2026-12-15", a)] == [cid]
+    assert issue_of(conn, a)[returned] == (150, True) and cid not in issue_of(conn, a)     # the return: the same fee as an issue
+
+
 def test_the_handed_page_has_its_banner_and_the_list_below(tmp_path):
     app, owner, tok, conn, a, b = panel(tmp_path)
     mine = manager(app, conn, a)
@@ -480,8 +505,10 @@ def test_the_point_sold_from_oth_after_the_first_of_december_gets_the_issue_and_
     a = point(conn, "Альфа")
     first, x = _on_oth(conn, monkeypatch, a, DAY)
     assert _income(conn, a, START, END) == {}                                     # on «На ОТХ»: the chain waits
+    assert [(w["order"], w["pieces"], w["expected"]) for w in order_report.waiting(conn, "2026-12-11", a)] == [(first, 4, 300)]
     b = _point_sells(conn, x, "2026-12-12", "менеджер Альфа")
     assert _income(conn, a, START, END) == {b: (300, 200)}                       # one issue for the chain and the bonus
+    assert order_report.waiting(conn, "2026-12-12", a) == []                     # the chain ended: nothing «к начислению»
     rep = order_report.build(conn, START, END)
     assert rep["oth"]["pieces"] == 4 and rep["oth"]["fee"] == 200 and rep["fees"]["issue"] == 300
     profit, margin = _sheet_matches(conn, b, START, END)

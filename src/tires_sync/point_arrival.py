@@ -184,7 +184,8 @@ def _paid(conn) -> Dict[int, dict]:
             "SELECT order_id, point_id, arrived_at, left_at, pieces FROM order_arrival WHERE arrived_at != '' AND undone_at IS NULL "
             "AND none_at IS NULL AND substr(arrived_at, 1, 10) >= ? AND point_id IS NOT NULL AND pieces > 0", (ARRIVAL_FROM,)):
         if order_id not in records:
-            out[order_id] = {"point_id": point_id, "day": str(left_at or arrived_at)[:10], "pieces": int(pieces), "left": bool(left_at)}
+            out[order_id] = {"point_id": point_id, "day": str(left_at or arrived_at)[:10], "pieces": int(pieces), "left": bool(left_at),
+                             "arrived": str(arrived_at)[:10]}
     return out
 
 
@@ -195,6 +196,18 @@ def unsold(conn, start: str, end: str) -> List[dict]:
     record of storage (its tyres are the cancelled order's), not an order with a sale of its own (the sale is the fee of the chain,
     order_report). The tyres sold from «На ОТХ» by another order (taken from the order or its record, the sale not reversed) and the
     sale of the record itself are that sale's: the arrival pays the rest only. The point is the arrival's. [{order, point_id, day, pieces}]."""
+    return [dict(found, order=order_id) for order_id, found, ended in _chains(conn) if ended and start <= found["day"] <= end]
+
+
+def waiting(conn) -> List[dict]:
+    """The chains with no end yet (the owner 2026-11-26: «к начислению», shown apart, never in the sums): the tyres came (ARRIVAL_FROM
+    on) and are still at the point — on «На точке», on «На ОТХ», agreeing the return, in the record of storage of the cancelled order,
+    taken by an order not sold yet. The tyres a sale took already are that sale's. [{order, point_id, arrived (its day), pieces, record}]."""
+    return [dict(found, order=order_id) for order_id, found, ended in _chains(conn) if not ended]
+
+
+def _chains(conn) -> List[tuple]:
+    """(order, {point_id, day, pieces (not sold by another order), arrived, record}, ended) of every arrival that pays, with no sale of its own."""
     from . import oth_storage
     paid = _paid(conn)
     if not paid:
@@ -204,17 +217,19 @@ def unsold(conn, start: str, end: str) -> List[dict]:
     out = []
     for order_id, found in sorted(paid.items()):
         code, kind = stages.get(order_id, ("", ""))
-        if not found["left"] or not (start <= found["day"] <= end) or not code or "Заказ №%d" % order_id in sold:
-            continue
-        if kind == "open" and code not in GONE_BACK:                       # in work, or the tyres wait on «На ОТХ»
+        if not code or "Заказ №%d" % order_id in sold:                     # a sale of its own: the sale is the fee of the chain
             continue
         record = oth_storage.record_of(conn, order_id) if kind == "lost" else None
-        if record is not None and stages.get(record, ("", ""))[0] not in GONE_BACK:
-            continue                                                       # the record holds them, sold whole or taken: not given back
+        if kind == "open":
+            ended = code in GONE_BACK                                      # in work, or the tyres wait on «На ОТХ»
+        elif record is not None:
+            ended = stages.get(record, ("", ""))[0] in GONE_BACK           # the record holds them, sold whole or taken: not given back
+        else:
+            ended = True
         chain = [order_id] + ([record] if record is not None else [])
         pieces = found["pieces"] - _sold_elsewhere(conn, chain, sold)
-        if pieces > 0:
-            out.append(dict(found, order=order_id, pieces=pieces))
+        if pieces > 0 and (found["left"] or not ended):
+            out.append((order_id, dict(found, pieces=pieces, record=record), ended))
     return out
 
 

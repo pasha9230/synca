@@ -157,6 +157,10 @@ def build(conn, point_id: int, args, today: str) -> dict:
             if _matches(f["q"], card):
                 rows.append(dict(e, card=card))
         view["rows"] = _sorted(rows, f, "issue")
+        waiting = order_report.waiting(conn, today, point_id)           # «к начислению»: shown apart, not in the sums above
+        cards = _cards(conn, [w["order"] for w in waiting])
+        view["waiting"] = [dict(w, card=_card(cards, w["order"])) for w in waiting]
+        view["waiting_sum"] = round(sum(w["expected"] for w in waiting), 2)
     elif f["tab"] == "bonus":
         view["rows"] = _bonus_rows(conn, point_id, f, by_order, rates)
     else:
