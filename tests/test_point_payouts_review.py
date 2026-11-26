@@ -151,11 +151,13 @@ def test_the_issue_fee_is_per_order_before_its_day_and_per_tyre_from_it(tmp_path
     from test_point_kpi import sell as sell_any
     conn = db(tmp_path)
     a = point(conn, "Альфа")
-    sell_any(conn, 1, a, pieces=4, day="2026-11-26")
+    sell_any(conn, 1, a, pieces=4, day="2026-10-22")                               # settled with the points by the old count
     sell_any(conn, 2, a, pieces=4, day=order_report.POINT_FEE_PER_TYRE_FROM)
-    got = {e["order"]: (e["issue"], e["issue_pieces"]) for e in order_report.point_income(conn, "2026-11-01", "2026-11-30", a)["orders"]}
-    assert got == {1: (75, 0), 2: (300, 4)}
-    assert order_report.POINT_FEE_PER_TYRE_FROM == "2026-11-27" and order_report.HANDOFF_PER_TYRE_FROM == "2026-12-01"   # the owner 2026-11-25
+    sell_any(conn, 3, a, pieces=4, day="2026-11-26")
+    got = {e["order"]: (e["issue"], e["issue_pieces"]) for e in order_report.point_income(conn, "2026-10-01", "2026-11-30", a)["orders"]}
+    assert got == {1: (75, 0), 2: (300, 4), 3: (300, 4)}
+    # the owner 2026-11-26: the points are settled up to 22.10 — 75 ₽ a tyre from 23.10; the bonuses from 01.12
+    assert order_report.POINT_FEE_PER_TYRE_FROM == "2026-10-23" == point_payouts.LEDGER_FROM and order_report.HANDOFF_PER_TYRE_FROM == "2026-12-01"
 
 
 def test_the_row_of_the_table_takes_the_report_rule_of_the_handed_client(tmp_path):
