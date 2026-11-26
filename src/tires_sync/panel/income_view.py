@@ -146,7 +146,10 @@ def build(conn, point_id: int, args, today: str) -> dict:
                       "kpi": round(sum(e["kpi"] for e in entries), 2), "adj": round(sum(e["adj"] for e in entries), 2), "orders": []}
     view["income"]["total"] = round(sum(view["income"][k] for k in ("issue", "bonus", "kpi", "adj")), 2)
     view["adjust"] = [e for e in entries if e["kind"] == "adj"]
-    by_order = {e["order"]: e for e in entries if e["order"]}
+    by_order: Dict[int, dict] = {}
+    for e in entries:                                     # an order sold apart from its arrival (order_report.SALE_ITEM): the sale
+        if e["order"] and (e["order"] not in by_order or not e.get("arrived")):
+            by_order[e["order"]] = e
     if f["tab"] == "income":
         cards = _cards(conn, [e["order"] for e in entries if e["kind"] == "order"])
         rows = []
