@@ -57,6 +57,7 @@
 {% if current.item_url and current.item_url.startswith("https://") %}<a class="muted" href="{{ current.item_url }}" rel="noopener noreferrer" target="_blank" title="Откроет страницу Авито: переход по ней из другого кабинета может засчитаться как просмотр и потратить рекламный бюджет">на Авито</a>{% endif %}</span></div>{% endif %}
 {% endif %}
 {% if current %}
+{% include "_chat_oth.html" %}
 <div class="chat-thread o2-cl-msgs">
 {% with o2=true %}{% include "_chat_thread.html" %}{% endwith %}
 </div>

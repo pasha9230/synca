@@ -1,0 +1,18 @@
+<div data-chat-oth{% if not current.oth %} hidden{% endif %}>
+{% if current.oth %}{% set hint = current.oth %}
+<details class="chat-oth">
+<summary>
+{% if hint.exact %}<strong class="badge badge--ok">{{ "Шина есть на ОТХ" if hint.size else "Модель есть на ОТХ" }}</strong>
+{% elif hint.alternatives %}<strong class="badge badge--brand">Размер есть на ОТХ</strong>
+{% else %}<strong>На ОТХ совпадений нет</strong>{% endif %}
+<span>{{ hint.brand }} {{ hint.model }} {{ hint.size }}</span>
+<span class="small muted">· {{ hint.source }}</span>
+</summary>
+{% for rows, label in ((hint.exact, "Совпадения по шине"), (hint.alternatives, "Варианты того же размера")) %}
+{% if rows %}<p class="small strong">{{ label }}</p><ul class="small">
+{% for row in rows %}<li>{{ row.name }} · {{ row.qty }} шт.{% if row.point %} · {{ row.point }}{% endif %}</li>{% endfor %}
+</ul>{% endif %}
+{% endfor %}
+</details>
+{% endif %}
+</div>
