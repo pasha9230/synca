@@ -302,15 +302,15 @@ def test_fifty_rubles_for_an_issued_order_of_a_handed_over_client_from_the_24th(
     _sell(conn, 4, "Бета", "2026-10-24")                                                         # not handed over: 75
     assert order_report.rate_on([], "handoff_fee", "2026-10-23") == 0 and order_report.rate_on([], "handoff_fee", order_report.HANDOFF_FEE_FROM) == 50
     before = order_report.build(conn, "2026-10-01", "2026-10-23")
-    assert before["lines"][0]["fee"] == 75 and before["handoff"]["fee"] == 0
+    assert before["lines"][0]["fee"] == 300 and before["handoff"]["fee"] == 0                        # the owner 2026-11-26: 75 ₽ a tyre from 23.10
     rep = order_report.build(conn, "2026-10-01", "2026-10-31")
     line = rep["lines"][0]
-    assert line["fee"] == 75 * 3 + 50 and rep["handoff"] == {"lines": [{"point": "Бета", "clients": 2, "fee": 50.0}], "clients": 2, "fee": 50.0}
-    assert line["net"] == line["margin"] - 275 and line["owner"] == round(line["net"] / 2, 2)
+    assert line["fee"] == 300 * 3 + 50 and rep["handoff"] == {"lines": [{"point": "Бета", "clients": 2, "fee": 50.0}], "clients": 2, "fee": 50.0}
+    assert line["net"] == line["margin"] - 950 and line["owner"] == round(line["net"] / 2, 2)
     order_report.set_rates(conn, "2026-10-25", "2026-10-25", NOW, "owner", handoff_fee=70)          # a saved rate wins from its day
     _sell(conn, 3, "Бета", "2026-10-25")
-    assert order_report.build(conn, "2026-10-25", "2026-10-25")["lines"][0]["fee"] == 75 + 70
-    assert order_report.build(conn, "2026-10-24", "2026-10-24")["lines"][0]["fee"] == 75 * 2 + 50
+    assert order_report.build(conn, "2026-10-25", "2026-10-25")["lines"][0]["fee"] == 300 + 70
+    assert order_report.build(conn, "2026-10-24", "2026-10-24")["lines"][0]["fee"] == 300 * 2 + 50
 
 
 def test_the_staff_answer_in_the_chat_takes_the_client(tmp_path):
@@ -430,16 +430,16 @@ def test_the_fifty_go_to_the_point_that_handed_the_client_over_the_75_to_the_poi
     _sell(conn, 1, "Гамма", "2026-10-24")                                                         # handed by Бета, issued at Гамма
     rep = order_report.build(conn, "2026-10-01", "2026-10-31")
     by = {l["point"]: l for l in rep["lines"]}
-    assert by["Гамма"]["fee"] == 75 and by["Бета"]["fee"] == 50 and by["Бета"]["orders"] == 0 and by["Бета"]["net"] == -50
-    assert rep["handoff"]["lines"] == [{"point": "Бета", "clients": 1, "fee": 50.0}] and rep["total"]["fee"] == 125
-    assert rep["total"]["owner"] + rep["total"]["partner"] == rep["total"]["net"] == by["Гамма"]["margin"] - 125
+    assert by["Гамма"]["fee"] == 300 and by["Бета"]["fee"] == 50                                   # 75 ₽ a tyre from 23.10 and by["Бета"]["orders"] == 0 and by["Бета"]["net"] == -50
+    assert rep["handoff"]["lines"] == [{"point": "Бета", "clients": 1, "fee": 50.0}] and rep["total"]["fee"] == 350
+    assert rep["total"]["owner"] + rep["total"]["partner"] == rep["total"]["net"] == by["Гамма"]["margin"] - 350
     assert [l["point"] for l in order_report.build(conn, "2026-10-01", "2026-10-31", "Бета")["lines"]] == ["Бета"]
-    assert order_report.build(conn, "2026-10-01", "2026-10-31", "Гамма")["lines"][0]["fee"] == 75
+    assert order_report.build(conn, "2026-10-01", "2026-10-31", "Гамма")["lines"][0]["fee"] == 300
     same = order_report.bonus_point
     try:
         order_report.BONUS_TO = "issued"                                                          # the other choice: one line to change
         assert same("Гамма", "Бета") == "Гамма"
-        assert {l["point"]: l["fee"] for l in order_report.build(conn, "2026-10-01", "2026-10-31")["lines"]} == {"Гамма": 125}
+        assert {l["point"]: l["fee"] for l in order_report.build(conn, "2026-10-01", "2026-10-31")["lines"]} == {"Гамма": 350}
     finally:
         order_report.BONUS_TO = "handed"
 
