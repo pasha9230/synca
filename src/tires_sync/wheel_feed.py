@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit
 
 from .connections import PRIMARY_ACCOUNT
 from .feed import clean_title
@@ -21,7 +22,9 @@ def ad_id(goods_id: str, account_id: int, address_id: str) -> str:
     return 'wheel_' + digest
 
 
-def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, category, product_type, rim_types):
+def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, category, product_type, rim_types,
+              photo_for=None, photo_prefix=""):
+    """Build only ads with approved account photo URLs; supplier URLs are not published."""
     if account_id != PRIMARY_ACCOUNT or not str(address_id).strip():
         raise ValueError('Укажите аккаунт и адрес для дисков.')
     if not all((str(phone).strip(), str(category).strip(), str(product_type).strip())):
@@ -32,10 +35,14 @@ def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, c
         if key not in enabled_brands or rules.get(key, {}).get('enabled') is not True:
             continue
         price = price_for(w, rules)
+        image_url = photo_for(w) if photo_for else ""
+        parts = urlsplit(image_url or "")
+        safe_photo = bool(photo_prefix and image_url.startswith(photo_prefix) and parts.scheme == "https"
+                          and parts.hostname and not parts.username and not parts.password and not parts.query and not parts.fragment)
         rim_type = rim_types.get(w.wheel_type, '')
         missing = [k for k, v in {'brand': w.brand, 'name': w.name, 'diameter': w.diameter, 'width': w.width,
                                   'holes': w.holes, 'pcd': w.pcd, 'offset': w.offset, 'dia': w.center_bore,
-                                  'rim_type': rim_type, 'price': price, 'image': w.image if w.image.startswith('https://') else ''}.items() if not v]
+                                  'rim_type': rim_type, 'price': price, 'image': image_url if safe_photo else ''}.items() if not v]
         if price is not None and price <= 0 and 'price' not in missing:
             missing.append('price')
         if w.stock <= 0 or missing:
@@ -52,7 +59,6 @@ def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, c
         for tag, value in fields.items():
             if value:
                 ET.SubElement(ad, tag).text = str(value)
-        if w.image.startswith('https://'):
-            ET.SubElement(ET.SubElement(ad, 'Images'), 'Image', url=w.image)
+        ET.SubElement(ET.SubElement(ad, 'Images'), 'Image', url=image_url)
         ads.append(ad)
     return ads, rejected

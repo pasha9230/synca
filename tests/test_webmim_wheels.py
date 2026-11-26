@@ -114,7 +114,7 @@ def test_wheel_feed_is_opt_in_and_uses_template_fields():
     from tires_sync.wheel_feed import build_ads
     wheel_item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
     params = dict(account_id=1, address_id='25', phone='123', category='Запчасти и аксессуары',
-                  product_type='Диски', rim_types={'': 'Литые'})
+                  product_type='Диски', rim_types={'': 'Литые'}, photo_for=lambda w: 'https://photos.example.test/a.jpg', photo_prefix='https://photos.example.test/')
     rules = {'BRAND': {'pct_small': 10, 'pct_large': 15, 'enabled': True}}
     assert build_ads([wheel_item], rules, set(), **params) == ([], {})
     ads, rejected = build_ads([wheel_item], rules, {'BRAND'}, **params)
@@ -133,7 +133,7 @@ def test_wheel_feed_rejects_nonpositive_prices():
     item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
     rules = {'BRAND': {'pct_small': -200, 'pct_large': 0, 'enabled': True}}
     ads, rejected = build_ads([item], rules, {'BRAND'}, account_id=1, address_id='2', phone='123',
-                              category='parts', product_type='wheels', rim_types={'': 'type'})
+                              category='parts', product_type='wheels', rim_types={'': 'type'}, photo_for=lambda w: 'https://photos.example.test/a.jpg', photo_prefix='https://photos.example.test/')
     assert ads == [] and rejected == {'42': ['price']}
 
 
@@ -176,7 +176,7 @@ def test_extreme_price_is_rejected_without_losing_valid_rows():
 def test_wheel_feed_never_enables_brand_implicitly():
     from tires_sync.wheel_feed import build_ads
     item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
-    params = dict(account_id=1, address_id='2', phone='123', category='parts', product_type='wheels', rim_types={'': 'type'})
+    params = dict(account_id=1, address_id='2', phone='123', category='parts', product_type='wheels', rim_types={'': 'type'}, photo_for=lambda w: 'https://photos.example.test/a.jpg', photo_prefix='https://photos.example.test/')
     for enabled in (None, False):
         rule = {'pct_small': 10, 'pct_large': 10}
         if enabled is not None:
@@ -273,3 +273,14 @@ def test_wheel_feed_rejects_non_primary_account():
     from tires_sync.wheel_feed import build_ads
     with pytest.raises(ValueError):
         build_ads([], {}, set(), account_id=2, address_id='1', phone='123', category='parts', product_type='wheels', rim_types={})
+
+
+def test_wheel_feed_refuses_unapproved_and_secret_photo_urls():
+    from tires_sync.wheel_feed import build_ads
+    item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
+    rules = {'BRAND': {'pct_small': 10, 'pct_large': 10, 'enabled': True}}
+    params = dict(account_id=1, address_id='2', phone='123', category='parts', product_type='wheels', rim_types={'': 'type'},
+                  photo_prefix='https://photos.example.test/')
+    for image in ('', 'https://other.test/a.jpg', 'https://photos.example.test/a.jpg?token=secret'):
+        ads, rejected = build_ads([item], rules, {'BRAND'}, photo_for=lambda w: image, **params)
+        assert ads == [] and rejected['42'] == ['image']
