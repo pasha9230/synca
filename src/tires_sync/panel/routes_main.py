@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
-from flask import flash, redirect, render_template, request
+from flask import abort, flash, redirect, render_template, request
 
 from .. import analytics, daily_summary, new_filter, order_alerts, staging, store, tochki_feed
 from ..settings_store import active_settings, get_active
@@ -69,8 +69,16 @@ def register(app) -> None:
     @app.route("/settings/notify")
     @login_required
     def settings_notify_page():
-        """«Настройки › Уведомления»: the morning summary in Telegram (was a line of the main page; п. 27 of the audit, 2026-11-08)."""
-        return render_template("settings_notify.html", tab="notify", summary_on=daily_summary.is_on(get_conn()))
+        """«Настройки › Уведомления»: the morning summary in Telegram (was a line of the main page; п. 27 of the audit, 2026-11-08) and
+        «Уведомления точек» with «Что видят точки» (the owner 2026-11-26: who has «Заказы», never a point). Section «Заказы» (common):
+        the summary is shown to who has «Настройка» only."""
+        from .common import own_point
+        from .routes_point_notify import notify_values
+        conn = get_conn()
+        if not can("setup") and (own_point() is not None or current_user()["role"] == "point"):
+            abort(403)
+        values = notify_values(conn) if can("orders") and own_point() is None and current_user()["role"] != "point" else {}
+        return render_template("settings_notify.html", tab="notify", summary_on=daily_summary.is_on(conn), **values)
 
     def _opens(href: str) -> bool:
         """The person may open the page of a line of «Требует внимания» (an outside link: yes)."""

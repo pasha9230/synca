@@ -28,7 +28,7 @@ PAGES = {
     "economics_funnel": ("p c pg", "pg", ""),
     "history": ("f", "", ""),
     "history_ads": ("f q pg", "pg", ""),
-    "history_points": ("p", "", ""),
+    "history_points": ("p from to k", "", ""),
     "analytics_page": ("from to by", "by", ""),
     "calls_page": ("days missed q account", "", "account"),
     "mappings": ("q b a c", "", ""),

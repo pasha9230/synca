@@ -6,6 +6,7 @@
 {% block content %}
 {% set badge = {"unpaid": "badge--warn", "paid": "badge--ok", "extra": "badge--warn", "over": "badge--err"} %}
 <header class="page-head"><div><h1>Пункты выдачи<span class="help-q" tabindex="0" data-tip="Взаиморасчёты с точками: выплаты за выдачу, бонусы (переданные клиенты, продажи с ОТХ), премии KPI и корректировки — по тем же ставкам, что «Отчёт по заказам». «Рассчитан» фиксирует, что точке заплатили (например, вычли с кассы). Если сумма заказа после расчёта выросла — «Доплата», уменьшилась или продажу отменили — «Переплата / к удержанию». Учёт ведётся с {{ ledger_from }}.">?</span></h1></div></header>
+{% set ptab = "ledger" %}{% include "_payouts_tabs.html" %}
 <form method="get" class="card card-body row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap;margin-bottom:var(--s-4)">
 <label class="field"><span class="label">С</span><input class="input" type="date" name="from" value="{{ start }}"></label>
 <label class="field"><span class="label">По</span><input class="input" type="date" name="to" value="{{ end }}"></label>

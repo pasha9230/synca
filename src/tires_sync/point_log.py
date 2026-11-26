@@ -45,38 +45,72 @@ def _name(conn, point_id) -> str:
     return row[0] if row else ""
 
 
-def history(conn, point_id: Optional[int] = None, limit: int = SHOWN) -> List[dict]:
+def _days(sql: str, args: list, column: str, since: str, until: str) -> tuple:
+    """`since` and `until` (days, both included; "" — no border) added to a query of `column`."""
+    from datetime import date, timedelta
+    if since:
+        sql, args = sql + " AND %s >= ?" % column, args + [since[:10]]
+    if until:
+        sql, args = sql + " AND %s < ?" % column, args + [(date.fromisoformat(until[:10]) + timedelta(days=1)).isoformat()]
+    return sql, args
+
+
+def history(conn, point_id: Optional[int] = None, limit: int = SHOWN, since: str = "", until: str = "", kind: str = "") -> List[dict]:
     """The actions of the points (of one point when `point_id` is given), newest first: {"at", "author", "point_id", "point", "kind",
-    "name", "order_id", "text"}."""
+    "name", "order_id", "text"}; from `since` to `until` (days, both included), of one `kind` of NAMES (or "vk") when given."""
     names = {p["id"]: p["name"] for p in points.list_points(conn)}
     found = []
     sql, args = "SELECT at, author, detail FROM audit WHERE action = ?", [ACTION]
     if point_id is not None:                                              # the record starts with its point (record): a quiet point's old ones too
         sql, args = sql + " AND detail LIKE ?", args + ['{"point": %d,%%' % int(point_id)]
+    sql, args = _days(sql, args, "at", since, until)
+    if kind:                                                              # json.dumps of record: «"kind": "<kind>"»; checked again below
+        sql, args = sql + " AND detail LIKE ?", args + ['%%"kind": "%s"%%' % kind.replace("%", "")]
     for at, author, detail in conn.execute(sql + " ORDER BY id DESC LIMIT ?", args + [limit]):
         try:
             d = json.loads(detail)
             pid = int(d["point"])
         except (ValueError, TypeError, KeyError):
             continue
-        if point_id is not None and pid != point_id:
+        if (point_id is not None and pid != point_id) or (kind and d.get("kind", "") != kind):
             continue
         found.append({"at": at, "author": author, "point_id": pid, "point": names.get(pid, "точка №%d" % pid), "kind": d.get("kind", ""),
                       "name": NAMES.get(d.get("kind", ""), d.get("kind", "")), "order_id": d.get("order"), "text": d.get("text", "")})
     peers = {str(p["vk_peer_id"]): p["id"] for p in points.list_points(conn) if p.get("vk_peer_id")}
-    if peers:                                                             # what the points wrote in VK (the page's presses are records above)
+    if peers and kind in ("", "vk"):                                      # what the points wrote in VK (the page's presses are records above)
         wanted = [peer for peer, pid in peers.items() if point_id is None or pid == point_id]
         if wanted:
             for at, sender, word, order_id, outcome in conn.execute(
                     "SELECT at, sender, word, order_id, outcome FROM order_command_log WHERE sender IN (%s) AND message_id NOT LIKE 'page-%%' "
-                    "AND message_id NOT LIKE 'chat-%%' AND message_id NOT LIKE 'call-%%' ORDER BY at DESC LIMIT ?" % ",".join("?" * len(wanted)),
-                    wanted + [limit]):
+                    "AND message_id NOT LIKE 'chat-%%' AND message_id NOT LIKE 'call-%%'%s ORDER BY at DESC LIMIT ?" % (",".join("?" * len(wanted)),
+                    _days("", [], "at", since, until)[0]), wanted + _days("", [], "at", since, until)[1] + [limit]):
                 pid = peers[str(sender)]
                 found.append({"at": at, "author": "ВК точки", "point_id": pid, "point": names.get(pid, "точка №%d" % pid), "kind": "vk",
                               "name": "команда ВК «%s»" % (word or ""), "order_id": order_id, "text": outcome or ""})
     found.sort(key=lambda r: r["at"] or "", reverse=True)
     return found[:limit]
 
+
+
+def journal_kinds() -> dict:
+    """The choice «Действие» of «История → Точки»: the presses and the VK commands (NAMES) and the records of «Уведомления точек»."""
+    from . import point_notify
+    found = {k: v[:1].upper() + v[1:] for k, v in NAMES.items()}
+    found.update(point_notify.KINDS)
+    return found
+
+
+def journal(conn, point_id: Optional[int] = None, since: str = "", until: str = "", kind: str = "", limit: int = SHOWN) -> List[dict]:
+    """«История → Точки» (the owner 2026-11-26): the actions of the points (history) and the records of «Уведомления точек» (point_notify:
+    switched on / off, by whom and why, the browser's answers, the office's tasks read and done) in one list, newest first."""
+    from . import point_notify
+    found = [] if kind in point_notify.KINDS else history(conn, point_id, limit, since, until, kind)
+    if not kind or kind in point_notify.KINDS:
+        for r in point_notify.history(conn, point_id, since, until, kind, limit):
+            found.append(dict(r, order_id=None, author=r["author"] + (" (%s)" % r["who"] if r["who"] else ""),
+                              text=r["text"] or ""))
+    found.sort(key=lambda r: r["at"] or "", reverse=True)
+    return found[:limit]
 
 UNDO_KEY = "point_undo:%d"
 UNDOABLE = {"arrived": "«Приехал»", "issued": "«Выдал»", "reserve_issued": "«Выдан»", "oth_issued": "«Выдали»", "oth_sold": "«Продать»", "to_oth": "«На ОТХ»", "refuse": "«ОТКАЗ»",

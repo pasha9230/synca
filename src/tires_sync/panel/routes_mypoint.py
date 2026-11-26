@@ -1005,6 +1005,12 @@ def register(app) -> None:
         wanted = str(request.args.get("p") or "")
         return redirect("/history/points" + ("?p=" + wanted if wanted.isascii() and wanted.isdigit() else ""), code=301)
 
+    def _history_day(value) -> str:
+        try:
+            return date.fromisoformat(str(value or "").strip()[:10]).isoformat()
+        except ValueError:
+            return ""
+
     @app.route("/history/points")
     @login_required
     def history_points():
@@ -1013,7 +1019,13 @@ def register(app) -> None:
         known = points.list_points(conn)
         wanted = str(request.args.get("p") or "")
         point_id = int(wanted) if wanted.isascii() and wanted.isdigit() and int(wanted) in {p["id"] for p in known} else None
-        return render_template("points_history.html", rows=point_log.history(conn, point_id), points=known, point_id=point_id)
+        since, until = _history_day(request.args.get("from")), _history_day(request.args.get("to"))
+        if since and until and since > until:
+            since, until = until, since
+        kinds = point_log.journal_kinds()
+        kind = request.args.get("k", "") if request.args.get("k", "") in kinds else ""
+        return render_template("points_history.html", rows=point_log.journal(conn, point_id, since, until, kind), points=known,
+                               point_id=point_id, since=since, until=until, kind=kind, kinds=kinds)
 
     @app.route("/my-point/feed")
     @login_required
