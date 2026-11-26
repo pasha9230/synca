@@ -251,7 +251,7 @@ for _section, _endpoints in {
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_autosave", "order_point_sale", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
-               "orders_inbox_confirm", "orders_inbox_dismiss", "order_item_find", "order_new_page", "order_new", "orders_bulk_page", "orders_bulk_check",
+               "orders_inbox_confirm", "orders_inbox_dismiss", "order_item_find", "order_new_page", "order_new", "order_blank", "orders_bulk_page", "orders_bulk_check",
                "orders_bulk_run", "orders_bulk_undo_page", "orders_bulk_undo_run", "orders_cleanup_page", "orders_cleanup_run",
                "orders_bulk_tag", "orders_bulk_responsible", "orders_bulk_delete",    # the side panel of «Список» in «Новый вид»
                "deleted_page", "deleted_restore", "orders_webmim_page", "order_webmim_link", "order_webmim_create", "order_webmim_resolve", "order_webmim_cabinet",

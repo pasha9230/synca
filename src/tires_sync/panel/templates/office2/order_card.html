@@ -91,11 +91,11 @@
 {% include "_order_want_fields.html" %}
 <div class="row" style="gap:var(--s-2)"><button class="btn btn--secondary btn--sm">Сохранить строку</button><button class="btn btn--danger-outline btn--sm" formaction="/orders/{{ c.id }}/wants/{{ w.id }}/delete" formnovalidate>Убрать строку</button></div></form>{% endif %}
 {% else %}<p class="muted">Строк пока нет.</p>{% endfor %}
-{% if can_post("order_want_add") %}<form method="post" action="/orders/{{ c.id }}/wants/add" class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% if can_post("order_want_add") and can_post("order_save") %}<div class="stack" data-want-new>{# in the window's form (form="ow-main"): «Сохранить» of the window keeps a typed line too (the owner 2026-11-26) #}
 <div class="strong">Добавить строку</div>
-{% set w = {"brand": "", "model": "", "width": "", "profile": "", "radius": "", "season": "", "studded": "", "qty": 4, "code": "", "any_brand": false, "any_size": false} %}
-{% include "_order_want_fields.html" %}
-<div><button class="btn btn--primary btn--sm">{{ icon("plus") }}Добавить строку</button></div></form>{% endif %}
+{% set w = {"brand": "", "model": "", "width": "", "profile": "", "radius": "", "season": "", "studded": "", "qty": 4, "code": "", "any_brand": c.wait_analogs == 1, "any_size": c.wait_other_sizes == 1} %}
+{% with wp="want_", wf='form="ow-main"' %}{% include "_order_want_fields.html" %}{% endwith %}
+<div><button class="btn btn--primary btn--sm" form="ow-main" name="want_add" value="1" formnovalidate>{{ icon("plus") }}Добавить строку</button> <span class="small muted">или «Сохранить» в окне заказа: строка сохранится вместе с заказом</span></div></div>{% endif %}
 </div></details>
 {% set w = webmim %}{% set b = webmim_create %}{# the block «WebMIM» only when it asks for an action (П11, the owner 08.11: no block «WebMIM»): the button is held,
    «Досоздать», a result that failed, the positions differ, or no number and orders of WebMIM to pick #}

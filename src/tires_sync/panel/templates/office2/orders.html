@@ -25,7 +25,7 @@
 <a class="menu-item" href="/orders/settings">Настроить воронку</a>{% endif %}
 <hr><a class="menu-item" href="/deleted">Удалённые</a>
 </div></details>
-{% if can_post("order_new") %}<a class="btn btn--primary" href="/orders/new">{{ icon("plus") }}Новый заказ</a>{% endif %}</div></header>
+{% if can_post("order_blank") %}<form method="post" action="/orders/blank" data-once style="display:inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary" data-new-order title="Откроется карточка нового заказа: те же поля, что у любого заказа">{{ icon("plus") }}Новый заказ</button></form>{% endif %}{# the owner 26.11: the same card as any order, not a window of its own #}</div></header>
 {% set more_on = [point, tag, only_stage, returning, date_from or date_to]|select|list|length %}
 <form method="get" action="/orders" class="card o2-filters o2-filters--fold{% if more_on %} is-open{% endif %}" data-o2-filters>{# the owner 08.11: the search and «Сбросить» in sight, the rest under «Фильтры» #}
 <input type="hidden" name="v" value="{{ view }}">
@@ -111,7 +111,7 @@
 {% else %}<div class="o2-items"><b class="o2-model">без позиций</b></div>{% endif %}
 {% if c.sum is not none %}<div class="o2-sum"><b>{{ c.sum|money }}</b></div>{% endif %}
 {% if c.point %}<div class="o2-meta">{{ c.point }}</div>{% endif %}
-{% if c.wait_wish or c.wait_analogs %}<div class="xs muted" data-wait-wish title="Лист ожидания: пожелания клиента">{% if c.wait_wish %}Ждёт: {{ c.wait_wish|truncate(90) }}{% endif %}{% if c.wait_analogs %} <span class="badge badge--neutral">подойдут аналоги</span>{% endif %}</div>{% endif %}
+{% if c.wait_wish or c.wait_analogs or c.wait_other_sizes %}<div class="xs muted" data-wait-wish title="Лист ожидания: пожелания клиента">{% if c.wait_wish %}Ждёт: {{ c.wait_wish|truncate(90) }}{% endif %}{% if c.wait_analogs %} <span class="badge badge--neutral">другие бренды</span>{% endif %}{% if c.wait_other_sizes %} <span class="badge badge--neutral">другие размеры</span>{% endif %}</div>{% endif %}
 {% if acc %}<div class="o2-tags o2-acc" data-account>{% for t in acc %}<span class="badge badge--brand">{{ t }}</span>{% endfor %}</div>{% endif %}
 <div class="o2-meta daymark{% if c.overdue %} is-over{% endif %}">{{ c.days }} дн.</div>
 {% set rest = c.tags|reject("in", acc)|list %}

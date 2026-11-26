@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{# A new order in «Новый вид» (the owner 2026-11-26: one card of an order whatever it comes from — a chat, «Заказы», CRM): the frame of
+   office2/order_card.html (three columns «Заказ» · «Лента» · «Чат Авито», the person's own layout) with the same window, _order_window.html,
+   its fields and «Лист ожидания». The journal and the chat come once the order is made. The old view keeps order_new.html. #}
+{% block title %}Новый заказ · Tires Sync{% endblock %}
+{% block page_class %} page--wide o2c-page{% endblock %}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}o2 o2-card{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
+{% block content %}
+{% set names = ("Заказ", "Лента", "Чат Авито") %}
+{% macro col(i) %}{% set body = caller() %}<section class="o2c-col{{ ' is-off' if layout.off[i] else '' }}" data-cc="{{ i }}" style="--w:{{ layout.w[i] }}">
+<button type="button" class="o2c-strip" data-cc-toggle="{{ i }}" title="Развернуть колонку «{{ names[i] }}»" aria-expanded="false">{{ icon("chev", "i-sm") }}<span>{{ names[i] }}</span></button>
+<div class="o2c-colin"><div class="o2c-colhead">{{ names[i] }}<button type="button" class="icon-btn ml-auto" data-cc-toggle="{{ i }}" title="Свернуть колонку «{{ names[i] }}»" aria-expanded="true">{{ icon("chev", "i-sm") }}</button></div>
+<div class="o2c-scroll">{{ body }}</div></div></section>{% endmacro %}
+<header class="o2c-head"><a class="o2c-back" href="/orders">{{ icon("arrow-left", "i-sm") }}Заказы</a></header>
+<div class="o2c-body" data-keep-place data-ccs data-csrf="{{ csrf_token() }}" data-layout='{{ layout|tojson }}' data-order-new>
+{% call col(0) %}
+<p class="sub owin-lead">Достаточно имени, телефона, чата клиента или одной позиции. Остальное можно заполнить по ходу переговоров.</p>
+{% if busy %}<p class="owin-lead"><a class="btn btn--secondary btn--sm" href="/orders/{{ busy }}" data-open-order>Открыть заказ №{{ busy }}</a></p>{% endif %}
+{% include "_order_window.html" %}
+{% endcall %}<div class="o2c-split" data-split="0" role="separator" aria-orientation="vertical" tabindex="0" title="Потяните, чтобы изменить ширину. Двойной щелчок — ширина по умолчанию"></div>
+{% call col(1) %}<p class="muted small o2c-empty">Журнал и заметки заказа появятся после создания.</p>{% endcall %}<div class="o2c-split" data-split="1" role="separator" aria-orientation="vertical" tabindex="0" title="Потяните, чтобы изменить ширину. Двойной щелчок — ширина по умолчанию"></div>
+{% call col(2) %}<p class="muted small o2c-empty">Чат Авито: впишите ссылку или номер в окне («Дополнительно» → «Чат Авито»), после создания он привяжется к заказу.</p>{% endcall %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='office2.js') }}"></script>{% endblock %}

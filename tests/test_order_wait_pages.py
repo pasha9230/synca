@@ -32,7 +32,7 @@ def test_the_card_has_a_tab_for_what_the_client_wants_and_a_line_can_be_added(tm
     app, client, tok, conn = setup(tmp_path)
     card_id = new_card(conn)
     page = text(client, "/orders/%d?tab=wants" % card_id)
-    assert "Что нужно" in page and 'action="/orders/%d/wants/add"' % card_id in page
+    assert "Что нужно" in page and 'form="ow-main" name="want_add"' in page       # the new line saves with the window (2026-11-26); the route stays
     assert post(client, "/orders/%d/wants/add" % card_id, tok, **WANT, any_brand="on").status_code == 302
     [line] = order_wait.list_wants(conn, card_id)
     assert line["width"] == 205 and line["qty"] == 4 and line["any_brand"] and not line["any_size"]
