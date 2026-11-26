@@ -24,9 +24,10 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional
 
-# the owner 2026-11-26: «с самого начала сотрудничества» — every arrival the panel wrote (order_arrival, from 2026-11-26) pays by the
-# rule of the chain; what the office settled before the rule stays as settled (order_report.OLD_RULE_BEFORE)
-ARRIVAL_FROM = ""
+# the owner 2026-11-26: «с самого начала сотрудничества» — every arrival the panel wrote pays by the rule of the chain: order_arrival is
+# written from this day (the deploy of #74), nothing earlier exists; a day the office settled before the rule gets no new item
+# (order_report.OLD_RULE_BEFORE)
+ARRIVAL_FROM = "2026-11-26"
 HERE = "at_point"
 BEFORE = ("new", "talk", "wait", "placed", "moving", "from_point")     # the stages before the tyres come: a move back there is an undo
 UNDONE = "Начисление точке за выдачу снято: этап «На точке» отменён (шины не считаются полученными)"
@@ -254,29 +255,74 @@ def _chains(conn) -> List[tuple]:
         if digits.isdigit() and str(value).strip().isdigit():
             record_of[int(digits)] = int(str(value).strip())
 
-    def walk(holder: int, seen: set) -> tuple:
-        """(tyres sold further on, something still waits, the day of the last sale) of what `holder` holds."""
-        seen.add(holder)
-        code, kind = stages.get(holder, ("", ""))
-        got, waits, last = 0, kind == "open" and code not in GONE_BACK, ""
-        if holder in records and holder in sold:                          # the record sold itself («Выполнено» by the office)
-            got, last = sold[holder][0], sold[holder][1]
-        nexts = ([(record_of[holder], None)] if kind == "lost" and holder in record_of else []) + takers.get(holder, [])
-        for nxt, qty in nexts:
-            if nxt in seen:
+    source_of = {x: a for a, x in record_of.items()}
+    parents: Dict[int, List[tuple]] = {}                                  # holder → [(where its tyres came from, how many; None — all)]
+    for x, a in source_of.items():
+        parents.setdefault(x, []).append((a, None))
+    for source, found in takers.items():
+        for order_id, qty in found:
+            parents.setdefault(order_id, []).append((source, qty))
+
+    def nexts(holder: int) -> List[tuple]:
+        kind = stages.get(holder, ("", ""))[1]
+        return ([(record_of[holder], None)] if kind == "lost" and holder in record_of else []) + takers.get(holder, [])
+
+    below: Dict[int, int] = {}
+    shares: Dict[int, Dict[int, int]] = {}
+
+    def sold_below(holder: int, path: frozenset) -> int:
+        """The tyres a sale took from what `holder` held (further down the chain included), each sold tyre counted once."""
+        if holder in below:
+            return below[holder]
+        got = sold[holder][0] if holder in records and holder in sold else 0  # the record sold itself («Выполнено» by the office)
+        for nxt, qty in nexts(holder):
+            if nxt in path:
                 continue
             if qty is not None and nxt in sold:                           # the taker sold: those tyres are its sale's
-                got, last = got + qty, max(last, sold[nxt][1])
+                got += qty
+            else:
+                got += share(nxt, path | {holder}).get(holder, 0)
+        below[holder] = got
+        return got
+
+    def share(holder: int, path: frozenset) -> Dict[int, int]:
+        """What of the tyres sold below `holder` goes back up to each holder it got tyres from: its own arrival's first, the rest up the
+        chain in turn, never more than it got from each (the review 2026-11-26: a sold tyre is taken off one arrival only)."""
+        if holder in shares:
+            return shares[holder]
+        rest = sold_below(holder, path) - (paid[holder]["pieces"] if holder in paid and holder not in records else 0)
+        out: Dict[int, int] = {}
+        for up, qty in parents.get(holder, []):
+            if qty is None:                                               # a record and its order: what the order brought into it
+                qty = (paid[up]["pieces"] if up in paid else 0) + sum(q for _, q in parents.get(up, []) if q is not None)
+            give = max(min(rest, qty), 0)
+            out[up], rest = out.get(up, 0) + give, rest - give
+        shares[holder] = out
+        return out
+
+    def walk(holder: int, seen: set) -> tuple:
+        """(something of what `holder` held still waits, the day of the last sale further on)."""
+        seen.add(holder)
+        code, kind = stages.get(holder, ("", ""))
+        waits, last = kind == "open" and code not in GONE_BACK, ""
+        if holder in records and holder in sold:
+            last = sold[holder][1]
+        for nxt, qty in nexts(holder):
+            if nxt in seen:
                 continue
-            more, wait, day = walk(nxt, seen)
-            got, waits, last = got + (more if qty is None else min(more, qty)), waits or wait, max(last, day)
-        return got, waits, last
+            if qty is not None and nxt in sold:
+                last = max(last, sold[nxt][1])
+                continue
+            wait, day = walk(nxt, seen)
+            waits, last = waits or wait, max(last, day)
+        return waits, last
 
     out = []
     for order_id, found in sorted(paid.items()):
         if order_id not in stages or order_id in sold:                    # a sale of its own: the sale is the fee of the chain
             continue
-        got, waits, last = walk(order_id, set())
+        got = sold_below(order_id, frozenset())
+        waits, last = walk(order_id, set())
         pieces = found["pieces"] - min(got, found["pieces"])
         ended = not waits
         day = max(found["day"] if found["left"] else "", last[:10])

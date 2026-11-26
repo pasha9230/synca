@@ -666,6 +666,46 @@ def test_a_return_at_the_end_of_a_long_chain_pays_the_first_arrival(tmp_path, mo
     assert order_report.waiting(conn, "2026-12-16", a) == []
 
 
+def _own_and_taken(conn, monkeypatch, a):
+    """A came (4), refused → X1; B took X1 and has 4 tyres of its own, came, refused → X2 holds 8 tyres of two arrivals."""
+    from tires_sync import oth_storage
+    first, x1 = _on_oth(conn, monkeypatch, a, DAY)
+    b = card(conn, a, phone="+7 900 000 00 81")
+    orders.add_item(conn, b, goods_id="2", name="Nokian 215/55 R17", brand_key="nokian", season="winter", diameter=17, territory="1",
+                    qty=4, sale_unit=5000, supplier_price=4000, terms=None, fee_pct=0, promo_pct=0, now=DAY, author="o")
+    _takes_record(conn, b, x1, "2026-12-11T10:00:00")
+    go(conn, b, "placed", "moving", "at_point", when="2026-12-11T12:00:00")
+    assert point_arrival._row(conn, b)["pieces"] == 4
+    assert orders.move_card(conn, b, stage(conn, "oth"), "2026-12-12T10:00:00", "o", {"cancel_reason": "отменил клиент"})
+    return first, b, oth_storage.record_of(conn, b)
+
+
+def test_a_record_of_two_arrivals_given_back_pays_both(tmp_path, monkeypatch):
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    first, b, x2 = _own_and_taken(conn, monkeypatch, a)
+    assert sorted((w["order"], w["pieces"]) for w in order_report.waiting(conn, "2026-12-13", a)) == [(first, 4), (b, 4)]
+    _give_back(conn, x2, "2026-12-16T10:00:00")
+    assert _income(conn, a, START, END) == {first: (300, 0), b: (300, 0)}
+
+
+def test_a_sold_tyre_of_a_shared_record_is_taken_off_one_arrival_only(tmp_path, monkeypatch):
+    """The review 2026-11-26 (T2): X2 holds 8 tyres of A and B; C took 6 and sold them; the other 2 go back: 450 + 150 = 600 ₽."""
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    first, b, x2 = _own_and_taken(conn, monkeypatch, a)
+    c = card(conn, a, qty=6, phone="+7 900 000 00 82")
+    go(conn, c, "placed")
+    _take_from(conn, c, x2, 6)
+    go(conn, c, "moving", "at_point", "done", when="2026-12-14T10:00:00")
+    orders.record_sales(conn, c, "2026-12-14", NOW, "owner", "2026-12-14")
+    assert [(w["order"], w["pieces"]) for w in order_report.waiting(conn, "2026-12-14", a)] == [(first, 2)]   # B's own 4 sold first
+    _give_back(conn, x2, "2026-12-16T10:00:00")
+    got = order_report.point_income(conn, START, END, a)["orders"]
+    assert sorted((e["order"], e["issue"], e["issue_pieces"]) for e in got) == [(first, 150, 2), (c, 450, 6)]
+    assert order_report.waiting(conn, "2026-12-16", a) == []
+
+
 def test_tyres_taken_by_an_order_in_work_keep_the_chain_waiting(tmp_path, monkeypatch):
     conn = order_db(tmp_path)
     a = point(conn, "Альфа")
