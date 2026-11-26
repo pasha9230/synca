@@ -206,6 +206,8 @@ def audit_text(entry: dict) -> str:
         return "Точка №%s: «Вычли с кассы и получили бонусы» — %s ₽, запрос офису" % (d.get("point", "?"), d.get("amount", "?"))
     if action == "order_source_point":
         return "Заказ №%s: откуда клиент — точка %s" % (d.get("order", "?"), d.get("name") or "не указана")
+    if action == "point_compare_shown":
+        return "Вкладка «Другие точки» в «Сводках» точек: %s" % ("показывается" if d.get("on") else "скрыта")
     if action == "point_income_shown":
         return "Страница «Доход» у точек: %s" % ("показывается" if d.get("on") else "скрыта")
     if action == "inquiry":
@@ -529,6 +531,8 @@ _MORE_TEXTS = {
     "orders_bulk_undo": lambda d: "Отмена массового переноса №%s: возвращено %s, пропущено %s, осталось %s%s" % (
         _q(d.get("run")), _count(d.get("back") or 0), _count(d.get("skipped") or 0), _count(d.get("left") or 0), _stopped(d)),
     "orders_cleanup_new": lambda d: "Очистка пустых новых заказов: удалено %s, пропущено %s, осталось %s%s" % (
+        _count(d.get("removed") or 0), _count(d.get("skipped") or 0), _count(d.get("left") or 0), _stopped(d)),
+    "orders_empty_delete": lambda d: "Удалены пустые заказы («Удалить пустые заказы»): удалено %s, пропущено %s, осталось %s%s" % (
         _count(d.get("removed") or 0), _count(d.get("skipped") or 0), _count(d.get("left") or 0), _stopped(d)),
     "share_created": lambda d: "Создана подборка №%s: позиций %s, %s" % (_q(d.get("link")), _count(d.get("items")), _on(d.get("price"), "с ценами", "без цен")),
     "share_price_toggled": lambda d: "Подборка №%s: цены %s" % (_q(d.get("link")), _on(d.get("show"), "показаны", "скрыты")),

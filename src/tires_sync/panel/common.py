@@ -252,7 +252,7 @@ for _section, _endpoints in {
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
                "orders_inbox_confirm", "orders_inbox_dismiss", "order_item_find", "order_new_page", "order_new", "order_blank", "orders_bulk_page", "orders_bulk_check",
-               "orders_bulk_run", "orders_bulk_undo_page", "orders_bulk_undo_run", "orders_cleanup_page", "orders_cleanup_run",
+               "orders_bulk_run", "orders_bulk_undo_page", "orders_bulk_undo_run", "orders_cleanup_page", "orders_cleanup_run", "orders_empty_delete",
                "orders_bulk_tag", "orders_bulk_responsible", "orders_bulk_delete",    # the side panel of «Список» in «Новый вид»
                "deleted_page", "deleted_restore", "orders_webmim_page", "order_webmim_link", "order_webmim_create", "order_webmim_resolve", "order_webmim_cabinet",
                "order_tochki_placed", "order_delivery_tomorrow",           # «Заказ поставщику» (order_supplier)
@@ -336,7 +336,7 @@ SECTION_OF.update(ui_new_page="setup",                           # «Новый 
                   as_point_start="self", as_point_stop="self")   # «Работать как точка»: check_access lets them by AS_POINT_PAGES
 # the dangerous actions: the right is needed on top of «менять» in the section (POST only)
 NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catalog_own_price_inline": "money", "catalog_market_token": "money", "catalog_market_switch": "money", "order_delete": "delete", "chat_delete": "delete", "deleted_restore": "delete", "economics_terms_delete": "delete",
-         "orders_bulk_check": "bulk", "orders_bulk_run": "bulk", "orders_bulk_tag": "bulk", "orders_bulk_responsible": "bulk", "orders_bulk_delete": "delete", "orders_bulk_undo_run": "bulk", "orders_cleanup_run": "bulk", "chats_merge": "bulk",
+         "orders_bulk_check": "bulk", "orders_bulk_run": "bulk", "orders_bulk_tag": "bulk", "orders_bulk_responsible": "bulk", "orders_bulk_delete": "delete", "orders_bulk_undo_run": "bulk", "orders_cleanup_run": "bulk", "orders_empty_delete": "delete", "chats_merge": "bulk",
          "draft_confirm": "publish", "feed_update_confirm": "publish", "pairs_forget": "publish", "pairs_not_pair": "publish", "feed_update_fetch": "publish", "history_rollback": "publish",
          "connections_account_live": "publish", "connections_account_stock": "publish", "economics_apply_pricing": "publish",
          "order_sale_reverse": "delete", "order_webmim_create": "supplier", "order_webmim_resolve": "supplier", "order_webmim_cabinet": "supplier", "order_tochki_placed": "supplier",
@@ -356,7 +356,7 @@ SECTION_OF.update(points_payouts_page="analytics", points_payouts_settle="orders
                   points_payouts_request_close="orders", points_payouts_bulk="orders", order_arrival_back="orders")
 NEEDS.update(points_payouts_settle="money", points_payouts_unsettle="money", points_payouts_adjust="money", points_payouts_request_close="money",
              points_payouts_bulk="money", order_arrival_back="money")
-# «Уведомления точек» and «Оповещение» (routes_point_notify, the owner 2026-11-25): the point its own (POINT_PAGES); the office looks and
+# «Уведомления точек» and «Сводки» (routes_point_notify, the owner 2026-11-25): the point its own (POINT_PAGES); the office looks and
 # switches on /points/notify («Заказы»: «смотреть» to look, «менять» to switch — the observer looks only)
 SECTION_OF.update(mypoint_notify="mypoint", mypoint_notify_ask="mypoint", mypoint_notify_answer="mypoint", mypoint_notices="mypoint",
                   mypoint_notice_task="mypoint", points_notify="orders")
@@ -403,7 +403,7 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "mypoint_income_request",                     # «Вычли с кассы и получили бонусы»: a request to the office (ТЗ 95)
                          "order_label_file",                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
                          "mypoint_notify", "mypoint_notify_ask", "mypoint_notify_answer",   # its own notifications (2026-11-25)
-                         "mypoint_notices", "mypoint_notice_task",     # «Оповещение»: its week, return, the office's tasks (2026-11-25)
+                         "mypoint_notices", "mypoint_notice_task",     # «Сводки»: its week, return, the office's tasks (2026-11-25)
                          "whatsnew_page"}                              # «Что нового»: the point's items
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)

@@ -35,3 +35,23 @@ def register(app) -> None:
             done["removed"], " (%d изменили по ходу, они остались)" % done["skipped"] if done["skipped"] else "",
             "; база была занята, %d не убраны, нажмите ещё раз" % done["left"] if done["left"] else "", done["backup"]))
         return redirect("/deleted?k=order")
+
+    @app.route("/orders/empty/delete", methods=["POST"])
+    @login_required
+    def orders_empty_delete():
+        """«Удалить пустые заказы» of «Ещё» in «Заказы» (the owner 2026-11-26): the right to delete an order (NEEDS «delete»); the confirmation
+        counted the list whose sign comes here, so a second press or a list changed meanwhile removes nothing (order_cleanup.delete_empty)."""
+        expected = request.form.get("expected", "").strip()
+        back = "/orders?v=list" if request.form.get("v") == "list" else "/orders"
+        if not expected:
+            flash("Откройте «Заказы» ещё раз и нажмите «Удалить пустые заказы».")
+            return redirect(back)
+        try:
+            done = order_cleanup.delete_empty(get_conn(), local_iso(), author(), expected)
+        except OrderError as err:
+            flash(str(err))
+            return redirect(back)
+        flash("Удалено пустых заказов: %d%s%s. Вернуть любой можно в «Удалённых»." % (
+            done["removed"], " (%d заполнили по ходу, они остались)" % done["skipped"] if done["skipped"] else "",
+            "; база была занята, %d не удалены, нажмите ещё раз" % done["left"] if done["left"] else ""))
+        return redirect(back)

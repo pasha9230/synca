@@ -17,7 +17,7 @@ from ..amounts import parse_amount
 from ..avito import AvitoClient
 from ..secretbox import SecretKeyError
 from ..transport import urllib_transport
-from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_chain, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_arrival, point_log, user_prefs
+from .. import message_texts, onboarding_texts, order_autosend, order_bulk, order_chain, order_cleanup, order_intercity, order_merge as order_merge_store, order_notes, order_notify, order_oth, oth_sale, oth_storage, oth_swap, point_arrival, point_log, user_prefs
 from .. import chat_deals as deals, chats as chats_store, connections, economics, order_alerts, order_supplier, order_offers, order_placed, order_report, order_search, order_sheet, order_wait, orders_export, point_payouts, users as panel_users, order_engine as engine, order_manager as manager, order_points as points, order_rules as rules, order_templates as templates, orders, orders_list, sales as sales_store, terms as terms_store, trash, vk_point_fix, vk_send, webmim_cabinet, webmim_create, webmim_match
 from . import economics_view, service
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, own_point, point_account, safe_path
@@ -729,7 +729,8 @@ def register(app) -> None:
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
                                stages=[] if own_point() else orders.list_stages(conn),
                                dots=_dots(conn), rows=rows, total_cards=total, only_stage=only, returning=returning, returning_filters=order_oth.FILTERS,
-                               waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn))
+                               waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn),
+                               empty_old=[] if own_point() else order_cleanup.empty_to_delete(conn, local_iso()), empty_sign=order_cleanup.empty_sign)
 
     def board_positions(conn) -> dict:
         """The positions of every order for the card of the board (view only): {order: {"n": positions, "qty": pieces, "name": the first one}}."""

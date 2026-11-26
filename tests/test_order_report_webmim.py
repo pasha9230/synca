@@ -49,9 +49,9 @@ def test_a_paired_order_is_counted_at_the_price_of_webmim(tmp_path):
     sell(conn, cid)                                                           # written: cost 16000, margin 4000
     rep = build(conn)
     line = rep["lines"][0]
-    assert (line["sale"], line["cost"], line["margin"], line["fee"], line["net"]) == (20000, 14000, 6000, 75, 5925)
+    assert (line["sale"], line["cost"], line["margin"], line["fee"], line["net"]) == (20000, 14000, 6000, 300, 5700)     # the owner 2026-11-26: 75 ₽ a tyre from 23.10
     assert rep["webmim"] == {"count": 1, "positions": 1, "by_point": [{"point": "Бета", "count": 1, "positions": 1}]}
-    assert (rep["total"]["owner"], rep["total"]["partner"]) == (2962.5, 2962.5)
+    assert (rep["total"]["owner"], rep["total"]["partner"]) == (2850, 2850)
 
 
 def test_the_terms_apply_to_the_price_of_webmim_as_to_the_unload_price(tmp_path):
@@ -95,7 +95,7 @@ def test_without_a_price_of_webmim_the_report_is_as_before(tmp_path, server, ite
     sell(conn, cid)
     rep = build(conn)
     line = rep["lines"][0]
-    assert (line["cost"], line["margin"], line["net"], rep["webmim"]["count"], rep["webmim"]["positions"]) == (16000, 4000, 3925, 0, 1)
+    assert (line["cost"], line["margin"], line["net"], rep["webmim"]["count"], rep["webmim"]["positions"]) == (16000, 4000, 3700, 0, 1)
     assert "WebMIM" not in order_report.export_csv(rep)                     # nothing of WebMIM: the CSV is the old one
 
 
@@ -222,7 +222,7 @@ def test_the_money_of_the_analytics_and_its_source(tmp_path):
     sell(conn, cid)
     sell(conn, card(conn), point="Альфа")
     got = analytics.money(conn, "2026-10-01", "2026-10-31")
-    assert (got["cost"], got["profit"], got["net"]) == (30000, 10000, 9850)
+    assert (got["cost"], got["profit"], got["net"]) == (30000, 10000, 9400)
     assert got["webmim"] == {"count": 1, "of": 2}
 
 
@@ -242,7 +242,7 @@ def test_the_page_the_csv_and_the_right(tmp_path):
     html = client.get("/analytics?from=2026-10-01&to=2026-10-31").get_data(as_text=True)
     assert "data-webmim-cost" in html
     csv_text = client.get("/orders/report/export.csv?from=2026-10-01&to=2026-10-31").get_data(as_text=True)
-    assert "Бета;1;4;20000,00;14000,00;6000,00;75,00;5925,00;2962,50;2962,50\n" in csv_text
+    assert "Бета;1;4;20000,00;14000,00;6000,00;300,00;5700,00;2850,00;2850,00\n" in csv_text
     assert "\nЗакупка из заказов WebMIM (боевой сервер), позиций;1 из 2;" in csv_text
     users.add_user(conn, "watcher", "pw-long-enough-123", NOW, role="viewer")
     other = app.test_client()
