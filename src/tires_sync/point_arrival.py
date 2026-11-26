@@ -221,6 +221,28 @@ _MOVE = re.compile(r"^Этап: «(.*)» → «(.*)»$")
 _CREATED = re.compile(r"^Заказ создан на этапе «(.*)»$")             # orders.create_card
 
 
+def got_tyres(conn, order_id: int) -> bool:
+    """The tyres of the order came to the point (the owner 2026-11-26: «Невыкуп», not «Отмена»): its arrival, as written (not undone, not
+    «шины не приезжали»); an order of before order_arrival — a stay on «На точке» in its journal, not undone (as _journal_arrivals)."""
+    row = _row(conn, order_id)
+    if row is not None:
+        return _active(row)
+    names = {code: name for code, name in conn.execute("SELECT code, name FROM order_stage")}
+    here, before = names.get(HERE), {names[c] for c in BEFORE if c in names}
+    came = False
+    for kind, text in conn.execute("SELECT kind, text FROM order_event WHERE order_id = ? AND kind IN ('stage', 'created') ORDER BY at, id",
+                                   (int(order_id),)):
+        found = (_MOVE if kind == "stage" else _CREATED).match(str(text or ""))
+        if not found:
+            continue
+        was, now = (found.group(1), found.group(2)) if kind == "stage" else ("", found.group(1))
+        if now == here:
+            came = True
+        elif came and was == here and now in before:
+            came = False                                                  # undone
+    return came
+
+
 def _journal_arrivals(conn, skip: set) -> Dict[int, dict]:
     """Order → {point_id, day, pieces, left, arrived, journal} of the arrivals read from the journal (orders with no order_arrival, not in
     `skip`): the first move to «На точке» of the last stay, whenever it was (the owner 2026-11-26: one fee, on the day of the end; only an end from JOURNAL_FROM on pays) (a move back to a stage before it undoes the stay, as

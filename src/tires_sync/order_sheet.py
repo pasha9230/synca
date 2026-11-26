@@ -57,7 +57,9 @@ CLAIM_MINUTES = 3
 BATCH = 20                                                     # orders sent by one flush after a request (the hourly one takes all)
 MINUTE_BATCH = 3                                               # the minutely retries (chats-sync): a hung Google holds the chats no longer (review 2026-11-23)
 AUTHOR = "Google-таблица"
-REALIZED, REFUSED, FROM_STOCK = "Р", "О", "Б"                  # the legend of «Реализация» (docs/integrations/google-sheet-columns.md)
+REALIZED, FROM_STOCK = "Р", "Б"                                 # the legend of «Реализация» (docs/integrations/google-sheet-columns.md)
+NOT_BOUGHT, CANCELLED = "Н", "О"                                # the owner 2026-11-26: «Невыкуп» (the tyres came), «Отмена» (before)
+REFUSED = NOT_BOUGHT                                            # the client refused the tyres at the point (before 2026-11-26 the row had «О»)
 
 log = logging.getLogger("tires_sync.sheet")
 Transport = Callable[[str, str, Dict[str, str], Optional[bytes]], Tuple[int, Dict[str, str], bytes]]
@@ -229,11 +231,22 @@ def _stamp(text: str) -> str:
         return ""
 
 
-def realization(card: dict) -> str:
+def realization(card: dict, conn=None) -> str:
+    """«Реализация» of the row. The owner 2026-11-26: «Н» — «Невыкуп», the tyres came to the point and the client refused (on «На ОТХ»; a
+    «Отмена» after the tyres came, point_arrival.got_tyres); «О» — «Отмена» before the tyres came. Without `conn` a «Отмена» stays empty
+    (as before); a source closed by a merge is no cancel: empty. «Вернули поставщику», «На возврат»: empty, as before."""
     code = card["stage"].get("code")
     if code in ("done", "shipped"):                  # «Отправлен»: an order to another city handed to the courier (the owner 2026-11-02)
         return FROM_STOCK if card["deal_kind"] == "stock" else REALIZED
-    return REFUSED if code == "oth" else ""          # the owner 2026-11-02: «О» is «На ОТХ» only; «Отмена», «Вернули поставщику», «На возврат»: empty
+    if code == "oth":
+        return NOT_BOUGHT
+    if code == "cancel" and conn is not None:
+        merged = conn.execute("SELECT 1 FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.order_id = ? "
+                              "AND m.undone_at = '' AND s.ref = 0", (int(card["id"]),)).fetchone()
+        if not merged:
+            from . import point_arrival
+            return NOT_BOUGHT if point_arrival.got_tyres(conn, int(card["id"])) else CANCELLED
+    return ""
 
 
 def _invoice_day(conn, card: dict) -> str:
@@ -510,7 +523,7 @@ def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
     return dict(note, **{"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
             "Дата счета": _invoice_day(conn, card), "Имя": card["client_name"], "Телефон": connections.format_phone(card["client_phone"]),
             "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": orders.stage_name(conn, "done") if sold else tyres["stage"]["name"],
-            "Реализация": REFUSED if sold else realization(tyres),
+            "Реализация": REFUSED if sold else realization(tyres, conn),
             "Списание": bool(card["codes_written_off_at"]), "Уведомление точке": _stamp(sent.get("manager", "")),
             "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]})
 

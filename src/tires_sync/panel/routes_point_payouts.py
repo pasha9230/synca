@@ -175,11 +175,18 @@ def register(app) -> None:
         conn = get_conn()
         today = local_iso()[:10]
         from ..amounts import parse_amount
+        typed = request.form.get("amount", "").strip()
+        counted = request.form.get("pieces", "").strip()                  # «по ручному подсчёту»: tyres × the rate
         try:
-            amount = parse_amount(request.form.get("amount", ""))
+            amount = parse_amount(typed) if typed or not counted else None
+            pieces = None
+            if counted:
+                if not counted.isdigit():
+                    raise point_payouts.PayoutError("Количество по ручному подсчёту: целое число шин.")
+                pieces = int(counted)
             day = _period({"from": request.form.get("day", ""), "to": today}, today)[0]
             point_payouts.adjust(conn, int(request.form.get("point_id", "0") or 0), amount, request.form.get("reason", ""), day,
-                                 local_iso(), author())
+                                 local_iso(), author(), pieces=pieces)
             conn.commit()
             flash("Корректировка записана.")
         except ValueError as err:
