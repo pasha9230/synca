@@ -159,7 +159,8 @@ def _sell(conn, order_id, point, day):
                    note="Заказ №%d" % order_id, now=NOW, author="o", today="2026-10-21", source="order")
 
 
-def test_the_fixed_sum_is_zero_by_default_and_follows_the_dated_rate(base):
+def test_the_fixed_sum_is_zero_by_default_and_follows_the_dated_rate(base, monkeypatch):
+    monkeypatch.setattr(order_report, "BONUS_FROM", "2026-01-01")    # the base is of October; the bonuses start 2026-12-01 (the owner 2026-11-25)
     conn, _ = base
     mgr.dispatch(conn, "vk-1", PEER, "клиент 89001112233 шины", None, NOW)
     handed = conn.execute("SELECT order_id FROM order_handoff").fetchone()[0]

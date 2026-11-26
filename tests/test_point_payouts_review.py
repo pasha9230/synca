@@ -80,7 +80,9 @@ def test_an_adjustment_with_a_reason_is_an_item_the_point_sees(tmp_path):
     debt = point_payouts.balance(conn, a, TODAY)
     assert (debt["adj"], debt["total"]) == (-100, 1450)
     report = order_report.build(conn, START, END)
-    assert {r["point"]: r["fee"] for r in report["lines"]}["Альфа"] == 1550                # the counted sums stay
+    # the owner 2026-11-25: a correction counts everywhere — the fee of the report and the analytics too; the counted sums stay
+    assert {r["point"]: r["fee"] for r in report["lines"]}["Альфа"] == 1450
+    assert {f["point"]: (f["issue"], f["bonus"], f["adj"]) for f in report["fees"]["lines"]}["Альфа"] == (1050, 500, -100)
     switch(owner, tok, True)
     page = manager(app, conn, a).get("/my-point/income").get_data(as_text=True).replace("\xa0", " ")
     assert "Корректировка" in page and "недостача в кассе" in page and ">1 450 ₽" in page
@@ -153,7 +155,7 @@ def test_the_issue_fee_is_per_order_before_its_day_and_per_tyre_from_it(tmp_path
     sell_any(conn, 2, a, pieces=4, day=order_report.POINT_FEE_PER_TYRE_FROM)
     got = {e["order"]: (e["issue"], e["issue_pieces"]) for e in order_report.point_income(conn, "2026-11-01", "2026-11-30", a)["orders"]}
     assert got == {1: (75, 0), 2: (300, 4)}
-    assert order_report.HANDOFF_PER_TYRE_FROM == order_report.POINT_FEE_PER_TYRE_FROM == "2026-11-27"
+    assert order_report.POINT_FEE_PER_TYRE_FROM == "2026-11-27" and order_report.HANDOFF_PER_TYRE_FROM == "2026-12-01"   # the owner 2026-11-25
 
 
 def test_the_row_of_the_table_takes_the_report_rule_of_the_handed_client(tmp_path):

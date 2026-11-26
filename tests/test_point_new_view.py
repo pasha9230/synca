@@ -187,7 +187,7 @@ def test_hand_over_and_cancel_from_the_new_page(w):
     pt = w["point"]
     page = pt.get("/my-point/handed").get_data(as_text=True)
     assert is_new(page) and 'id="handoff"' in page
-    assert page.index('id="mp-handed-h"') < page.index('class="mp-handoff-form"')         # the list first, the form under it (the owner 2026-10-30)
+    assert page.index('class="mp-handoff-form"') < page.index('id="mp-handed-h"')         # the form, the list under it (the owner 2026-11-25, ТЗ F)
     tok = re.search(r'name="token" value="([0-9a-f]+)"', page).group(1)
     r = post(pt, "/my-point/handed", "tok", token=tok, phone="+7 900 555 11 22", need="4 шт")
     assert r.status_code == 302

@@ -189,9 +189,9 @@ def test_an_oth_card_has_the_tyres_and_no_client(w):
     assert "data-tyres" in card and "Клиент oth" not in card and 'href="tel:' not in card
 
 
-def test_handed_clients_is_a_section_with_the_list_first_and_the_form_below(w):
-    page = _page(w["point"], "/my-point/handed")
-    assert page.index('id="mp-handed-h"') < page.index('class="mp-handoff-form"') and 'action="/my-point/handed"' in page
+def test_handed_clients_is_a_section_with_the_form_first_and_the_list_below(w):
+    page = _page(w["point"], "/my-point/handed")              # the owner 2026-11-25 (ТЗ F): the banner, the form, the list under it
+    assert page.index('class="mp-handoff-form"') < page.index('id="mp-handed-h"') and 'action="/my-point/handed"' in page
     assert 'data-point-nav' in page and 'href="/my-point"' in page and "data-back" not in page     # the sections at the bottom (2026-10-30, point-orders)
     work = _page(w["point"])
     assert 'href="/my-point/handed"' in work and "Передать клиента" in work                     # the button of «Рабочее место» and the menu

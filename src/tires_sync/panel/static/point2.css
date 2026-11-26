@@ -285,3 +285,25 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 /* «Комментарий» of the order's window in the card (the owner 2026-11-25): as typed, its lines kept */
 .p2w .mp-comment{white-space:pre-line;overflow-wrap:anywhere;color:var(--p2-text-2);font-size:13px;margin-top:4px}
 .p2w .mp-comment-l{display:block;color:var(--p2-text-3);font-weight:600}
+
+/* «Доход» of a point (the owner 2026-11-25): the search and «Фильтры» in sight, the rest under «Фильтры» (as «Заказы» of the office);
+   the text of the section in two lines with «показать полностью»; the banner of «Переданные клиенты» */
+.inc-filters{display:flex;flex-direction:column;gap:var(--s-2);margin:var(--s-3) 0}
+.inc-f-row{display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:flex-end}
+.inc-f-wide{flex:1 1 14rem;max-width:420px}
+.inc-f-more>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center}
+.inc-f-more>summary::-webkit-details-marker{display:none}
+.inc-f-fields{display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:flex-end;margin-top:var(--s-3)}
+.inc-about{margin:var(--s-3) 0;padding:var(--s-3);border:1px solid var(--gray-200);border-radius:var(--r-lg)}
+.inc-about h3{margin:0 0 var(--s-1)}
+.inc-about p{margin:0 0 var(--s-1)}
+.inc-clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.inc-more-box:checked+.inc-clamp{display:block;-webkit-line-clamp:unset}
+.inc-more-hide{display:none}
+.inc-more-box:checked~.inc-more-btn .inc-more-show{display:none}
+.inc-more-box:checked~.inc-more-btn .inc-more-hide{display:inline}
+.inc-banner{display:flex;gap:var(--s-3);align-items:flex-start;margin:var(--s-3) 0;padding:var(--s-4);border-radius:var(--r-lg);
+  border:1px solid var(--brand-200, var(--gray-200));background:var(--brand-50, var(--gray-50))}
+.inc-banner-ico{font-size:2.5rem;line-height:1}
+.inc-banner h2,.inc-banner h3{margin:0 0 var(--s-1)}
+.inc-banner p{margin:0 0 var(--s-1)}

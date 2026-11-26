@@ -435,6 +435,8 @@ def merge(conn, ids, stage_id, now: str, author: str, client_from=None, client_n
                          (merge_id, card["id"], position, 1 if ref else 0, card["stage_id"], card["entered_at"], card["cancel_reason"], card["reserve_until"],
                           json.dumps(saved["chats"]), json.dumps(saved["calls"]), json.dumps(saved["callbacks"])))
             _copy_history(conn, card, new, logins)
+        from . import point_arrival                                     # made on «На точке»: its arrival holds the tyres moved in, from the
+        point_arrival.merged(conn, new, [c["id"] for c in cards if not _ref(c)])     # earliest arrival of the sources (review 2026-11-26)
         main = (chosen if chosen is not None and chosen["id"] in chats_of else base)["avito_chat"]      # the chats moved with the tyres
         orders.update_card(conn, new, {"client_phone": phone, "avito_chat": main}, now, author, commit=False, link_client=False)
         busy = orders.open_order_conflict(conn, phone, plan["point_id"], besides=new)       # the sources are cancelled already
@@ -548,6 +550,8 @@ def unmerge(conn, into_order, now: str, author: str) -> List[int]:
             if conn.execute("UPDATE order_card SET stage_id = ?, entered_at = ?, cancel_reason = ?, reserve_until = ?, updated_at = ? "
                             "WHERE id = ? AND stage_id = ?", (stage_id, entered_at, reason, reserve, now, order_id, cancel)).rowcount != 1:
                 raise MergeError("Заказ №%s только что изменили: ничего не разъединено. Обновите страницу." % _label(card))
+            from . import point_arrival                                 # back on its stage: on the point again, its day of the fee goes
+            point_arrival.back_from_merge(conn, order_id, stages.get(stage_id, {}).get("code", ""), stages.get(stage_id, {}).get("kind", ""))
             for table, ids in (("avito_chat", chats), ("avito_call", calls), ("callback_task", callbacks)):
                 ids = json.loads(ids or "[]")
                 if ids:
@@ -557,6 +561,8 @@ def unmerge(conn, into_order, now: str, author: str) -> List[int]:
                 stages.get(stage_id, {}).get("name", ""), into_order), level="grey")
             back.append(order_id)
         left = conn.execute("SELECT COUNT(*) FROM order_item WHERE order_id = ? AND qty >= 1", (into_order,)).fetchone()[0]
+        from . import point_arrival
+        point_arrival.recount(conn, into_order)                         # the tyres went back: its arrival holds what is left, or none (review 2026-11-26)
         card = orders.get_card(conn, into_order)
         if not left and card["stage"]["kind"] == "open":                # only what came: the new order is closed; with its own positions it stays
             if not orders.move_card(conn, into_order, cancel, now, author, changes={"cancel_reason": (UNDONE_REASON % ", ".join(labels))[:300]},

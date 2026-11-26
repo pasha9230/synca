@@ -23,15 +23,20 @@ def clients(conn, to, n, first=1, pieces=4, day="2026-12-05", issued=None):
         handed(conn, order_id, to)
 
 
-def test_the_handoff_bonus_is_per_tyre_from_its_day_and_per_order_before(tmp_path):
+def test_the_handoff_bonus_is_per_tyre_from_the_first_of_december_and_none_before(tmp_path):
+    """The owner 2026-11-25: the bonuses start on 2026-12-01 whatever rate is saved (the time before is paid by a one-time correction)."""
     conn = db(tmp_path)
     a, b = point(conn, "Альфа"), point(conn, "Бета")
-    sell(conn, 1, b, pieces=4, day="2026-11-20")
+    sell(conn, 1, b, pieces=4, day="2026-11-28")
     handed(conn, 1, a)
     sell(conn, 2, b, pieces=3, day=order_report.HANDOFF_PER_TYRE_FROM)
     handed(conn, 2, a)
-    got = {e["order"]: (e["handoff"], e["handoff_pieces"]) for e in order_report.point_income(conn, "2026-11-01", "2026-11-30", a)["orders"]}
-    assert got == {1: (50, 0), 2: (150, 3)}
+    order_report.set_point_rates(conn, a, "2026-11-25", "2026-11-25", NOW, "owner", {"handoff_fee": 100})   # a point's own rate earlier: no bonus
+    got = {e["order"]: (e["handoff"], e["handoff_pieces"]) for e in order_report.point_income(conn, "2026-11-01", "2026-12-31", a)["orders"]}
+    assert order_report.HANDOFF_PER_TYRE_FROM == order_report.BONUS_FROM == "2026-12-01"
+    assert got == {1: (0, 0), 2: (300, 3)}
+    rep = order_report.build(conn, "2026-11-01", "2026-12-31")
+    assert rep["handoff"]["clients"] == 2 and rep["handoff"]["fee"] == 300              # both clients counted, the bonus of December only
 
 
 def test_kpi_one_cycle_needs_both_thresholds(tmp_path):
