@@ -231,10 +231,11 @@ def _stamp(text: str) -> str:
         return ""
 
 
-def realization(card: dict, conn=None) -> str:
+def realization(card: dict, conn=None, came: Optional[bool] = None) -> str:
     """«Реализация» of the row. The owner 2026-11-26: «Н» — «Невыкуп», the tyres came to the point and the client refused (on «На ОТХ»; a
     «Отмена» after the tyres came, point_arrival.got_tyres); «О» — «Отмена» before the tyres came. Without `conn` a «Отмена» stays empty
-    (as before); a source closed by a merge is no cancel: empty. «Вернули поставщику», «На возврат»: empty, as before."""
+    (as before); a source closed by a merge is no cancel: empty. «Вернули поставщику», «На возврат»: empty, as before. `came`: the caller
+    knows the tyres came (the row of a client's order whose tyres went to a record of storage: the record is no arrival of its own)."""
     code = card["stage"].get("code")
     if code in ("done", "shipped"):                  # «Отправлен»: an order to another city handed to the courier (the owner 2026-11-02)
         return FROM_STOCK if card["deal_kind"] == "stock" else REALIZED
@@ -245,7 +246,7 @@ def realization(card: dict, conn=None) -> str:
                               "AND m.undone_at = '' AND s.ref = 0", (int(card["id"]),)).fetchone()
         if not merged:
             from . import point_arrival
-            return NOT_BOUGHT if point_arrival.got_tyres(conn, int(card["id"])) else CANCELLED
+            return NOT_BOUGHT if came or point_arrival.got_tyres(conn, int(card["id"])) else CANCELLED
     return ""
 
 
@@ -523,7 +524,7 @@ def common_of(conn, card: dict, placed_at: str, sent: Optional[Dict[str, str]] =
     return dict(note, **{"№ заказа MIM": card["webmim_number"] or card["webmim_id"], "Перемещение MIM": card["transfer_number"],
             "Дата счета": _invoice_day(conn, card), "Имя": card["client_name"], "Телефон": connections.format_phone(card["client_phone"]),
             "ПВЗ": card["point"]["name"] if card["point"] else "", "Этап": orders.stage_name(conn, "done") if sold else tyres["stage"]["name"],
-            "Реализация": REFUSED if sold else realization(tyres, conn),
+            "Реализация": REFUSED if sold else realization(tyres, conn, came=True if kept is not None else None),   # a record: they came
             "Списание": bool(card["codes_written_off_at"]), "Уведомление точке": _stamp(sent.get("manager", "")),
             "Уведомление клиенту": _stamp(sent.get("client", "")), "Примечание": card["comment"]})
 

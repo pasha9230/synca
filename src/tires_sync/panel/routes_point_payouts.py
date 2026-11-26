@@ -181,7 +181,7 @@ def register(app) -> None:
             amount = parse_amount(typed) if typed or not counted else None
             pieces = None
             if counted:
-                if not counted.isdigit():
+                if not (counted.isascii() and counted.isdigit()):              # «²» and the like are digits for str.isdigit
                     raise point_payouts.PayoutError("Количество по ручному подсчёту: целое число шин.")
                 pieces = int(counted)
             day = _period({"from": request.form.get("day", ""), "to": today}, today)[0]
