@@ -14,7 +14,7 @@ from .overrides import override_key
 from .settings_store import StaleDraftError, cancel_draft, get_active
 
 KEY = "work_draft"
-TRACKED = ("enabled", "pricing", "overrides", "excluded_brands", "excluded_sizes", "price_overrides", "wheel_pricing")
+TRACKED = ("enabled", "pricing", "overrides", "excluded_brands", "excluded_sizes", "price_overrides", "wheel_pricing", "wheel_accounts")
 SEASONS = ("winter", "summer", "all")
 SEASON_RU = {"winter": "зима", "summer": "лето", "all": "всесезонные"}
 
@@ -377,10 +377,24 @@ def cancel_all(conn, now: str, author: str) -> None:
     store.set_state(conn, KEY, "")
 
 
-def set_wheel_pricing(conn, brand: str, small: float, large: float, now: str) -> None:
+def set_wheel_pricing(conn, brand: str, small: float, large: float, now: str, enabled: bool = False) -> None:
     if not isinstance(brand, str) or not brand.strip() or len(brand) > 120:
         raise ValueError("Некорректный бренд дисков.")
-    rule = {"pct_small": _pct(small, "до R17"), "pct_large": _pct(large, "от R18")}
+    rule = {"pct_small": _pct(small, "до R17"), "pct_large": _pct(large, "от R18"), "enabled": bool(enabled)}
     def fn(eff):
         eff["wheel_pricing"][brand] = rule
+    _mutate(conn, fn, now)
+
+
+def set_wheel_account(conn, account_id: int, addresses, now: str) -> None:
+    if isinstance(account_id, bool) or not isinstance(account_id, int) or account_id <= 0:
+        raise ValueError("Некорректный аккаунт.")
+    if not isinstance(addresses, list) or any(not isinstance(a, str) or not a.strip() or len(a) > 128 for a in addresses):
+        raise ValueError("Некорректные адреса дисков.")
+    clean = list(dict.fromkeys(addresses))
+    def fn(eff):
+        if clean:
+            eff["wheel_accounts"][str(account_id)] = clean
+        else:
+            eff["wheel_accounts"].pop(str(account_id), None)
     _mutate(conn, fn, now)

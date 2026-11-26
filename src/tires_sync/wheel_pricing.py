@@ -13,6 +13,8 @@ def validate_rules(rules, limit=None):
     for brand, rule in rules.items():
         if not isinstance(brand, str) or not brand.strip() or not isinstance(rule, dict):
             raise ValueError('wheel_pricing: некорректный бренд или правило')
+        if 'enabled' in rule and not isinstance(rule['enabled'], bool):
+            raise ValueError('wheel_pricing: некорректный признак публикации')
         for key in ('pct_small', 'pct_large'):
             value = rule.get(key)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
@@ -30,3 +32,15 @@ def price_for(wheel, rules):
     except ValueError:
         return None
     return final_price(wheel.price, PricingRule(rule['pct_small'], rule['pct_large']), diameter, step=FEED_STEP)
+
+
+def validate_accounts(accounts):
+    if not isinstance(accounts, dict):
+        raise ValueError('wheel_accounts: нужна таблица аккаунтов')
+    for account, addresses in accounts.items():
+        if not isinstance(account, str) or not account.isascii() or not account.isdigit() or int(account) <= 0:
+            raise ValueError('wheel_accounts: некорректный аккаунт')
+        if not isinstance(addresses, list) or any(not isinstance(a, str) or not a.strip() or len(a) > 128 for a in addresses):
+            raise ValueError('wheel_accounts: некорректные адреса')
+        if len(addresses) != len(set(addresses)):
+            raise ValueError('wheel_accounts: повторяющийся адрес')

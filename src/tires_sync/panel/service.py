@@ -1330,8 +1330,15 @@ def describe_changes(raw: dict, changes: dict, offers=None, min_stock=None) -> l
                 lines.append("Диски %s: до R17 %s → %s, от R18 %s → %s" % (
                     brand, _pct(old_rule.get("pct_small")), _pct(new_rule["pct_small"]),
                     _pct(old_rule.get("pct_large")), _pct(new_rule["pct_large"])))
+                if bool(old_rule.get("enabled")) != bool(new_rule.get("enabled")):
+                    lines.append("Диски %s: публикация %s" % (brand, "включена" if new_rule.get("enabled") else "выключена"))
+    if "wheel_accounts" in changes:
+        old_accounts, new_accounts = raw.get("wheel_accounts") or {}, changes["wheel_accounts"] or {}
+        for account in sorted(set(old_accounts) | set(new_accounts)):
+            if old_accounts.get(account) != new_accounts.get(account):
+                lines.append("Диски, аккаунт %s: адреса %s → %s" % (account, ", ".join(old_accounts.get(account, [])) or "нет", ", ".join(new_accounts.get(account, [])) or "нет"))
     for key in sorted(changes):
-        if key == "wheel_pricing":
+        if key in ("wheel_pricing", "wheel_accounts"):
             continue
         if key == "excluded_brands":
             old_set, new_set = set(raw.get(key) or []), set(changes[key] or [])

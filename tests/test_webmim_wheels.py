@@ -86,13 +86,13 @@ def test_wheel_markup_is_staged_and_does_not_enable_publication(tmp_path):
     xml = ('<CATALOG>' + wheel(territory=territory) + '</CATALOG>').encode()
     wheel_snapshot_path(app.config['UNLOAD_PATH']).write_bytes(xml)
     html = owner.get('/settings/brands').get_data(as_text=True)
-    assert 'Диски: калькуляция и публикация' in html and 'Не публикуется' in html
+    assert 'Диски: калькуляция и публикация' in html and 'Публиковать' in html
     response = post(owner, '/settings/pricing', token, scope='wheel', brand='BRAND', small='10', large='15')
     assert response.status_code == 302
     rules = staging.effective_raw(conn)['wheel_pricing']
-    assert rules == {'BRAND': {'pct_small': 10.0, 'pct_large': 15.0}}
+    assert rules == {'BRAND': {'pct_small': 10.0, 'pct_large': 15.0, 'enabled': False}}
     assert price_for(parse_unload(xml, territory).offers['42'], rules) == 1400
-    assert 'enabled' not in rules['BRAND']
+    assert rules['BRAND']['enabled'] is False
 
 
 def test_wheel_markup_uses_existing_confirmation_limit(tmp_path):
@@ -106,3 +106,60 @@ def test_wheel_markup_uses_existing_confirmation_limit(tmp_path):
     draft_id = staging.summary(conn)['draft_id']
     with pytest.raises(PercentLimitError):
         confirm_draft(conn, draft_id, T2, 'owner')
+
+
+def test_wheel_feed_is_opt_in_and_uses_template_fields():
+    from pathlib import Path
+    from tires_sync.wheel_feed import build_ads
+    wheel_item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
+    params = dict(account_id=10, address_id='25', phone='123', category='Запчасти и аксессуары',
+                  product_type='Диски', rim_types={'': 'Литые'})
+    rules = {'BRAND': {'pct_small': 10, 'pct_large': 15}}
+    assert build_ads([wheel_item], rules, set(), **params) == ([], {})
+    ads, rejected = build_ads([wheel_item], rules, {'BRAND'}, **params)
+    assert not rejected and len(ads) == 1
+    ad = ads[0]
+    assert ad.findtext('RimBoltsDiameter') == '114,3' and ad.findtext('Price') == '1400'
+    template = __import__('xml.etree.ElementTree', fromlist=['parse']).parse(str(
+        Path(__file__).parents[1] / 'src/tires_sync/data/avito-templates/diski-2026-11-26.xml')).getroot()[0]
+    assert {e.tag for e in ad} <= {e.tag for e in template}
+    other, _ = build_ads([wheel_item], rules, {'BRAND'}, **dict(params, account_id=11))
+    assert ad.findtext('Id') != other[0].findtext('Id')
+
+
+def test_wheel_feed_rejects_nonpositive_prices():
+    from tires_sync.wheel_feed import build_ads
+    item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
+    rules = {'BRAND': {'pct_small': -200, 'pct_large': 0}}
+    ads, rejected = build_ads([item], rules, {'BRAND'}, account_id=1, address_id='2', phone='123',
+                              category='parts', product_type='wheels', rim_types={'': 'type'})
+    assert ads == [] and rejected == {'42': ['price']}
+
+
+def test_wheel_account_settings_staged_per_account_and_validate_inputs(tmp_path):
+    import pytest
+    from test_settings_store import fresh, T2
+    from tires_sync import staging
+    conn = fresh(tmp_path)
+    staging.set_wheel_account(conn, 12, ['loc1', 'loc2'], T2)
+    assert staging.effective_raw(conn)['wheel_accounts'] == {'12': ['loc1', 'loc2']}
+    staging.set_wheel_account(conn, 12, [], T2)
+    assert not staging.effective_raw(conn).get('wheel_accounts')
+    with pytest.raises(ValueError):
+        staging.set_wheel_account(conn, -1, ['loc1'], T2)
+
+
+def test_wheel_account_selection_rejects_address_from_other_account(tmp_path):
+    from test_catalog_filters import setup
+    from panel_helpers import post
+    from tires_sync import connections, staging
+    app, owner, token, conn = setup(tmp_path)
+    a = connections.create_account(conn, 'A', '2026-11-27', 'owner')
+    b = connections.create_account(conn, 'B', '2026-11-27', 'owner')
+    conn.execute("INSERT INTO avito_address (account_id,position,name,address_id,enabled,share,address_text) VALUES (?,0,'First','123',1,100,'')", (a,))
+    conn.execute("INSERT INTO avito_address (account_id,position,name,address_id,enabled,share,address_text) VALUES (?,0,'Second','456',1,100,'')", (b,))
+    conn.commit()
+    assert post(owner, '/settings/pricing', token, scope='wheel_account', account=str(a), address='456').status_code == 302
+    assert not staging.effective_raw(conn).get('wheel_accounts')
+    assert post(owner, '/settings/pricing', token, scope='wheel_account', account=str(a), address='123').status_code == 302
+    assert staging.effective_raw(conn)['wheel_accounts'] == {str(a): ['123']}

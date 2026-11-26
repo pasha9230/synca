@@ -226,8 +226,13 @@ def register(app) -> None:
     def settings_brands_page():
         conn = get_conn()
         wheel_brands = _wheel_brands(conn)
-        wheel_rules = staging.effective_raw(conn).get("wheel_pricing", {})
-        return render_template("settings_brands.html", wheel_brands=wheel_brands, wheel_rules=wheel_rules,
+        wheel_settings = staging.effective_raw(conn)
+        wheel_rules = wheel_settings.get("wheel_pricing", {})
+        wheel_accounts = [{"id": a["id"], "name": connections.display_name(conn, a["id"]),
+                           "addresses": connections.list_addresses(conn, a["id"]),
+                           "selected": wheel_settings.get("wheel_accounts", {}).get(str(a["id"]), [])}
+                          for a in connections.list_feed_accounts(conn)]
+        return render_template("settings_brands.html", wheel_brands=wheel_brands, wheel_rules=wheel_rules, wheel_accounts=wheel_accounts,
                                raw=get_active(conn)[1], pricing_tables=[
             {"supplier": sp, "rows": service.pricing_table(conn, sp["id"], app.config["UNLOAD_PATH"], load_reference(app.config["REFERENCE_PATH"])),
              "stale": service.supplier_stale_text(conn, sp["id"], app.config["UNLOAD_PATH"]),
@@ -284,6 +289,21 @@ def register(app) -> None:
     def settings_pricing():
         conn = get_conn()
         form = request.form
+        if form.get("scope") == "wheel_account":
+            try:
+                account_id = int(form.get("account", ""))
+                account = connections.get_account(conn, account_id)
+                if account is None or not account["feed_enabled"]:
+                    raise ValueError("Аккаунт не подключён к фиду.")
+                valid = {a["address_id"] for a in connections.list_addresses(conn, account_id) if a["address_id"]}
+                addresses = form.getlist("address")
+                if any(a not in valid for a in addresses):
+                    raise ValueError("Адрес отсутствует в выбранном аккаунте.")
+                staging.set_wheel_account(conn, account_id, addresses, now_iso())
+            except (ValueError, StaleDraftError) as err:
+                flash(str(err), "error")
+                return redirect("/settings/brands#pricing-wheels")
+            return review_or_back(conn, "/settings/brands#pricing-wheels")
         if form.get("scope") == "wheel":
             try:
                 brands = _wheel_brands(conn)
@@ -292,7 +312,7 @@ def register(app) -> None:
                     raise ValueError("Бренд отсутствует в выгрузке дисков МИМ.")
                 small = float(form.get("small", "").strip().replace(",", "."))
                 large = float(form.get("large", "").strip().replace(",", "."))
-                staging.set_wheel_pricing(conn, brand, small, large, now_iso())
+                staging.set_wheel_pricing(conn, brand, small, large, now_iso(), enabled=form.get("enabled") == "1")
             except (ValueError, StaleDraftError) as err:
                 flash(str(err), "error")
                 return redirect("/settings/brands#pricing-wheels")
