@@ -252,7 +252,7 @@ for _section, _endpoints in {
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
                "orders_inbox_confirm", "orders_inbox_dismiss", "order_item_find", "order_new_page", "order_new", "order_blank", "orders_bulk_page", "orders_bulk_check",
-               "orders_bulk_run", "orders_bulk_undo_page", "orders_bulk_undo_run", "orders_cleanup_page", "orders_cleanup_run",
+               "orders_bulk_run", "orders_bulk_undo_page", "orders_bulk_undo_run", "orders_cleanup_page", "orders_cleanup_run", "orders_empty_delete",
                "orders_bulk_tag", "orders_bulk_responsible", "orders_bulk_delete",    # the side panel of «Список» in «Новый вид»
                "deleted_page", "deleted_restore", "orders_webmim_page", "order_webmim_link", "order_webmim_create", "order_webmim_resolve", "order_webmim_cabinet",
                "order_tochki_placed", "order_delivery_tomorrow",           # «Заказ поставщику» (order_supplier)
@@ -336,7 +336,7 @@ SECTION_OF.update(ui_new_page="setup",                           # «Новый 
                   as_point_start="self", as_point_stop="self")   # «Работать как точка»: check_access lets them by AS_POINT_PAGES
 # the dangerous actions: the right is needed on top of «менять» in the section (POST only)
 NEEDS = {"catalog_own_price": "money", "catalog_own_price_bulk": "money", "catalog_own_price_inline": "money", "catalog_market_token": "money", "catalog_market_switch": "money", "order_delete": "delete", "chat_delete": "delete", "deleted_restore": "delete", "economics_terms_delete": "delete",
-         "orders_bulk_check": "bulk", "orders_bulk_run": "bulk", "orders_bulk_tag": "bulk", "orders_bulk_responsible": "bulk", "orders_bulk_delete": "delete", "orders_bulk_undo_run": "bulk", "orders_cleanup_run": "bulk", "chats_merge": "bulk",
+         "orders_bulk_check": "bulk", "orders_bulk_run": "bulk", "orders_bulk_tag": "bulk", "orders_bulk_responsible": "bulk", "orders_bulk_delete": "delete", "orders_bulk_undo_run": "bulk", "orders_cleanup_run": "bulk", "orders_empty_delete": "delete", "chats_merge": "bulk",
          "draft_confirm": "publish", "feed_update_confirm": "publish", "pairs_forget": "publish", "pairs_not_pair": "publish", "feed_update_fetch": "publish", "history_rollback": "publish",
          "connections_account_live": "publish", "connections_account_stock": "publish", "economics_apply_pricing": "publish",
          "order_sale_reverse": "delete", "order_webmim_create": "supplier", "order_webmim_resolve": "supplier", "order_webmim_cabinet": "supplier", "order_tochki_placed": "supplier",

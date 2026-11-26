@@ -23,7 +23,7 @@
 {% if can_post("orders_bulk_run") %}<a class="menu-item" href="/orders/bulk">Закрыть разом</a>{% endif %}
 {% if can("setup") %}<a class="menu-item" href="/orders/templates">Шаблоны</a>
 <a class="menu-item" href="/orders/settings">Настроить воронку</a>{% endif %}
-<hr><a class="menu-item" href="/deleted">Удалённые</a>
+<hr><a class="menu-item" href="/deleted">Удалённые</a>{% include "_orders_empty_delete.html" %}
 </div></details>
 {% if can_post("order_blank") %}<form method="post" action="/orders/blank" data-once style="display:inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary" data-new-order title="Откроется карточка нового заказа: те же поля, что у любого заказа">{{ icon("plus") }}Новый заказ</button></form>{% endif %}{# the owner 26.11: the same card as any order, not a window of its own #}</div></header>
 {% set more_on = [point, tag, only_stage, returning, date_from or date_to]|select|list|length %}

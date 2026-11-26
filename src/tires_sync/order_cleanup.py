@@ -149,3 +149,64 @@ def run(conn, db_path, now_local: str, author: str, expected: str) -> dict:
                                                    "backup": copy.name, "first": removed[0] if removed else None, "last": removed[-1] if removed else None})
     conn.commit()
     return {"removed": len(removed), "skipped": skipped, "left": left, "backup": copy.name}
+
+
+# «Удалить пустые заказы» of «Ещё» in «Заказы» (the owner 2026-11-26): the empty orders «Новый заказ» of «Заказы» left (orders.EMPTY_SQL) go
+# to «Удалённые». Stricter than the board's rule: anything typed in the card (a point, a date, a comment, a tag, a field, a note, WebMIM, a sale,
+# a removed position, a label, «Доставка в другой город») keeps it; one made less than EMPTY_MINUTES ago may be open right now: it stays too.
+EMPTY_MINUTES = 10
+EMPTY_ACTION = "orders_empty_delete"
+EMPTY_STRICT_SQL = (orders.EMPTY_SQL + " AND c.point_id IS NULL AND c.comment = '' AND c.tags = '' AND c.delivery_date = '' AND c.delivery_time = '' "
+                    "AND c.webmim_id = '' AND c.webmim_number = '' AND c.webmim_status = '' AND c.transfer_number = '' AND c.sale_ids IN ('', '[]') "
+                    "AND NOT EXISTS (SELECT 1 FROM order_field_value f WHERE f.order_id = c.id AND TRIM(f.value) != '') "
+                    "AND NOT EXISTS (SELECT 1 FROM order_event e WHERE e.order_id = c.id AND e.kind = 'note') "
+                    "AND NOT EXISTS (SELECT 1 FROM order_item_removed r WHERE r.order_id = c.id) "
+                    "AND NOT EXISTS (SELECT 1 FROM order_label l WHERE l.order_id = c.id) "
+                    "AND NOT EXISTS (SELECT 1 FROM order_intercity x WHERE x.order_id = c.id)")
+
+
+def empty_cutoff(now_local: str) -> str:
+    return (datetime.fromisoformat(now_local) - timedelta(minutes=EMPTY_MINUTES)).isoformat(timespec="seconds")
+
+
+def empty_to_delete(conn, now_local: str) -> List[int]:
+    """The ids «Удалить пустые заказы» removes now: empty (EMPTY_STRICT_SQL), on «Новый заказ», made EMPTY_MINUTES ago or earlier."""
+    return [r[0] for r in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'new' AND "
+                                       + EMPTY_STRICT_SQL + " AND c.created_at <= ? ORDER BY c.id", (empty_cutoff(now_local),))]
+
+
+def empty_sign(ids) -> str:
+    return hashlib.sha256(",".join(str(i) for i in ids).encode()).hexdigest()[:16]
+
+
+def delete_empty(conn, now_local: str, author: str, expected: str) -> dict:
+    """Removes the orders of empty_to_delete. `expected` is the empty_sign of the list the confirmation counted: when the list changed since
+    (a second press, a card filled or one more aged), nothing is done. Each order is checked again inside its own delete (trash.delete_order)."""
+    planned = empty_to_delete(conn, now_local)
+    if not planned:
+        raise OrderError("Пустых заказов нет.")
+    if empty_sign(planned) != expected:
+        raise OrderError("Пока страница была открыта, список изменился (сейчас пустых заказов: %d). Нажмите «Удалить пустые заказы» ещё раз." % len(planned))
+    cutoff = empty_cutoff(now_local)
+
+    def still_empty(conn_, card):
+        row = conn_.execute("SELECT 1 FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.id = ? AND s.code = 'new' AND "
+                            + EMPTY_STRICT_SQL + " AND c.created_at <= ?", (card["id"], cutoff)).fetchone()
+        return None if row else "Заказ заполнили: он остался."
+
+    removed, skipped, stopped = [], 0, ""
+    for card_id in planned:
+        try:
+            trash.delete_order(conn, card_id, now_local, author, only_if=still_empty)
+            removed.append(card_id)
+        except OrderError:
+            skipped += 1
+        except sqlite3.Error as err:
+            conn.rollback()
+            stopped = str(err)
+            break
+    left = len(planned) - len(removed) - skipped
+    trash._audit(conn, now_local, author, EMPTY_ACTION, {"removed": len(removed), "skipped": skipped, "left": left, "stopped": stopped,
+                                                         "orders": removed[:200]})
+    conn.commit()
+    return {"removed": len(removed), "skipped": skipped, "left": left}
