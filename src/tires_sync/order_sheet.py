@@ -263,20 +263,10 @@ def _sent(conn, card_id: int) -> Dict[str, str]:
     return out
 
 
-# the rows of the orders sold before this day keep the bonuses they were written with (order_report.legacy_fee): the move of the bonuses to
-# 2026-12-01 (the owner 2026-11-25) sends no recount of old rows to the table (the review 2026-11-26)
-KEEPS_BEFORE = order_report.BONUS_FROM
-
-
-def _profit_sent(conn, card_id: int) -> bool:
-    """A row of the order went to the table with its profit already: only such rows keep the old sums (KEEPS_BEFORE); a row that goes
-    there for the first time is counted as the report counts it (the review 2026-11-26)."""
-    row = conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (int(card_id),)).fetchone()
-    try:
-        written = json.loads(row[0] or "{}") if row else {}
-    except ValueError:
-        return False
-    return isinstance(written, dict) and any(isinstance(r, dict) and r.get("Прибыль ₽") not in ("", None) for r in written.values())
+# the rows of the orders sold before this day keep the bonuses they were written with (order_report.legacy_fee: 50 ₽ for a handed client,
+# no paid_oth_pieces) — for ever, whatever is sent when: the move of the bonuses to 2026-12-01 (the owner 2026-11-25) sends no recount of
+# old rows (the review 2026-11-26); from this day the rows are counted as the report; a sum the office sets counts as everywhere
+KEEPS_BEFORE = "2026-11-27"
 
 
 def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
@@ -307,7 +297,7 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     fixed = order_report.fixes(conn)                                              # the sums the office set (point_item_fix), as the report
     item = "order:%d" % card["id"]
     theirs = got["handoff_to"][1] if got["handoff_to"] is not None and got["handoff_to"][0] == "id" else None
-    if day < KEEPS_BEFORE and _profit_sent(conn, card["id"]) and not fixed.get((issued, item)) and not fixed.get((theirs, item)):
+    if day < KEEPS_BEFORE and not fixed.get((issued, item)) and not fixed.get((theirs, item)):
         # the rows of the orders sold before the bonuses moved to 2026-12-01 keep the sums they were written with (the review 2026-11-26:
         # the deploy sends no recount of old rows); a sum the office sets for such an order counts as everywhere
         fee = order_report.legacy_fee(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]), oth_sold)

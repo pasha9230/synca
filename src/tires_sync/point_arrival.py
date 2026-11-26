@@ -67,9 +67,36 @@ def came(conn, order_id: int, now: str, author: str) -> None:
 
 
 def recount(conn, order_id: int) -> None:
-    """The tyres of an arrival counted again (no commit): an order made right on «На точке» gets its positions after (order_merge)."""
-    if arrived(conn, order_id):
-        conn.execute("UPDATE order_arrival SET pieces = ? WHERE order_id = ?", (own_pieces(conn, order_id), int(order_id)))
+    """The tyres of an arrival counted again (no commit): an order made right on «На точке» gets its positions after (order_merge); one
+    left with no tyres of its own (order_merge.unmerge: they went back) has no arrival any more."""
+    if not arrived(conn, order_id):
+        return
+    pieces = own_pieces(conn, order_id)
+    if pieces:
+        conn.execute("UPDATE order_arrival SET pieces = ? WHERE order_id = ?", (pieces, int(order_id)))
+    else:
+        conn.execute("DELETE FROM order_arrival WHERE order_id = ?", (int(order_id),))
+
+
+def merged(conn, order_id: int, sources: Iterable[int]) -> None:
+    """The arrival of an order made by a merge on «На точке» (no commit): its tyres after the move, its moment the earliest arrival of the
+    sources that came (an arrival before ARRIVAL_FROM stays unpaid), else its own."""
+    recount(conn, order_id)
+    ids = [int(s) for s in sources]
+    if not ids or not arrived(conn, order_id):
+        return
+    first = conn.execute("SELECT MIN(arrived_at) FROM order_arrival WHERE arrived_at != '' AND undone_at IS NULL AND none_at IS NULL "
+                         "AND order_id IN (%s)" % ",".join("?" * len(ids)), ids).fetchone()[0]
+    if first:
+        conn.execute("UPDATE order_arrival SET arrived_at = ? WHERE order_id = ? AND arrived_at > ?", (first, int(order_id), first))
+
+
+def back_from_merge(conn, order_id: int, code: str, kind: str) -> None:
+    """A source given back by «Разъединить» stands on its stage again (no commit): on an open stage before «На ОТХ» it has not left the
+    point — its day of the fee goes."""
+    from . import orders
+    if kind == "open" and code not in orders.RETURN_STAGES:
+        conn.execute("UPDATE order_arrival SET left_at = NULL WHERE order_id = ?", (int(order_id),))
 
 
 def moved(conn, order_id: int, was_code: str, code: str, now: str, author: str, kind: str = "") -> None:

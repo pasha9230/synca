@@ -485,8 +485,9 @@ def test_the_fee_without_a_swap_is_paid_as_before(tmp_path):
     profit = sum(r["Прибыль ₽"] for r in order_sheet.card_rows(conn, orders.get_card(conn, a), "").values())
     sale = conn.execute("SELECT margin_total FROM sale WHERE reversed_at IS NULL").fetchone()[0]
     rates = order_report.list_rates(conn)
-    # a row not sent yet is counted as the report: no bonus before 2026-12-01 (the owner 2026-11-25; rows sent keep theirs, KEEPS_BEFORE)
-    assert profit == round(sale - order_report.rate_on(rates, "point_fee", "2026-10-29") - order_report.rate_on(rates, "handoff_fee", "2026-10-29"), 2)
+    # a row of an order sold before 2026-11-27 keeps the bonus it was written with, for ever (order_sheet.KEEPS_BEFORE: 50 ₽ an order);
+    # the report counts no bonus before 2026-12-01 (the owner 2026-11-25)
+    assert profit == round(sale - order_report.rate_on(rates, "point_fee", "2026-10-29") - order_report.DEFAULTS["handoff_fee"], 2)
     assert order_report.build(conn, "2026-10-01", "2026-10-31")["handoff"]["fee"] == 0
 
 

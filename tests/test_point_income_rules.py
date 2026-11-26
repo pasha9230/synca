@@ -177,18 +177,29 @@ def test_old_rows_of_the_table_keep_their_sums(tmp_path):
     handed(conn, mine, pid)
     orders.move_card(conn, mine, sheet_stage(conn, "done")["id"], NOW, "owner")
     orders.record_sales(conn, mine, "2026-11-28", NOW, "owner", "2026-11-28")
-    rows = sheet.rows_of(conn, mine, NOW)
     report = order_report.build(conn, "2026-11-28", "2026-11-28")
     assert report["handoff"]["fee"] == 0                                                   # the report: no bonus before 01.12
-    assert round(sum(r["Прибыль ₽"] for r in rows.values()), 2) == report["total"]["net"]   # a row going there the first time: the new rules
-    conn.execute("INSERT OR IGNORE INTO sheet_order (order_id, placed_at) VALUES (?, ?)", (mine, NOW))
-    conn.execute("UPDATE sheet_order SET rows = ? WHERE order_id = ?", (json.dumps({m: dict(r, **{"Прибыль ₽": 1.0}) for m, r in rows.items()}), mine))
-    conn.commit()                                                                          # the row was sent before with its profit
-    rows = list(sheet.rows_of(conn, mine, NOW).values())
-    assert round(sum(r["Прибыль ₽"] for r in rows), 2) == round(report["total"]["net"] - 200, 2)   # it keeps the old sums (50 ₽ a tyre)
-    point_payouts.fix_items(conn, [(pid, "order:%d" % mine)], "issue", 0, "ошибка", NOW, "owner", "2026-11-01", "2026-11-30")
-    rows = list(sheet.rows_of(conn, mine, NOW).values())
-    assert round(sum(r["Прибыль ₽"] for r in rows), 2) == order_report.build(conn, "2026-11-28", "2026-11-28")["total"]["net"]
+    for _ in range(2):                                                                     # sent twice: the same profit, the report's
+        rows = sheet.rows_of(conn, mine, NOW)
+        assert round(sum(r["Прибыль ₽"] for r in rows.values()), 2) == report["total"]["net"]
+        conn.execute("INSERT OR IGNORE INTO sheet_order (order_id, placed_at) VALUES (?, ?)", (mine, NOW))
+        conn.execute("UPDATE sheet_order SET rows = ? WHERE order_id = ?", (json.dumps(rows), mine))
+        conn.commit()
+    old = placed(conn, goods=(("222", 4),))                                                # sold 20.11: the old sums, for ever
+    conn.execute("UPDATE order_card SET point_id = ? WHERE id = ?", (pid, old))
+    handed(conn, old, pid)
+    orders.move_card(conn, old, sheet_stage(conn, "done")["id"], NOW, "owner")
+    orders.record_sales(conn, old, "2026-11-20", NOW, "owner", "2026-11-20")
+    net = order_report.build(conn, "2026-11-20", "2026-11-20")["total"]["net"]
+    for _ in range(2):
+        rows = sheet.rows_of(conn, old, NOW)
+        assert round(sum(r["Прибыль ₽"] for r in rows.values()), 2) == round(net - 50, 2)  # 50 ₽ an order before 27.11, as written
+        conn.execute("INSERT OR IGNORE INTO sheet_order (order_id, placed_at) VALUES (?, ?)", (old, NOW))
+        conn.execute("UPDATE sheet_order SET rows = ? WHERE order_id = ?", (json.dumps(rows), old))
+        conn.commit()
+    point_payouts.fix_items(conn, [(pid, "order:%d" % old)], "issue", 0, "ошибка", NOW, "owner", "2026-11-01", "2026-11-30")
+    rows = list(sheet.rows_of(conn, old, NOW).values())                                    # a sum set by the office: as everywhere
+    assert round(sum(r["Прибыль ₽"] for r in rows), 2) == order_report.build(conn, "2026-11-20", "2026-11-20")["total"]["net"]
 
 
 def test_only_the_money_right_says_the_tyres_never_came_and_takes_it_back(tmp_path):
@@ -249,6 +260,24 @@ def test_a_merged_order_pays_the_issue_once(tmp_path):
     go(conn, new, "done")
     orders.record_sales(conn, new, "2026-12-15", NOW, "owner", "2026-12-15")
     assert issue_of(conn, a) == {new: (300, False)}                           # the issue once, by the sale
+
+
+def test_an_unmerge_gives_the_arrival_back_to_the_source(tmp_path):
+    from tires_sync import order_merge
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    one, two = card(conn, a, qty=2, phone="+7 900 000 00 41"), card(conn, a, qty=2, phone="+7 900 000 00 41")
+    go(conn, one, "placed", "moving", "at_point", when="2026-12-05T10:00:00")
+    go(conn, two, "placed", "moving", "at_point")
+    new = order_merge.merge(conn, [one, two], stage(conn, "at_point"), NOW, "o", client_from=one)
+    assert point_arrival._row(conn, new)["arrived_at"] == "2026-12-05T10:00:00"         # the earliest arrival of the sources
+    order_merge.unmerge(conn, new, NOW, "o")
+    conn.commit()
+    assert point_arrival._row(conn, new) is None                                         # no tyres of its own left: no arrival
+    assert orders.get_card(conn, one)["stage"]["code"] == "at_point" and not point_arrival._row(conn, one)["left_at"]
+    assert issue_of(conn, a) == {}                                                       # back on the point: in work
+    go(conn, one, "cancel", when="2026-12-20T10:00:00")
+    assert issue_of(conn, a) == {one: (150, True)}                                       # paid once, the merged order nothing
 
 
 def test_a_part_sold_leaves_the_rest_unpaid_for_the_next_order(tmp_path):
