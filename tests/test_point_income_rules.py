@@ -78,6 +78,44 @@ def test_the_fee_follows_the_tyres_the_point_got(tmp_path):
     assert issue_of(conn, a)[waiting] == (300, True)
 
 
+def _before_the_table(conn, *ids):
+    """The arrivals of before order_arrival (2026-11-26): only the journal of the order says them."""
+    conn.execute("DELETE FROM order_arrival WHERE order_id IN (%s)" % ",".join("?" * len(ids)), ids)
+    conn.commit()
+
+
+def test_the_arrivals_before_the_table_are_read_from_the_journal(tmp_path, monkeypatch):
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    nov = "2026-11-10T10:00:00"
+    cancelled = card(conn, a, phone="+7 900 000 00 91")
+    go(conn, cancelled, "placed", "moving", "at_point", when=nov)
+    go(conn, cancelled, "cancel", when="2026-11-12T10:00:00")
+    undone = card(conn, a, phone="+7 900 000 00 92")
+    go(conn, undone, "placed", "moving", "at_point", "moving", "cancel", when=nov)
+    returned = card(conn, a, qty=2, phone="+7 900 000 00 93")
+    go(conn, returned, "placed", "moving", "at_point", "oth", when=nov)
+    _give_back(conn, returned, "2026-11-20T10:00:00")
+    waiting = card(conn, a, phone="+7 900 000 00 94")
+    go(conn, waiting, "placed", "moving", "at_point", when=nov)
+    sold = card(conn, a, phone="+7 900 000 00 95")
+    go(conn, sold, "placed", "moving", "at_point", "done", when=nov)
+    orders.record_sales(conn, sold, "2026-11-11", NOW, "owner", "2026-11-11")
+    never = card(conn, a, phone="+7 900 000 00 96")
+    go(conn, never, "placed", "moving", "cancel", when=nov)
+    old = card(conn, a, phone="+7 900 000 00 97")
+    go(conn, old, "placed", "moving", "at_point", "cancel", when="2026-10-20T10:00:00")     # settled with the points up to 22.10
+    _before_the_table(conn, cancelled, undone, returned, waiting, sold, never, old)
+    got = {e["order"]: (e["day"], e["issue"], e["issue_pieces"]) for e in order_report.point_income(conn, "2026-10-01", "2026-11-30", a)["orders"]}
+    assert got == {cancelled: ("2026-11-12", 300, 4), returned: ("2026-11-20", 150, 2), sold: ("2026-11-11", 300, 4)}
+    assert [w["order"] for w in order_report.waiting(conn, "2026-11-26", a)] == [waiting]
+    first, x = _on_oth(conn, monkeypatch, a, nov)                               # cancelled into a record of storage, given back
+    _give_back(conn, x, "2026-11-18T10:00:00")
+    _before_the_table(conn, first)
+    got = {e["order"]: (e["day"], e["issue"]) for e in order_report.point_income(conn, "2026-11-01", "2026-11-30", a)["orders"]}
+    assert got[first] == ("2026-11-18", 300)
+
+
 def _give_back(conn, cid, when):
     """«На возврат»: the tyres go back to the supplier (the agreement of the return is the office's, not of this test)."""
     assert orders.move_card(conn, cid, stage(conn, "return_given"), when, "o", internal_return_restore=True)
@@ -95,7 +133,7 @@ def test_the_office_says_the_tyres_never_came(tmp_path):
     assert point_arrival.unmark_none(conn, cid, NOW, "owner") and issue_of(conn, a)[cid] == (300, True)
 
 
-def test_a_sale_counts_once_and_the_chain_rule_holds_for_every_arrival_but_not_for_a_settled_day(tmp_path):
+def test_a_sale_counts_once_and_the_rate_a_tyre_holds_from_the_twenty_third_of_october(tmp_path):
     conn = order_db(tmp_path)
     a = point(conn, "Альфа")
     sold = card(conn, a)
@@ -106,14 +144,12 @@ def test_a_sale_counts_once_and_the_chain_rule_holds_for_every_arrival_but_not_f
     early = card(conn, a, phone="+7 900 000 00 08")
     go(conn, early, "placed", "moving", "at_point", "done")
     orders.record_sales(conn, early, "2026-11-20", NOW, "owner", "2026-11-20")
-    got = issue_of(conn, a, "2026-11-01", END)
-    assert got == {sold: (300, False), old: (75, True), early: (75, False)}               # the chain rule for every arrival written;
-    # the rate before the technical start: once an order (the reports of before are not recounted)
-    point_payouts.settle(conn, [(a, "order:%d" % early)], "2026-11-01", "2026-11-30", NOW, "owner")
-    conn.execute("UPDATE point_paid SET day = '2026-11-26' WHERE item = ?", ("order:%d" % early,))
-    conn.commit()
-    got = issue_of(conn, a, "2026-11-01", END)
-    assert got == {sold: (300, False), early: (75, False)}                                 # a settled day gets no new item
+    settled = card(conn, a, phone="+7 900 000 00 07")
+    go(conn, settled, "placed", "moving", "at_point", "done")
+    orders.record_sales(conn, settled, "2026-10-22", NOW, "owner", "2026-10-22")
+    got = issue_of(conn, a, "2026-10-01", END)
+    # the owner 2026-11-26: 75 ₽ a tyre from 23.10 (the points are settled up to 22.10: that day keeps the old count, once an order)
+    assert got == {sold: (300, False), old: (300, True), early: (300, False), settled: (75, False)}
 
 
 def test_the_cancel_window_asks_and_both_ways_write_the_journal(tmp_path):

@@ -194,7 +194,9 @@ def test_the_profit_is_the_analytics_one_and_the_rows_add_up_to_the_net(table):
     orders.record_sales(conn, mine, "2026-10-23", NOW, "owner", "2026-10-23")
     rows = list(sheet.rows_of(conn, mine, NOW).values())
     report = order_report.build(conn, "2026-10-23", "2026-10-23")
-    assert round(sum(r["Прибыль ₽"] for r in rows), 2) == report["total"]["net"] and report["total"]["fee"] == 75.0
+    # the owner 2026-11-26: the report counts 75 ₽ a tyre from 23.10; a row of the table of before 27.11 keeps the sum it was written with
+    assert report["total"]["fee"] == 450.0
+    assert round(sum(r["Прибыль ₽"] for r in rows), 2) == round(report["total"]["margin"] - 75, 2)
     for r in rows:
         assert r["Прибыль %"] == round(r["Прибыль ₽"] * 100.0 / r["Сумма продажи"], 1)
     assert rows[0]["Прибыль ₽"] != rows[1]["Прибыль ₽"]                                               # the fee is shared by the sum of the sale

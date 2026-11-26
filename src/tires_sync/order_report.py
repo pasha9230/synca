@@ -31,12 +31,11 @@ OTH_SALE_FEE_FROM = BONUS_FROM       # the sales of earlier days get 0
 # ТЗ 92 / 95 (the owner 2026-11-24: «50 ₽ за каждую шину», «+200 ₽ за комплект»): the bonus of a handed-over client is handoff_fee for
 # every tyre of the issued order
 HANDOFF_PER_TYRE_FROM = BONUS_FROM
-# the owner 2026-11-25/26: the fee of the issue (point_fee, 75 ₽) is for every tyre issued or given back (a set of 4 — 300 ₽). A
-# technical start (never shown to a point): the reports before it were counted once an order and are not recounted — the owner's and
-# the partner's split of past months stays, and the time before it was paid to the points by one sum each (the office's correction)
-POINT_FEE_PER_TYRE_FROM = "2026-11-27"
-# the chain rule holds for every arrival the panel wrote (point_arrival.ARRIVAL_FROM): an arrival of a day before this one that the office
-# settled the point for («Рассчитан») is not added afterwards — a closed period never changes
+# the owner 2026-11-26: the fee of the issue (point_fee, 75 ₽) is for every tyre the point took in and issued or gave back (a set of 4 —
+# 300 ₽), always; the points are settled up to 2026-10-22, so the count by the rule (and the ledger, point_payouts.LEDGER_FROM) starts the
+# next day. The days before keep the old count (once an order): settled, never recounted
+POINT_FEE_PER_TYRE_FROM = "2026-10-23"
+# an arrival of a day before this one that the office settled the point for («Рассчитан») is not added afterwards (a closed period)
 OLD_RULE_BEFORE = POINT_FEE_PER_TYRE_FROM
 # KPI (ТЗ 95): in a calendar month, for every full cycle of kpi_orders closed orders AND kpi_tyres tyres of the clients the point handed
 # over, the premium kpi_bonus; the cycles are not limited: min(orders // kpi_orders, tyres // kpi_tyres) premiums (20 / 76 → 2). The rates
@@ -548,7 +547,8 @@ def legacy_fee(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str
                oth_sold: bool = False) -> float:
     """What an order sold on `day` cost in fixed sums by the rules before the owner's 2026-11-25 (the bonuses from LEGACY_STARTS, a handed
     client per order before LEGACY_PER_TYRE_FROM): only the rows of the Google table already written keep it (order_sheet.KEEPS_BEFORE)."""
-    fee = issue_fee(rates, by_point, key, day, pieces)[0]
+    fee = rate_for(rates, by_point, key, "point_fee", day)                     # the issue as the row was written: once an order before
+    fee = round(fee * pieces, 2) if day >= LEGACY_PER_TYRE_FROM else fee       # LEGACY_PER_TYRE_FROM, whatever the count is now
     if oth_sold:
         fee += round(_legacy_rate(rates, by_point, key, "oth_sale_fee", day) * pieces, 2)
     if handed:

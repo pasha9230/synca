@@ -17,7 +17,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from . import order_report, orders, store
 
-LEDGER_FROM = "2026-11-01"           # the first day the ledger keeps: earlier items are not shown as a debt
+LEDGER_FROM = "2026-10-23"           # the first day the ledger keeps: the points were settled up to 2026-10-22 (the owner 2026-11-26)
 STATUSES = {"unpaid": "Не рассчитан", "paid": "Рассчитан", "extra": "Доплата", "over": "Переплата / к удержанию"}
 REQUEST_TASK = "Точка «%s»: вычли с кассы и получили бонусы %s — проверить кассу и отметить «Рассчитан»"
 

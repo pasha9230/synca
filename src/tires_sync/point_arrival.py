@@ -22,6 +22,7 @@ moment it left the point without a sale (the day of the fee), the undo, the «н
 (also «Работать как точка») give the same result. Counted from ARRIVAL_FROM (every arrival written)."""
 from __future__ import annotations
 
+import re
 from typing import Dict, Iterable, List, Optional
 
 # the owner 2026-11-26: «с самого начала сотрудничества» — every arrival the panel wrote pays by the rule of the chain: order_arrival is
@@ -207,6 +208,79 @@ def _paid(conn) -> Dict[int, dict]:
         if order_id not in records:
             out[order_id] = {"point_id": point_id, "day": str(left_at or arrived_at)[:10], "pieces": int(pieces), "left": bool(left_at),
                              "arrived": str(arrived_at)[:10]}
+    written = {r[0] for r in conn.execute("SELECT order_id FROM order_arrival")}
+    for order_id, found in _journal_arrivals(conn, written | records).items():
+        out.setdefault(order_id, found)
+    return out
+
+
+# the owner 2026-11-26: the points are settled up to 2026-10-22; from this day the fee is the chain's (75 ₽ a tyre, order_report). The
+# arrivals before order_arrival (ARRIVAL_FROM) are read from the journal of the order: its moves of the stage (orders.move_card writes
+# «Этап: «A» → «B»» with the names of the stages)
+JOURNAL_FROM = "2026-10-23"
+_MOVE = re.compile(r"^Этап: «(.*)» → «(.*)»$")
+
+
+def _journal_arrivals(conn, skip: set) -> Dict[int, dict]:
+    """Order → {point_id, day, pieces, left, arrived, journal} of the arrivals read from the journal (orders with no order_arrival, not in
+    `skip`): the first move to «На точке» of the last stay from JOURNAL_FROM on (a move back to a stage before it undoes the stay, as
+    `moved`); its end (left) — the first move after it to «На возврат» / «Вернули поставщику», «Отмена» with no record of storage, another
+    closed stage or «Выполнено»; for an order cancelled into a record of storage, the record's move to «На возврат» / «Вернули
+    поставщику» or its closing. The point is the order's now (none written then); the tyres — those of the record (its split), else the
+    order's own now. Nothing is guessed: no move to «На точке» in the journal — no arrival."""
+    from . import oth_storage
+    stages = list(conn.execute("SELECT code, name, kind FROM order_stage"))
+    names = {code: name for code, name, _kind in stages}
+    kinds = {name: kind for _code, name, kind in stages}
+    here = names.get(HERE)
+    if not here:
+        return {}
+    before = {names[c] for c in BEFORE if c in names}
+    back = {names[c] for c in GONE_BACK if c in names}
+    waiting = {names[c] for c in WAITING if c in names}
+    moves: Dict[int, List[tuple]] = {}
+    for order_id, at, text in conn.execute("SELECT order_id, at, text FROM order_event WHERE kind = 'stage' AND at >= ? ORDER BY order_id, at, id",
+                                           (JOURNAL_FROM,)):
+        found = _MOVE.match(str(text or ""))
+        if found:
+            moves.setdefault(order_id, []).append((str(at), found.group(1), found.group(2)))
+    cards = {r[0]: r[1] for r in conn.execute("SELECT id, point_id FROM order_card")}
+    stored: Dict[int, int] = {}                                           # the order → its record of storage (oth_storage.record_of)
+    for key, value in conn.execute("SELECT key, value FROM app_state WHERE key LIKE ?", (oth_storage.OF.replace("%d", "%"),)):
+        digits = key.rsplit(":", 1)[1]
+        if digits.isdigit() and str(value).strip().isdigit():
+            stored[int(digits)] = int(str(value).strip())
+    out: Dict[int, dict] = {}
+    for order_id, found in moves.items():
+        if order_id in skip or cards.get(order_id) is None:
+            continue
+        record = stored.get(order_id)
+        came_at, left = None, None
+        for at, was, now in found:
+            if now == here:
+                if came_at is None:
+                    came_at = at
+                left = None                                               # back on the point: it has not left
+            elif came_at is not None:
+                if was == here and now in before:
+                    came_at, left = None, None                            # undone
+                elif now in back and (left is None or was in waiting):
+                    left = at
+                elif left is None and (kinds.get(now) in ("closed", "won") or (kinds.get(now) == "lost" and record is None)):
+                    left = at
+        if came_at is None or came_at[:10] >= ARRIVAL_FROM:
+            continue
+        if record is not None:
+            mark = oth_storage.record(conn, record) or {}
+            pieces = int(mark.get("pieces") or 0)
+            for at, was, now in moves.get(record, []):                    # the record's end: given back, or closed
+                if (now in back and was not in back) or (left is None and kinds.get(now) in ("closed", "lost", "won")):
+                    left = at
+        else:
+            pieces = own_pieces(conn, order_id)
+        if pieces > 0:
+            out[order_id] = {"point_id": cards[order_id], "day": str(left or came_at)[:10], "pieces": pieces, "left": bool(left),
+                             "arrived": came_at[:10], "journal": True}
     return out
 
 
