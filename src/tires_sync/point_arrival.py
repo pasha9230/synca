@@ -8,9 +8,10 @@ driver («На возврат», «Вернули поставщику») — al
 answers «Шины физически не приезжали?» (no by default; the answer «да» is of the money right): «да» takes the fee of the order off (the
 order's journal says so), «Вернуть отметку» gives it back.
 
-The tyres are paid once (the review 2026-11-26): the tyres an order took from «На ОТХ» are not its own arrival (their first order's
-arrival paid them, or they lay at the point already); a later order that takes from «На ОТХ» the tyres whose arrival was paid gets no
-fee of the issue for them (paid_oth_pieces), only the bonus of a sale from «На ОТХ».
+An arrival is paid once (the review 2026-11-26): the tyres an order took from «На ОТХ» are not its own arrival (their first order's
+arrival paid them, or they lay at the point already), so an order that takes them and is refused again pays nothing. A sale of them is an
+issue (the owner 2026-11-26): the order that sells them gets the fee of the issue like any sold order, and the bonus of «На ОТХ» on top of
+it when the point itself sold (order_report.fee_parts) — the arrival that brought them stays paid as it was.
 
 One row an order (order_arrival): the moment it came (the first of this stay), the point and the tyres of its own at that moment, the
 moment it left the point without a sale (the day of the fee), the undo, the «не приезжали» of the office. Written by orders.move_card
@@ -184,32 +185,4 @@ def unsold(conn, start: str, end: str) -> List[dict]:
                 or "Заказ №%d" % order_id in sold:
             continue
         out.append(dict(found, order=order_id))
-    return out
-
-
-def paid_oth_pieces(conn, order_ids: Iterable[int]) -> Dict[int, int]:
-    """Order → the tyres it took from «На ОТХ» whose arrival was paid already: the order they came with (the source of the record of
-    storage, or the order that stood on «На ОТХ» the old way) was paid for its arrival without a sale — those tyres are not paid again.
-    An order sold in part (2 of 4) was paid for the tyres sold only: the rest on «На ОТХ» are not paid, the order that takes them gets
-    the fee (the review 2026-11-26). The paid tyres of a source go to its takers once, the first taken first (order_item_oth order)."""
-    ids = {int(i) for i in order_ids if i}
-    if not ids:
-        return {}
-    from . import oth_storage
-    paid = _paid(conn)
-    if not paid:
-        return {}
-    sold = {r[0] for r in conn.execute("SELECT DISTINCT note FROM sale WHERE source = 'order' AND reversed_at IS NULL")}
-    credit = {oid: found["pieces"] for oid, found in paid.items() if "Заказ №%d" % oid not in sold}
-    out: Dict[int, int] = {}
-    for order_id, from_order, qty in conn.execute(
-            "SELECT order_id, from_order, qty FROM order_item_oth WHERE undone_at = '' ORDER BY at, item_id").fetchall():
-        source = oth_storage.source_of(conn, from_order) or from_order
-        left = credit.get(source, 0)
-        if not left:
-            continue
-        got = min(int(qty), left)
-        credit[source] = left - got
-        if order_id in ids:
-            out[order_id] = out.get(order_id, 0) + got
     return out

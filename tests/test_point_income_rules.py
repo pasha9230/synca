@@ -148,8 +148,9 @@ def test_the_tyres_from_oth_are_paid_once(tmp_path):
     conn.execute("INSERT INTO order_event (order_id, at, author, kind, text) VALUES (?,?,?,?,?)", (sold, NOW, "o", "point", order_report.OTH_SOLD_EVENT))
     conn.commit()
     got = {e["order"]: e for e in order_report.point_income(conn, START, END, a)["orders"]}
-    assert (got[sold]["issue"], got[sold]["oth"]) == (0, 200)                 # no second fee of the issue, the bonus of «На ОТХ» only
-    assert got[first]["issue"] == 300
+    # the owner 2026-11-26: the sale is an issue — its fee and the bonus of «На ОТХ» on top; the arrival stays paid once
+    assert (got[sold]["issue"], got[sold]["oth"]) == (300, 200)
+    assert got[first]["issue"] == 300 and taken not in got
 
 
 def test_the_arrival_keeps_its_point_and_tyres_and_the_day_it_left(tmp_path):
@@ -291,9 +292,12 @@ def test_a_part_sold_leaves_the_rest_unpaid_for_the_next_order(tmp_path):
     go(conn, first, "oth")                                                    # the other 2 on «На ОТХ»
     later = card(conn, a, qty=2, phone="+7 900 000 00 32")
     _take_from(conn, later, first, 2)
-    assert point_arrival.paid_oth_pieces(conn, [later]) == {}                  # not paid by the first order: the fee is the later one's
     got = issue_of(conn, a)
     assert got[first] == (150, False)                                         # the first: the 2 tyres it sold
+    go(conn, later, "placed", "moving", "at_point", "done")
+    orders.record_sales(conn, later, "2026-12-12", NOW, "owner", "2026-12-12")
+    got = issue_of(conn, a)
+    assert (got[first], got[later]) == ((150, False), (150, False))           # the later order: the fee of its 2 tyres, once
 
 
 def test_the_first_version_of_the_arrival_table_gets_its_columns(tmp_path):
@@ -430,3 +434,81 @@ def test_the_handed_page_has_its_banner_and_the_list_below(tmp_path):
     assert "1 заказ к выполнению KPI" in page
     assert page.index("mp-handoff-h") < page.index("mp-handed-h")                                # the form, then the list
     assert "закупк" not in page.lower()
+
+
+# ---- the owner 2026-11-26: a sale from «На ОТХ» is an issue; its bonus is the point's own sale only ------------------------------------
+
+def _on_oth(conn, monkeypatch, pid, day):
+    """A client's order came to the point on `day` and was refused: the record of storage holds its 4 tyres (as production splits)."""
+    from tires_sync import oth_storage
+    monkeypatch.setattr(oth_storage, "SPLIT", True)
+    first = card(conn, pid, phone="+7 900 000 00 51")
+    go(conn, first, "placed", "moving", "at_point", when=day)
+    assert orders.move_card(conn, first, stage(conn, "oth"), day, "o", {"cancel_reason": "отменил клиент"})
+    return first, oth_storage.record_of(conn, first)
+
+
+def _point_sells(conn, x, day, who, seller=""):
+    from tires_sync import oth_point_sale
+    item = orders.get_card(conn, x)["items"][0]["id"]
+    b = oth_point_sale.sell(conn, x, {item: 4}, "Глеб", "+7 900 333 44 55", None, None, False, day + "T15:00:00", who, seller=seller)
+    orders.record_sales(conn, b, day, NOW, "owner", day)
+    return b
+
+
+def _income(conn, pid, start, end):
+    return {e["order"]: (e["issue"], e["oth"]) for e in order_report.point_income(conn, start, end, pid)["orders"]}
+
+
+def _sheet_matches(conn, b, start, end):
+    from tires_sync import order_sheet as sheet
+    rows = sheet.rows_of(conn, b, NOW)
+    margin = sum(r["margin_total"] for r in order_report._counted(conn, sales.list_sales(conn, start, end)) if r["note"] == "Заказ №%d" % b)
+    return round(sum(r["Прибыль ₽"] for r in rows.values()), 2), round(margin, 2)
+
+
+def test_the_point_sold_from_oth_after_the_first_of_december_gets_the_issue_and_the_bonus(tmp_path, monkeypatch):
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    first, x = _on_oth(conn, monkeypatch, a, DAY)
+    b = _point_sells(conn, x, "2026-12-12", "менеджер Альфа")
+    assert _income(conn, a, START, END) == {first: (300, 0), b: (300, 200)}      # the arrival once; the sale: the issue and the bonus
+    rep = order_report.build(conn, START, END)
+    assert rep["oth"]["pieces"] == 4 and rep["oth"]["fee"] == 200 and rep["fees"]["issue"] == 600
+    profit, margin = _sheet_matches(conn, b, START, END)
+    assert profit == round(margin - 300 - 200, 2)                                 # the row of the table: the same sums as the report
+
+
+def test_the_point_sold_from_oth_before_the_first_of_december_gets_the_issue_only(tmp_path, monkeypatch):
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    first, x = _on_oth(conn, monkeypatch, a, "2026-11-28T10:00:00")
+    b = _point_sells(conn, x, "2026-11-29", "менеджер Альфа")
+    assert _income(conn, a, "2026-11-01", "2026-11-30") == {first: (300, 0), b: (300, 0)}     # the bonus of «На ОТХ» from 01.12
+    profit, margin = _sheet_matches(conn, b, "2026-11-01", "2026-11-30")
+    assert profit == round(margin - 300, 2)
+
+
+def test_the_office_sold_from_oth_gets_the_point_the_issue_without_the_bonus(tmp_path, monkeypatch):
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    first, x = _on_oth(conn, monkeypatch, a, DAY)
+    b = _point_sells(conn, x, "2026-12-12", "Павел за точку «Альфа»", seller="owner")      # the owner working as the point
+    assert any(e["kind"] == "point" and e["text"].startswith(order_report.OTH_SOLD_EVENT) for e in orders.list_events(conn, b))
+    assert _income(conn, a, START, END) == {first: (300, 0), b: (300, 0)}
+    assert order_report.build(conn, START, END)["oth"]["fee"] == 0
+    profit, margin = _sheet_matches(conn, b, START, END)
+    assert profit == round(margin - 300, 2)
+    other, y = _on_oth(conn, monkeypatch, a, DAY)                                 # the office moves a record to «Выполнено»
+    assert orders.move_card(conn, y, stage(conn, "done"), "2026-12-13T10:00:00", "owner")
+    orders.record_sales(conn, y, "2026-12-13", NOW, "owner", "2026-12-13")
+    got = _income(conn, a, START, END)
+    assert (got[other], got[y]) == ((300, 0), (300, 0))
+
+
+def test_the_tyres_that_came_and_went_back_are_paid_once(tmp_path, monkeypatch):
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    first, x = _on_oth(conn, monkeypatch, a, DAY)
+    assert orders.move_card(conn, x, stage(conn, "return_agree"), "2026-12-14T10:00:00", "o")      # the record goes back to the supplier
+    assert _income(conn, a, START, END) == {first: (300, 0)}                     # the arrival, once: the record pays nothing of its own

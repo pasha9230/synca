@@ -264,7 +264,7 @@ def _sent(conn, card_id: int) -> Dict[str, str]:
 
 
 # the rows of the orders sold before this day keep the bonuses they were written with (order_report.legacy_fee: 50 ₽ for a handed client,
-# no paid_oth_pieces) — for ever, whatever is sent when: the move of the bonuses to 2026-12-01 (the owner 2026-11-25) sends no recount of
+# the bonus of «На ОТХ» to the owner working as the point too) — for ever, whatever is sent when: the move of the bonuses to 2026-12-01 (the owner 2026-11-25) sends no recount of
 # old rows (the review 2026-11-26); from this day the rows are counted as the report; a sum the office sets counts as everywhere
 KEEPS_BEFORE = "2026-11-27"
 
@@ -290,17 +290,15 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     handed, _names = order_report.handed_points(conn)                             # «чей клиент»: the report's one rule (a handoff, «Откуда
     key = ("id", issued) if issued is not None else ("name", "")                  # клиент», the merge, the swap on «На ОТХ»)
     oth_sold = bool(order_report.oth_sold_orders(conn, [card["id"]]))
-    from . import point_arrival
-    paid_before = point_arrival.paid_oth_pieces(conn, [card["id"]]).get(card["id"], 0)
-    got = order_report.fee_parts(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]), oth_sold,
-                                 paid_before)                                     # the one formula of the report
+    got = order_report.fee_parts(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]), oth_sold)   # the report's formula
     fixed = order_report.fixes(conn)                                              # the sums the office set (point_item_fix), as the report
     item = "order:%d" % card["id"]
     theirs = got["handoff_to"][1] if got["handoff_to"] is not None and got["handoff_to"][0] == "id" else None
     if day < KEEPS_BEFORE and not fixed.get((issued, item)) and not fixed.get((theirs, item)):
         # the rows of the orders sold before the bonuses moved to 2026-12-01 keep the sums they were written with (the review 2026-11-26:
         # the deploy sends no recount of old rows); a sum the office sets for such an order counts as everywhere
-        fee = order_report.legacy_fee(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]), oth_sold)
+        fee = order_report.legacy_fee(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]),
+                                      bool(order_report.oth_sold_orders(conn, [card["id"]], acting=True)))     # the bonus as it was written
     else:
         mine = order_report._fix(dict(got), fixed.get((issued, item)), ("issue", "oth"))
         fee = got["issue"] + got["oth"] + sum(mine.values())

@@ -278,7 +278,6 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
     oth_lines: Dict[tuple, dict] = {}
     payouts: Dict[tuple, Dict[str, dict]] = {}                                          # point → order → what it is paid for it (point_income)
     oth_sold = oth_sold_orders(conn, {_order_id(r["note"]) for items in grouped.values() for r in items} - {None})
-    paid_oth = point_arrival.paid_oth_pieces(conn, {_order_id(r["note"]) for items in grouped.values() for r in items} - {None})
     fixed = fixes(conn)
     point_names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
     issues: Dict[tuple, List[tuple]] = {}                                               # point → (share, sum) of its fees for the issue
@@ -293,7 +292,7 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
             order_id = _order_id(note)
             day = min(r["day"] for r in parts)
             got = fee_parts(rates, by_point, key, day, sum(r["pieces"] for r in parts), order_id in handed, handed.get(order_id),
-                            order_id in oth_sold, paid_oth.get(order_id, 0))
+                            order_id in oth_sold)
             mine = _payout(payouts, key, note, day)
             mine["issue"], mine["issue_pieces"], mine["oth"], mine["oth_pieces"] = got["issue"], got["issue_pieces"], got["oth"], got["oth_pieces"]
             mine["oth_sold"] = order_id in oth_sold
@@ -454,14 +453,15 @@ def oth_fee(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str, p
 
 
 def fee_parts(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str, pieces: int, handed: bool = False, handed_to=None,
-              oth_sold: bool = False, paid_before: int = 0) -> dict:
+              oth_sold: bool = False) -> dict:
     """What the points get for one order issued by `key` on `day` with `pieces` tyres — the one formula of the report, the ledger and the
     row of the Google table: {issue, issue_pieces (to `key`), oth, oth_pieces (to `key`, a sale from «На ОТХ»), handoff, handoff_pieces,
-    handoff_to (the point of a handed-over client, bonus_point; None — none)}."""
+    handoff_to (the point of a handed-over client, bonus_point; None — none)}.
+    The owner 2026-11-26: a sale of tyres from «На ОТХ» is an issue like any other — the fee of the issue for every tyre sold, whoever
+    sold (the arrival that brought them was paid once on its own, point_arrival.unsold); the bonus of «На ОТХ» on top of it when the point
+    itself sold (`oth_sold`, oth_sold_orders), from BONUS_FROM."""
     out = {"handoff": 0.0, "handoff_pieces": 0, "handoff_to": None, "oth": 0.0, "oth_pieces": 0}
-    # `paid_before`: the tyres taken from «На ОТХ» whose arrival paid the issue already (point_arrival.paid_oth_pieces): not again
-    out["issue"], out["issue_pieces"] = issue_fee(rates, by_point, key, day, max(pieces - paid_before, 0)) if pieces > paid_before or not paid_before \
-        else (0.0, 0)
+    out["issue"], out["issue_pieces"] = issue_fee(rates, by_point, key, day, pieces)
     if oth_sold:
         out["oth"], out["oth_pieces"] = oth_fee(rates, by_point, key, day, pieces)
     if handed:                                                  # handed_to None: the point is gone, the issuing one gets it (bonus_point)
@@ -594,15 +594,20 @@ def _payout(payouts: Dict[tuple, Dict[str, dict]], key: tuple, note: str, day: s
                                                          "oth": 0.0, "oth_pieces": 0})
 
 
-def oth_sold_orders(conn, order_ids) -> set:
-    """Those of `order_ids` the point sold from «На ОТХ» (OTH_SOLD_EVENT in their journal): one query, by the index of the journal."""
+def oth_sold_orders(conn, order_ids, acting: bool = False) -> set:
+    """Those of `order_ids` the point sold from «На ОТХ» (OTH_SOLD_EVENT in their journal): one query, by the index of the journal.
+    The owner 2026-11-26: the bonus of «На ОТХ» is the point's only when the point itself sold — the owner or the partner working as the
+    point («<имя> за точку «X»», orders.ACTING_MARK, the seller of oth_sale.credit_seller) is the office: no bonus, the fee of the issue
+    only. `acting`: count their sales too — the rule before it, for the rows of the Google table written by it (order_sheet.KEEPS_BEFORE)."""
+    from .orders import ACTING_MARK
     ids = sorted({int(i) for i in order_ids})
     found = set()
+    office = "" if acting else " AND instr(author, ?) = 0"
     for chunk in range(0, len(ids), 500):
         part = ids[chunk:chunk + 500]
         found |= {r[0] for r in conn.execute(
-            "SELECT DISTINCT order_id FROM order_event WHERE order_id IN (%s) AND kind = 'point' AND (text = ? OR text LIKE ?)"
-            % ",".join("?" * len(part)), part + [OTH_SOLD_EVENT, OTH_SOLD_EVENT + ":%"])}
+            "SELECT DISTINCT order_id FROM order_event WHERE order_id IN (%s) AND kind = 'point' AND (text = ? OR text LIKE ?)%s"
+            % (",".join("?" * len(part)), office), part + [OTH_SOLD_EVENT, OTH_SOLD_EVENT + ":%"] + ([] if acting else [ACTING_MARK]))}
     return found
 
 
