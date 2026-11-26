@@ -532,6 +532,8 @@ _MORE_TEXTS = {
         _q(d.get("run")), _count(d.get("back") or 0), _count(d.get("skipped") or 0), _count(d.get("left") or 0), _stopped(d)),
     "orders_cleanup_new": lambda d: "Очистка пустых новых заказов: удалено %s, пропущено %s, осталось %s%s" % (
         _count(d.get("removed") or 0), _count(d.get("skipped") or 0), _count(d.get("left") or 0), _stopped(d)),
+    "orders_empty_delete": lambda d: "Удалены пустые заказы («Удалить пустые заказы»): удалено %s, пропущено %s, осталось %s%s" % (
+        _count(d.get("removed") or 0), _count(d.get("skipped") or 0), _count(d.get("left") or 0), _stopped(d)),
     "share_created": lambda d: "Создана подборка №%s: позиций %s, %s" % (_q(d.get("link")), _count(d.get("items")), _on(d.get("price"), "с ценами", "без цен")),
     "share_price_toggled": lambda d: "Подборка №%s: цены %s" % (_q(d.get("link")), _on(d.get("show"), "показаны", "скрыты")),
     "share_revoked": lambda d: "Подборка №%s отозвана" % _q(d.get("link")),
