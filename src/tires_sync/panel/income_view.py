@@ -180,6 +180,7 @@ def _bonus_rows(conn, point_id: int, f: dict, by_order: Dict[int, dict], rates: 
     bonus = {oid for oid, e in by_order.items() if e["handoff"] or e["oth"]}
     cards = _cards(conn, handed | bonus)
     per_tyre = f["to"] >= order_report.HANDOFF_PER_TYRE_FROM
+    whole, taken = order_report.oth_pieces(conn, handed | bonus)            # the tyres from its own «На ОТХ»: no bonus of a handed client
     rows = []
     for oid in handed | bonus:
         card = _card(cards, oid)
@@ -194,7 +195,9 @@ def _bonus_rows(conn, point_id: int, f: dict, by_order: Dict[int, dict], rates: 
             deal, amount, expected = "done", None, False             # closed outside the period: its bonus is in that period
         else:
             deal, expected = "work", True
-            amount = round(rates["handoff_fee"] * card["pieces"], 2) if per_tyre else rates["handoff_fee"]
+            own = order_report.from_oth(oid, ("id", int(point_id)), card["pieces"], whole, taken).get(int(point_id), 0)
+            rest = max(card["pieces"] - own, 0)
+            amount = round(rates["handoff_fee"] * rest, 2) if per_tyre else (rates["handoff_fee"] if rest else 0.0)
         if f["deal"] != "all" and deal != f["deal"]:
             continue
         if deal == "done" and amount and not _pay_ok(entry, f) or deal != "done" and f["pay"] == "paid":

@@ -31,9 +31,13 @@ OTH_SALE_FEE_FROM = BONUS_FROM       # the sales of earlier days get 0
 # ТЗ 92 / 95 (the owner 2026-11-24: «50 ₽ за каждую шину», «+200 ₽ за комплект»): the bonus of a handed-over client is handoff_fee for
 # every tyre of the issued order
 HANDOFF_PER_TYRE_FROM = BONUS_FROM
-# the owner 2026-11-25: the fee of the issue (point_fee, 75 ₽) is for every tyre of the order (a set of 4 — 300 ₽), from this day; the
-# orders of earlier days keep it per order (a past report is never recounted)
+# the owner 2026-11-25/26: the fee of the issue (point_fee, 75 ₽) is for every tyre issued or given back (a set of 4 — 300 ₽). A
+# technical start (never shown to a point): the reports before it were counted once an order and are not recounted — the owner's and
+# the partner's split of past months stays, and the time before it was paid to the points by one sum each (the office's correction)
 POINT_FEE_PER_TYRE_FROM = "2026-11-27"
+# the chain rule holds for every arrival the panel wrote (point_arrival.ARRIVAL_FROM): an arrival of a day before this one that the office
+# settled the point for («Рассчитан») is not added afterwards — a closed period never changes
+OLD_RULE_BEFORE = POINT_FEE_PER_TYRE_FROM
 # KPI (ТЗ 95): in a calendar month, for every full cycle of kpi_orders closed orders AND kpi_tyres tyres of the clients the point handed
 # over, the premium kpi_bonus; the cycles are not limited: min(orders // kpi_orders, tyres // kpi_tyres) premiums (20 / 76 → 2). The rates
 # of a month are those in force on its first day. The premium is the point's on the day of the order that closes the cycle.
@@ -280,6 +284,7 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
     sold_ids = {_order_id(r["note"]) for items in grouped.values() for r in items} - {None}
     oth_sold = oth_sold_orders(conn, sold_ids)
     whole, taken = oth_pieces(conn, sold_ids)                                           # the tyres of a sale from «На ОТХ», by its point
+    closed = settled_before(conn)                                                       # «Рассчитан» before the rule: no new item
     fixed = fixes(conn)
     point_names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point")}
     issues: Dict[tuple, List[tuple]] = {}                                               # point → (share, sum) of its fees for the issue
@@ -303,8 +308,8 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
                 theirs = _payout(payouts, got["handoff_to"], note, day)
                 theirs["handoff"], theirs["handoff_pieces"], theirs["handed"] = got["handoff"], got["handoff_pieces"], True
     for found in point_arrival.unsold(conn, start, end):                               # a chain ended with no sale: the arrival pays
-        if not kept_order(found["order"]):
-            continue
+        if not kept_order(found["order"]) or (found["day"] < OLD_RULE_BEFORE and found["day"] <= closed.get(found["point_id"], "")):
+            continue                                                                    # a day the office settled by the old rule
         key = ("id", found["point_id"])
         names.setdefault(key, point_names.get(found["point_id"]) or NO_POINT)
         mine = _payout(payouts, key, "Заказ №%d" % found["order"], found["day"])
@@ -429,8 +434,8 @@ def build(conn, start: str, end: str, point: str = "", handed_slice: str = "", h
 
 
 def issue_fee(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str, pieces: int) -> tuple:
-    """(the fee, the tyres it is paid for) of an order the point `key` issued on `day` with `pieces` tyres: point_fee a tyre from
-    POINT_FEE_PER_TYRE_FROM (the owner 2026-11-25: «75 ₽ за шину, комплект 300 ₽»), before it once per order (tyres 0). The one place."""
+    """(the fee, the tyres it is paid for) of an order the point `key` issued (or gave back) on `day` with `pieces` tyres: point_fee a tyre
+    from POINT_FEE_PER_TYRE_FROM (the owner: «75 ₽ за шину, комплект 300 ₽»), before it once per order (tyres 0). The one place."""
     fee = rate_for(rates, by_point, key, "point_fee", day)
     if day >= POINT_FEE_PER_TYRE_FROM:
         return round(fee * pieces, 2), pieces
@@ -477,18 +482,25 @@ def fee_parts(rates: List[dict], by_point: Dict[int, List[dict]], key, day: str,
     The owner 2026-11-26, one fee a chain: the sale is the end of the way of its tyres — the fee of the issue for every tyre sold, whoever
     sold, also from «На ОТХ» (the arrival that brought them pays nothing then, point_arrival.unsold); the bonus of «На ОТХ» on top of it
     only when the point itself sold (`oth_sold`, oth_sold_orders), from BONUS_FROM. The bonuses never add up: the tyres that came from
-    «На ОТХ» of the point that handed the client over (`from_oth`: point id → tyres, oth_pieces) give it no bonus of the handed client."""
+    «На ОТХ» of the point that handed the client over (`from_oth`: point id → tyres, oth_pieces) give it no bonus of the handed client,
+    whoever sold them (from BONUS_FROM: no bonus before it anyway; the client stays «передан» for the counts)."""
     out = {"handoff": 0.0, "handoff_pieces": 0, "handoff_to": None, "oth": 0.0, "oth_pieces": 0}
     out["issue"], out["issue_pieces"] = issue_fee(rates, by_point, key, day, pieces)
     if oth_sold:
         out["oth"], out["oth_pieces"] = oth_fee(rates, by_point, key, day, pieces)
     if handed:                                                  # handed_to None: the point is gone, the issuing one gets it (bonus_point)
-        to = bonus_point(key, handed_to)
-        rest = pieces - ((from_oth or {}).get(to[1], 0) if isinstance(to, tuple) and to and to[0] == "id" else 0)
-        if rest > 0:
-            out["handoff_to"] = to
-            out["handoff"], out["handoff_pieces"] = handoff_fee(rates, by_point, to, day, rest)
+        to = out["handoff_to"] = bonus_point(key, handed_to)
+        mine = (from_oth or {}).get(to[1], 0) if day >= BONUS_FROM and isinstance(to, tuple) and to and to[0] == "id" else 0
+        if pieces - mine > 0:
+            out["handoff"], out["handoff_pieces"] = handoff_fee(rates, by_point, to, day, pieces - mine)
     return out
+
+
+def settled_before(conn) -> Dict[int, str]:
+    """{point id: the last day before OLD_RULE_BEFORE of an item the office settled («Рассчитан», not cancelled)}: no new item of the chain
+    rule is added on such a day (a closed period never changes)."""
+    return {pid: day for pid, day in conn.execute("SELECT point_id, MAX(day) FROM point_paid WHERE cancelled_at IS NULL AND day < ? "
+                                                  "GROUP BY point_id", (OLD_RULE_BEFORE,))}
 
 
 def oth_pieces(conn, order_ids) -> tuple:
@@ -496,7 +508,8 @@ def oth_pieces(conn, order_ids) -> tuple:
     point_arrival.sold_from_oth; {order: {point id: tyres}} taken from «На ОТХ» by «Взять с ОТХ», not given back, by the point of the
     order they lay in)."""
     ids = sorted({int(i) for i in order_ids})
-    whole = point_arrival.sold_from_oth(conn, ids)
+    from .oth_swap import swaps
+    whole = point_arrival.sold_from_oth(conn, ids) | (set(swaps(conn)) & set(ids))   # «Новый клиент» of all the tyres on «На ОТХ» too
     taken: Dict[int, Dict[int, int]] = {}
     for chunk in range(0, len(ids), 500):
         part = ids[chunk:chunk + 500]
