@@ -28,6 +28,40 @@ CREATE INDEX IF NOT EXISTS sale_day ON sale (day);
 CREATE TABLE IF NOT EXISTS order_rate (
     name TEXT NOT NULL, valid_from TEXT NOT NULL, value REAL NOT NULL, created TEXT NOT NULL, author TEXT NOT NULL,
     PRIMARY KEY (name, valid_from));
+-- the rates of one point (ТЗ 95, «Индивидуальные настройки»): over order_rate from valid_from; value NULL — the general rate again
+CREATE TABLE IF NOT EXISTS point_rate (
+    point_id INTEGER NOT NULL, name TEXT NOT NULL, valid_from TEXT NOT NULL, value REAL, created TEXT NOT NULL, author TEXT NOT NULL,
+    PRIMARY KEY (point_id, name, valid_from));
+-- «Рассчитан» (ТЗ 95): each payment of the office to a point, item by item («order:<id>» — the order's fee and bonuses, «kpi:<YYYY-MM>:<n>» —
+-- a premium); an item paid again (its sum grew: «доплата») or held back (it fell: «к удержанию», amount < 0) gets a row more
+CREATE TABLE IF NOT EXISTS point_paid (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, item TEXT NOT NULL, amount REAL NOT NULL, day TEXT NOT NULL,
+    paid_at TEXT NOT NULL, author TEXT NOT NULL, cancelled_at TEXT, cancelled_by TEXT);     -- «Отменить расчёт»: kept, marked
+CREATE INDEX IF NOT EXISTS point_paid_item ON point_paid (point_id, item);
+-- «Корректировка» of what a point is paid (the owner 2026-11-25): ± with a reason, an item «adj:<id>» of the ledger
+CREATE TABLE IF NOT EXISTS point_adjust (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, day TEXT NOT NULL, amount REAL NOT NULL, reason TEXT NOT NULL,
+    at TEXT NOT NULL, author TEXT NOT NULL);
+-- «Вычли с кассы и получили бонусы» of a point: a request to the office (a task); the sum stays the point's until «Рассчитан»
+CREATE TABLE IF NOT EXISTS point_paid_request (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, amount REAL NOT NULL,
+    items TEXT NOT NULL, task_id INTEGER, closed_at TEXT, closed_by TEXT);
+-- «Откуда клиент» = a point (ТЗ 92): the client the point gave by phone, set in the order by the office; a handed client of that point
+CREATE TABLE IF NOT EXISTS order_source_point (
+    order_id INTEGER PRIMARY KEY, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL);
+-- the tyres the point physically got for an order (point_arrival, the owner 2026-11-25): the moment they came to «На точке» (this stay),
+-- the point and the order's own tyres of that moment, the moment it left the point without a sale (left_at: the day of the fee), the undo
+-- of that stage (undone_*), the office's «Шины физически не приезжали» (none_*); the base of the fee of the issue of an order left
+-- without a sale
+CREATE TABLE IF NOT EXISTS order_arrival (
+    order_id INTEGER PRIMARY KEY, arrived_at TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '', point_id INTEGER,
+    pieces INTEGER NOT NULL DEFAULT 0, left_at TEXT, undone_at TEXT, undone_by TEXT, none_at TEXT, none_by TEXT);
+-- a sum of the ledger set by the office (the owner 2026-11-25): an article (issue, handoff, oth, kpi, adj) of an item of a point gets
+-- `amount` instead of the counted sum, with a reason; «Отменить начисление» sets 0; undone_at — taken back (the counted sum again)
+CREATE TABLE IF NOT EXISTS point_item_fix (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, point_id INTEGER NOT NULL, item TEXT NOT NULL, part TEXT NOT NULL, amount REAL NOT NULL,
+    reason TEXT NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL, undone_at TEXT, undone_by TEXT);
+CREATE INDEX IF NOT EXISTS point_item_fix_item ON point_item_fix (point_id, item);
 CREATE TABLE IF NOT EXISTS economics_snapshot (
     day TEXT NOT NULL, brand_key TEXT NOT NULL, ads INTEGER NOT NULL, stock INTEGER NOT NULL, profit REAL NOT NULL,
     sale_total REAL NOT NULL, price_total REAL NOT NULL, no_terms INTEGER NOT NULL, PRIMARY KEY (day, brand_key));
@@ -174,6 +208,10 @@ CREATE INDEX IF NOT EXISTS order_merge_source_order ON order_merge_source (order
 CREATE TABLE IF NOT EXISTS order_merge_item (item_id INTEGER PRIMARY KEY, merge_id INTEGER NOT NULL, from_item INTEGER NOT NULL,
     from_order INTEGER NOT NULL, qty INTEGER NOT NULL, oth INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS order_merge_item_from ON order_merge_item (from_order);
+-- «Цепочка заказов» (order_chain, the owner 2026-11-19): the orders of one client tied, not merged; chain: the number they share
+CREATE TABLE IF NOT EXISTS order_chain (order_id INTEGER PRIMARY KEY, chain INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL,
+    made_from INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS order_chain_chain ON order_chain (chain);
 CREATE TABLE IF NOT EXISTS client_chat (chat_row INTEGER PRIMARY KEY, client_id INTEGER NOT NULL, how TEXT NOT NULL DEFAULT '', at TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS client_chat_client ON client_chat (client_id);
 CREATE TABLE IF NOT EXISTS avito_call (
@@ -455,6 +493,12 @@ CREATE TABLE IF NOT EXISTS order_task (
     created_at TEXT NOT NULL, done_at TEXT, UNIQUE (order_id, rule_id, entered_at)
 );
 CREATE INDEX IF NOT EXISTS order_task_order ON order_task (order_id, status);
+CREATE TABLE IF NOT EXISTS vk_point_message (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, peer_id TEXT NOT NULL, message_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', client_phone TEXT NOT NULL DEFAULT '',
+    sent_at TEXT NOT NULL, edited_at TEXT, template TEXT, vals TEXT, wrap TEXT
+);
+CREATE INDEX IF NOT EXISTS vk_point_message_order ON vk_point_message (order_id);
 CREATE TABLE IF NOT EXISTS order_want (
     id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
     width INTEGER NOT NULL DEFAULT 0, profile INTEGER NOT NULL DEFAULT 0, radius INTEGER NOT NULL DEFAULT 0,
@@ -605,6 +649,26 @@ CREATE TABLE IF NOT EXISTS market_listing (
 );
 CREATE INDEX IF NOT EXISTS market_listing_snapshot ON market_listing (snapshot_id);
 CREATE INDEX IF NOT EXISTS market_listing_run ON market_listing (run_at);
+-- the notifications of a point (point_notify, the owner 2026-11-25): on unless a row says off; who switched them and why
+CREATE TABLE IF NOT EXISTS point_notify (
+    point_id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1, at TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '',
+    who TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT ''
+);
+-- the asks «Разрешите уведомления» shown to a person of a point: per login and calendar day (at most point_notify.ASKS_A_DAY)
+CREATE TABLE IF NOT EXISTS point_notify_ask (
+    login TEXT NOT NULL, day TEXT NOT NULL, shown INTEGER NOT NULL DEFAULT 0, last_at TEXT NOT NULL DEFAULT '', PRIMARY KEY (login, day)
+);
+-- what the points and the office did with the notifications and «Оповещение» (point_notify.record): the history the office reads
+CREATE TABLE IF NOT EXISTS point_event (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, point_id INTEGER NOT NULL, kind TEXT NOT NULL, author TEXT NOT NULL DEFAULT '',
+    who TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', task_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS point_event_point ON point_event (point_id, at);
+CREATE INDEX IF NOT EXISTS point_event_at ON point_event (at);
+-- a task of the office read by the point on «Оповещение» (the owner 2026-11-25): once per task
+CREATE TABLE IF NOT EXISTS point_task_read (
+    task_id INTEGER PRIMARY KEY, point_id INTEGER NOT NULL, at TEXT NOT NULL, author TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -697,7 +761,13 @@ def _migrate(conn) -> None:
                         ("reserve_until", "TEXT NOT NULL DEFAULT ''"), ("special_terms", "TEXT NOT NULL DEFAULT ''"),
                         ("special_amount", "REAL NOT NULL DEFAULT 0"), ("receipt_needed", "INTEGER NOT NULL DEFAULT 0")):
         _add_column(conn, "order_card", column, ddl)
-    _add_column(conn, "order_card", "supplier_number", "TEXT NOT NULL DEFAULT ''")   # the number of the order of 4 Точки, «Оформил вручную» (order_supplier)
+    _add_column(conn, "order_card", "supplier_number", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "order_card", "wait_wish", "TEXT NOT NULL DEFAULT ''")         # «Лист ожидания» of the new order (2026-11-26): what the client waits for, in words
+    _add_column(conn, "order_card", "wait_analogs", "INTEGER NOT NULL DEFAULT 0")    # 1: «подойдут аналоги»   # the number of the order of 4 Точки, «Оформил вручную» (order_supplier)
+    # order_arrival of the first version (2026-11-25): the point, the tyres and the day it left came after (the review 2026-11-26)
+    _add_column(conn, "order_arrival", "point_id", "INTEGER")
+    _add_column(conn, "order_arrival", "pieces", "INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "order_arrival", "left_at", "TEXT")
     _add_column(conn, "order_item", "code", "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "order_item", "purchase_manual", "INTEGER NOT NULL DEFAULT 0")   # 1: the purchase was typed by hand, WebMIM does not overwrite it
     _add_column(conn, "account", "chats_enabled", "INTEGER NOT NULL DEFAULT 0")
@@ -718,6 +788,8 @@ def _migrate(conn) -> None:
     _add_column(conn, "chat_send_log", "orig_at", "TEXT NOT NULL DEFAULT ''")        # the first start of the send, never moved: the chat is looked at from it
     _add_column(conn, "account", "feed_mode", "TEXT NOT NULL DEFAULT 'generated'")
     _add_column(conn, "order_task", "arg", "TEXT NOT NULL DEFAULT ''")
+    for column in ("template", "vals", "wrap"):                      # the template a point's VK message was built from (vk_point_fix, 2026-11-25)
+        _add_column(conn, "vk_point_message", column, "TEXT")
     _add_column(conn, "order_task", "stage_id", "INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "order_event", "level", "TEXT NOT NULL DEFAULT ''")
     _add_column(conn, "callback_task", "kind", "TEXT NOT NULL DEFAULT 'callback'")   # «Задачи» (2026-10-31): the old rows are «перезвонить»

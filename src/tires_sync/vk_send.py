@@ -20,8 +20,16 @@ VK_LIMIT = 4000
 REFUSED = "ВК не принял сообщение"    # VK answered with an error (912: the keyboard needs «Возможности ботов» on in the community)
 
 
+EDIT_URL = "https://api.vk.com/method/messages.edit"
+TOO_OLD = (909, 920)                  # messages.edit: «too old to edit», «this kind of message cannot be edited»
+
+
 class VkError(Exception):
-    pass
+    """`code`: VK's own error_code when VK answered with an error (None otherwise)."""
+
+    def __init__(self, message: str = "", code: Optional[int] = None):
+        super().__init__(message)
+        self.code = code
 
 
 def stable_id(seed: str) -> int:
@@ -45,9 +53,31 @@ def send_message(token: str, peer_id, text: str, http: Transport = urllib_transp
               "random_id": random_id if random_id is not None else random.randint(1, 2 ** 31 - 1)}
     if keyboard:
         fields["keyboard"] = keyboard
+    return _call(URL, fields, http)
+
+
+def edit_message(token: str, peer_id, message_id, text: str, http: Transport = urllib_transport) -> int:
+    """Replace the text of the community's message `message_id` sent to `peer_id` (messages.edit); returns VK's 1. The same rules as
+    send_message: the key in the body only; a text longer than VK_LIMIT is refused, never cut (the caller sends a new message instead).
+    VK refuses an old message with code 909 or 920 (VkError.code, TOO_OLD)."""
+    token, peer, text = (token or "").strip(), str(peer_id or "").strip(), (text or "").strip()
+    if not token:
+        raise VkError("ВК не настроен: нет ключа доступа сообщества.")
+    if not (peer.isascii() and peer.isdigit() and peer != "0"):
+        raise VkError("ВК: у менеджера не привязан идентификатор (нужен номер из цифр).")
+    if not isinstance(message_id, int) or isinstance(message_id, bool) or message_id <= 0:
+        raise VkError("ВК: нет номера сообщения.")
+    if not text:
+        raise VkError("ВК: пустое сообщение.")
+    if len(text) > VK_LIMIT:
+        raise VkError("ВК: текст длиннее %d знаков." % VK_LIMIT)
+    return _call(EDIT_URL, {"access_token": token, "v": API_VERSION, "peer_id": peer, "message_id": message_id, "message": text}, http)
+
+
+def _call(url: str, fields: dict, http: Transport) -> int:
     body = urllib.parse.urlencode(fields).encode("utf-8")
     try:
-        status, _, raw = http("POST", URL, {"Content-Type": "application/x-www-form-urlencoded"}, body)
+        status, _, raw = http("POST", url, {"Content-Type": "application/x-www-form-urlencoded"}, body)
     except OSError:
         raise VkError("ВК недоступен: нет связи с сервером.") from None
     if status != 200:
@@ -60,7 +90,9 @@ def send_message(token: str, peer_id, text: str, http: Transport = urllib_transp
         raise VkError("ВК вернул непонятный ответ.")
     if "error" in data:
         error = data["error"] if isinstance(data["error"], dict) else {}
-        raise VkError(REFUSED + " (код %s): %s" % (str(error.get("error_code", "?"))[:6], str(error.get("error_msg", ""))[:120]))
+        code = error.get("error_code")
+        raise VkError(REFUSED + " (код %s): %s" % (str(code if code is not None else "?")[:6], str(error.get("error_msg", ""))[:120]),
+                      code=code if isinstance(code, int) and not isinstance(code, bool) else None)
     if not isinstance(data.get("response"), int):
         raise VkError("ВК вернул непонятный ответ.")
     return data["response"]
@@ -78,3 +110,16 @@ def sender_for(conn, box: Optional[SecretBox], http: Transport = urllib_transpor
     if not token:
         return None
     return lambda peer_id, text, random_id=None, keyboard=None: send_message(token, peer_id, text, http=http, random_id=random_id, keyboard=keyboard)
+
+
+def editor_for(conn, box: Optional[SecretBox], http: Transport = urllib_transport) -> Optional[Callable[[str, int, str], int]]:
+    """A function (peer_id, message_id, text) that edits a message of the community (edit_message), or None as sender_for."""
+    if box is None:
+        return None
+    try:
+        token = connections.get_secret(conn, box, "vk", 0, "token")
+    except SecretKeyError:
+        return None
+    if not token:
+        return None
+    return lambda peer_id, message_id, text: edit_message(token, peer_id, message_id, text, http=http)

@@ -143,7 +143,7 @@ def test_e3_one_act_for_several_orders_of_one_point(tmp_path, office_clock):
     app, owner, conn, pid, card = setup(tmp_path)
     assert card == 1
     ids = two_orders(conn, pid)
-    page = owner.get("/oth").get_data(as_text=True)
+    page = owner.get("/oth?tab=agree").get_data(as_text=True)                          # the orders on the agreement: their tab (2026-11-22)
     assert all(page.count('data-act-order="%d"' % i) == 1 for i in ids) and 'id="oth-act-orders"' in page
     assert act_post(owner, ids).status_code == 302
     assert [order_oth.return_plan(conn, i)["return_date"] for i in ids] == [ACT_DAY, ACT_DAY]
@@ -365,10 +365,12 @@ def test_a_phone_of_375_px_has_no_horizontal_scroll(tmp_path, clock, new_view):
                 ctx = b.new_context(viewport={"width": 375, "height": 800})
                 ctx.add_cookies([{"name": "session", "value": cookie, "domain": "127.0.0.1", "path": "/"}])
                 page = ctx.new_page()
-                for when, tab in ((DAY + "T09:05:00", "return"), ("2026-10-16T11:00:00", "agree")):
-                    clock["now"] = when
-                    page.goto("http://127.0.0.1:%d/my-point?tab=%s" % (server.server_port, tab))
+                for when, tab in ((DAY + "T09:05:00", ""), (DAY + "T09:05:00", "return"), ("2026-10-16T11:00:00", "agree")):
+                    clock["now"] = when                                            # «Сегодня есть возвраты»: the page as it opens (2026-11-21)
+                    page.goto("http://127.0.0.1:%d/my-point%s" % (server.server_port, "?tab=%s" % tab if tab else ""))
                     if tab == "return":
+                        assert page.locator("[data-return]").first.is_visible()
+                    elif not tab:
                         assert page.locator("[data-not-taken-next]").is_visible()
                     else:
                         assert page.locator('[data-oth-buyer="%d"] button' % more).is_visible()

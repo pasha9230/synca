@@ -1308,7 +1308,7 @@ def test_the_link_is_full_when_the_base_is_set(tmp_path):
 def test_the_page_shows_the_day_it_came_to_oth_on_a_return_row(tmp_path):
     app, client, tok, conn, cid = _on_oth_page(tmp_path)
     orders.move_card(conn, cid, _stage(conn, orders.RETURN_AGREE), "2026-10-27T10:00:00", "o")
-    page = client.get("/oth").get_data(as_text=True)
+    page = client.get("/oth?tab=agree").get_data(as_text=True)                         # «На согласовании» (the owner 2026-11-22)
     assert re.search(r"<td data-oth-since>20\.10(\.2026)?<", page)
 
 

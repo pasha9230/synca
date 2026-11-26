@@ -247,7 +247,7 @@ OPEN = frozenset({
 SECTION_OF = {}
 for _section, _endpoints in {
     "home": ("index", "analytics_page"),
-    "orders": ("orders_page", "order_card_page", "order_oth_back", "order_storage_back", "order_arrived_message", "order_arrived_told", "order_merge_page", "order_merge", "order_unmerge", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_ad_position", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
+    "orders": ("orders_page", "order_card_page", "order_oth_back", "order_storage_back", "order_arrived_message", "order_arrived_told", "order_merge_page", "order_merge", "order_unmerge", "order_chain_link", "order_chain_unlink", "order_again", "client_new_order", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_ad_position", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_autosave", "order_point_sale", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
@@ -310,7 +310,7 @@ for _section, _endpoints in {
              "tour_done", "tour_again",                 # «Обзор» (panel/tour.py): one's own mark «пройден», every role
              "whatsnew_page",                           # «Что нового» (routes_whatsnew): every role, its own items
              "tasks_feed"),                             # the sound of one's own tasks «Позвонить…» (order_call.sounds): read-only
-    "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
+    "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_income", "mypoint_income_request", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                 "mypoint_not_taken",                    # «Водитель не забрал» of «Сегодня возврат!» (oth_point_return, 2026-11-12)
                 "mypoint_oth_sale"),                    # the window of «Продать» of a record on «На ОТХ» (oth_point_sale, ТЗ part D)
     "shop": ("shop_page", "shop_photo",         # «Каталог для клиента»: the client's only (its photos through our server)
@@ -351,6 +351,15 @@ NEEDS.update(order_autosend_add="send", order_autosend_update="send", order_auto
 NEEDS.update(order_receipt_send="send", order_receipt_file="money", orders_receipt_settings_save="money")   # «Товарный чек»
 # «Собрать фид сейчас» (feed_now, 2026-11-03): the owner and the partner (the lead's task) — exactly those who have «orders» to change and
 # the right «supplier»; the partner has no «publish» and only looks at the catalog
+# «Пункты выдачи» (ТЗ 95, routes_point_payouts): the ledger is the money's (analytics); «Рассчитан» writes: «orders» with the money right
+SECTION_OF.update(points_payouts_page="analytics", points_payouts_settle="orders", points_payouts_unsettle="orders", points_payouts_adjust="orders",
+                  points_payouts_request_close="orders", points_payouts_bulk="orders", order_arrival_back="orders")
+NEEDS.update(points_payouts_settle="money", points_payouts_unsettle="money", points_payouts_adjust="money", points_payouts_request_close="money",
+             points_payouts_bulk="money", order_arrival_back="money")
+# «Уведомления точек» and «Оповещение» (routes_point_notify, the owner 2026-11-25): the point its own (POINT_PAGES); the office looks and
+# switches on /points/notify («Заказы»: «смотреть» to look, «менять» to switch — the observer looks only)
+SECTION_OF.update(mypoint_notify="mypoint", mypoint_notify_ask="mypoint", mypoint_notify_answer="mypoint", mypoint_notices="mypoint",
+                  mypoint_notice_task="mypoint", points_notify="orders")
 SECTION_OF.update(feed_update_now="orders")
 NEEDS.update(feed_update_now="supplier")
 # «На возврат» of a position on the page «На ОТХ» (the owner 2026-11-07): the owner and the partner, as «Согласовано с поставщиком»; the page itself
@@ -364,6 +373,8 @@ NEEDS.update(oth_return_act_upload="supplier", oth_return_act_delete="supplier")
 # one act for several orders of a point (oth_point_return.act_for_orders, E3 of 2026-11-12): the same people, as «Согласовано» and the act
 SECTION_OF.update(oth_return_act_orders="orders")
 NEEDS.update(oth_return_act_orders="supplier")
+SECTION_OF.update(oth_sent_back="orders")                     # «Вернули поставщику» of /oth: as the act of several orders (2026-11-22)
+NEEDS.update(oth_sent_back="supplier")
 # «Изменить цену просмотра» of «Аналитика рекламы» (ads_bid_set, the owner 2026-11-13): the owner and the partner. The window is the
 # analytics' (the money right); the writes are in «orders» with the money right, as the partner changes nothing in «analytics»; each view
 # checks the role itself as well (routes_ads_bid)
@@ -388,7 +399,11 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "mypoint_return_act",                         # «Скачать акт» of a return of its own point (2026-11-12)
                          "mypoint_not_taken",                          # «Водитель не забрал» of its own «Сегодня возврат!» (2026-11-12)
                          "mypoint_oth_sale",                           # the window of «Продать» of its own record on «На ОТХ» (ТЗ part D)
+                         "mypoint_income",                             # «Доход»: its own sums, while the owner's switch is on (ТЗ 80)
+                         "mypoint_income_request",                     # «Вычли с кассы и получили бонусы»: a request to the office (ТЗ 95)
                          "order_label_file",                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
+                         "mypoint_notify", "mypoint_notify_ask", "mypoint_notify_answer",   # its own notifications (2026-11-25)
+                         "mypoint_notices", "mypoint_notice_task",     # «Оповещение»: its week, return, the office's tasks (2026-11-25)
                          "whatsnew_page"}                              # «Что нового»: the point's items
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)
 # the client (a buyer): the own catalog and the own password, nothing else — not the search of the top bar either (its section is «self»)

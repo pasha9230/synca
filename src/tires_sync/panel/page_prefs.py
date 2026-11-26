@@ -33,7 +33,8 @@ PAGES = {
     "calls_page": ("days missed q account", "", "account"),
     "mappings": ("q b a c", "", ""),
     "photos_review": ("tab show", "tab", ""),
-    "clients_page": ("q tag", "", "tag"),
+    "clients_page": ("q tag src nm ord dk df dt", "dk", "tag src nm ord dk df dt"),     # ТЗ №79: the filters of the office only; the page
+                                                                                     # number is never kept (from the menu: the first page)
     "mypoint_page": ("tab q p", "tab", "p"),
     "shop_page": ("size q s t wh b xb o r p", "o r p", ""),
     "new_positions": ("days", "", ""),
@@ -44,6 +45,14 @@ PAGES = {
 TABS = {"settings": (("settings_page", "settings_brands_page", "settings_exclusions_page"), ("settings_brand_card",))}
 VALUE_MAX = 200
 SEARCH = ("q",)          # the text of a search is never kept (the owner 2026-10-30): the rest of the choice is, as before
+# a value of a page's key that is no more (a saved choice, an old bookmark): {endpoint: {key: {old value: new value ("" = the page's default)}}};
+# the saved choice reads the new value, nothing is rewritten. «Чаты» (ТЗ №93): «Не требуют ответа» is gone, routes_chats.OLD_FILTERS.
+RENAMED = {"chats_page": {"f": {"noreply": ""}}}
+
+
+def _renamed(endpoint: str, key: str, values: list) -> list:
+    old = RENAMED.get(endpoint, {}).get(key, {})
+    return [v for v in (old.get(v, v) if isinstance(v, str) else v for v in values) if v != ""]
 
 
 def _key(endpoint: str) -> str:
@@ -73,7 +82,7 @@ def _chosen(endpoint: str, role: str) -> dict:
     for key in _keys(endpoint, role):
         if key in SEARCH:
             continue
-        values = [v[:VALUE_MAX] for v in request.args.getlist(key) if v.strip()][:50]
+        values = _renamed(endpoint, key, [v[:VALUE_MAX] for v in request.args.getlist(key) if v.strip()][:50])
         if values:
             out[key] = values
     return out
@@ -151,7 +160,10 @@ def _forget(conn, login: str, endpoint: str) -> None:
 def _saved(conn, login: str, endpoint: str, role: str) -> dict:
     saved = user_prefs.get(conn, login, _key(endpoint), {})
     keys = _keys(endpoint, role)
-    return {k: v for k, v in saved.items() if k in keys and k not in SEARCH and isinstance(v, list)} if isinstance(saved, dict) else {}
+    if not isinstance(saved, dict):
+        return {}
+    kept = {k: _renamed(endpoint, k, v) for k, v in saved.items() if k in keys and k not in SEARCH and isinstance(v, list)}
+    return {k: v for k, v in kept.items() if v}
 
 
 def _saved_url(conn, login: str, endpoint: str, role: str) -> str:

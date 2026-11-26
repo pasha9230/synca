@@ -64,11 +64,12 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 
 /* the plaque of the act МХ-3 (over every tab while tyres wait for the supplier) */
 .p2w .mp-returns{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
-.p2-mx3{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px 12px;padding:12px;border:1px solid var(--p2-warn-border);
-  background:var(--p2-warn-bg);border-radius:var(--p2-r)}
+.p2-mx3{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px 12px;padding:12px;border:1px solid var(--gray-200);
+  background:var(--gray-0);border-radius:var(--p2-r)}
 .p2-mx3 .i{width:20px;height:20px;color:var(--p2-warn)}
 .p2-mx3 .p2-sub{display:block}
 .p2-mx3 form{margin:0}
+.p2-mx3>.mp-not-taken{grid-column:1/-1;min-width:0}
 
 /* the tabs */
 .p2w .mp-tabs{display:flex;gap:4px;border-bottom:1px solid var(--p2-border-2);margin-bottom:12px;overflow-x:auto;scrollbar-width:none}
@@ -279,3 +280,30 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .mp-act-mark--2{--act:#6639BA;--act-bg:#FBEFFF;--act-border:#D8B9FF}
 .mp-act-mark--3{--act:#0B6B5F;--act-bg:#D9F7F0;--act-border:#8ADBCB}
 .mp-act-mark--4{--act:#953800;--act-bg:#FFF1E5;--act-border:#FFB77C}
+/* «Сегодня есть возвраты» (2026-11-21) */
+.p2-mx3>.mp-today-acts{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;min-width:0}.mp-today-acts>*{flex:1 1 160px;min-width:0}
+/* «Комментарий» of the order's window in the card (the owner 2026-11-25): as typed, its lines kept */
+.p2w .mp-comment{white-space:pre-line;overflow-wrap:anywhere;color:var(--p2-text-2);font-size:13px;margin-top:4px}
+.p2w .mp-comment-l{display:block;color:var(--p2-text-3);font-weight:600}
+
+/* «Доход» of a point (the owner 2026-11-25): the search and «Фильтры» in sight, the rest under «Фильтры» (as «Заказы» of the office);
+   the text of the section in two lines with «показать полностью»; the banner of «Переданные клиенты» */
+.inc-filters{display:flex;flex-direction:column;gap:var(--s-2);margin:var(--s-3) 0}
+.inc-f-row{display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:flex-end}
+.inc-f-wide{flex:1 1 14rem;max-width:420px}
+.inc-f-more>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center}
+.inc-f-more>summary::-webkit-details-marker{display:none}
+.inc-f-fields{display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:flex-end;margin-top:var(--s-3)}
+.inc-about{margin:var(--s-3) 0;padding:var(--s-3);border:1px solid var(--gray-200);border-radius:var(--r-lg)}
+.inc-about h3{margin:0 0 var(--s-1)}
+.inc-about p{margin:0 0 var(--s-1)}
+.inc-clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.inc-more-box:checked+.inc-clamp{display:block;-webkit-line-clamp:unset}
+.inc-more-hide{display:none}
+.inc-more-box:checked~.inc-more-btn .inc-more-show{display:none}
+.inc-more-box:checked~.inc-more-btn .inc-more-hide{display:inline}
+.inc-banner{display:flex;gap:var(--s-3);align-items:flex-start;margin:var(--s-3) 0;padding:var(--s-4);border-radius:var(--r-lg);
+  border:1px solid var(--brand-200, var(--gray-200));background:var(--brand-50, var(--gray-50))}
+.inc-banner-ico{font-size:2.5rem;line-height:1}
+.inc-banner h2,.inc-banner h3{margin:0 0 var(--s-1)}
+.inc-banner p{margin:0 0 var(--s-1)}

@@ -125,11 +125,13 @@ def test_the_workplace_cards_tabs_and_questions(w):
     # «В другой город»: «Передал курьеру ТК» and the labels, no «Выдал»
     assert "/my-point/%d/shipped" % ids["far"] in here and "/my-point/%d/issued\"" % ids["far"] not in here
     assert 'href="/orders/%d/labels/' % ids["far"] in here and "data-intercity-tag" in here
-    # the act МХ-3 over every tab
-    assert 'data-return="%d"' % ids["ret"] in here and "/my-point/%d/act_signed" % ids["ret"] in here
+    # the act МХ-3: in «На возврат» only (the owner 2026-11-21)
+    assert 'data-return="%d"' % ids["ret"] not in here
+    ret = w["point"].get("/my-point?tab=return").get_data(as_text=True)
+    assert 'data-return="%d"' % ids["ret"] in ret and "/my-point/%d/act_signed" % ids["ret"] in ret
     oth = w["point"].get("/my-point?tab=oth").get_data(as_text=True)                  # an «asked» left on «На ОТХ» by the old rule still works
     assert 'data-oth-question="%d"' % ids["oth"] in oth and "/my-point/%d/oth_issued" % ids["oth"] in oth
-    assert 'data-return="%d"' % ids["ret"] in oth
+    assert 'data-return="%d"' % ids["ret"] not in oth
     moving = w["point"].get("/my-point?tab=moving").get_data(as_text=True)
     assert "/my-point/%d/arrived" % ids["moving"] in moving
 
@@ -137,7 +139,7 @@ def test_the_workplace_cards_tabs_and_questions(w):
 def test_the_tour_of_the_point_finds_its_places_on_the_new_workplace(w):
     flag(w["conn"], "all")
     html = w["point"].get("/my-point").get_data(as_text=True)
-    for mark in ('class="mp-tabs"', 'class="mp-search', 'data-tour="handoff"', 'class="mp-block"', 'class="mp-card p2-card', 'class="mp-returns"'):
+    for mark in ('class="mp-tabs"', 'class="mp-search', 'data-tour="handoff"', 'class="mp-block"', 'class="mp-card p2-card'):
         assert mark in html, mark
     assert re.search(r'<section class="mp-block"[^>]*><h2[^>]*>.*?</h2>\s*<article class="mp-card', html, re.S)   # .mp-block > .mp-card:first-of-type
 
@@ -185,7 +187,7 @@ def test_hand_over_and_cancel_from_the_new_page(w):
     pt = w["point"]
     page = pt.get("/my-point/handed").get_data(as_text=True)
     assert is_new(page) and 'id="handoff"' in page
-    assert page.index('id="mp-handed-h"') < page.index('class="mp-handoff-form"')         # the list first, the form under it (the owner 2026-10-30)
+    assert page.index('class="mp-handoff-form"') < page.index('id="mp-handed-h"')         # the form, the list under it (the owner 2026-11-25, ТЗ F)
     tok = re.search(r'name="token" value="([0-9a-f]+)"', page).group(1)
     r = post(pt, "/my-point/handed", "tok", token=tok, phone="+7 900 555 11 22", need="4 шт")
     assert r.status_code == 302
@@ -260,7 +262,7 @@ def test_the_more_menu_of_the_phone_keeps_the_alerts_page(w):
     flag(w["conn"], "all")
     html = w["point"].get("/my-point").get_data(as_text=True)
     more = html[html.index('class="p2-more-list"'):].split("</details>")[0]
-    assert 'href="/alerts"' in more and 'href="/my-point?notes=1"' in more and 'action="/logout"' in more
+    assert 'href="/alerts"' in more and 'href="/my-point/notices"' in more and 'action="/logout"' in more     # «Оповещение» (2026-11-25)
     assert 'href="/orders"' not in more
 
 

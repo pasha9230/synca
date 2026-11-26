@@ -19,12 +19,15 @@ from __future__ import annotations
 
 import re
 import secrets
+import sqlite3
 from datetime import date, timedelta
 
 from flask import abort, current_app, flash, g, jsonify, redirect, render_template, request
 
-from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_point_sale, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, users
-from .common import author, current_user, get_conn, login_required, own_point
+from .. import point_notify
+from .. import order_intercity, order_manager as mgr, order_merge, order_oth, oth_point_return, oth_point_sale, oth_return_act, oth_sale, point_log, search, order_points as points, order_report, order_reserve as reserve, order_templates as templates, orders, point_payouts, users
+from . import income_view
+from .common import author, current_user, get_conn, has_right, login_required, own_point
 from .routes_design import point_page
 from .routes_orders import local_iso, local_now
 
@@ -342,6 +345,45 @@ def point_lines(card: dict) -> list:
     return lines
 
 
+def point_comment(conn, card: dict) -> str:
+    """«Комментарий» of the order's window as the point reads it in the card (the owner 2026-11-25): the person's text only — not the
+    automatic part a new order gets from its ad or call (order_notes.person_text), never an Avito account's name; empty: no line."""
+    from .. import order_notes
+    text = order_notes.person_text(card.get("comment") or "")
+    if not text.strip():
+        return ""
+    names = g.get("point_account_names")
+    if names is None:                                                  # the names of the accounts: read once a request
+        names = g.point_account_names = orders.account_names(conn)
+    return orders.without_account_names(conn, text, names).strip()
+
+
+def _issued_comments(conn, point_id, today: str) -> list:
+    """What «Выдано» shows of the order's window that the cards of the other tabs do not carry: [order, «Комментарий» as the point reads it] of
+    the point's orders on «Выполнено» in the last ISSUED_DAYS (one query; a few more than the tab lists — the point's own sales — only reload
+    the page once more, never show anything)."""
+    since = (date.fromisoformat(today) - timedelta(days=ISSUED_DAYS)).isoformat()
+    rows = conn.execute("SELECT c.id, c.comment FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.point_id = ? AND s.code = 'done' "
+                        "AND c.entered_at >= ? ORDER BY c.id", (point_id, since)).fetchall()
+    return [[r[0], point_comment(conn, {"comment": r[1]})] for r in rows]
+
+
+def point_rev(conn, cards: list, point_id=None, today: str = "") -> str:
+    """A print of what «Рабочее место» shows of the point's orders (`cards`: already read, _cards + _oth_cards — on the way, at the point,
+    on «На ОТХ» and «На возврат»): the office changes the positions, the client, the dates, the numbers, the comment or moves an order —
+    the print is new and the open page reloads itself (notify.js, the owner 2026-11-25). Read from the orders themselves, the one source;
+    no money of the office in it."""
+    import hashlib
+    parts = []
+    for card in sorted(cards, key=lambda c: c["id"]):
+        parts.append([card["id"], card["stage_id"], card["entered_at"], card["client_name"], card["client_phone"],
+                      card["delivery_date"], card["delivery_time"], card["reserve_until"], card["transfer_number"], card["webmim_number"],
+                      point_comment(conn, card), [[i["id"], i["name"], i.get("code"), i["goods_id"], i["qty"], i["sale_unit"]] for i in card["items"]]])
+    if point_id is not None and today:                                   # the comment of «Выдано» (the closed orders are not in `cards`)
+        parts.append(_issued_comments(conn, point_id, today))
+    return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:16]
+
+
 def _issued(conn, point_id, today: str) -> list:
     """«Выдано» (the owner 2026-11-09): the orders of the point closed by a hand-out in the last ISSUED_DAYS, newest first — on
     «Выполнено», come there from «На точке» (or from the way: «Выдал» skips «Товар на точке», order_manager.ISSUE_FROM) by the point's
@@ -368,7 +410,8 @@ def _issued(conn, point_id, today: str) -> list:
         if came is None or came.group(1) not in sources:
             continue
         found.append({"card": card, "label": mgr.label(card), "at": card["entered_at"], "who": users.person_name(conn, move[0], current_app.config["AUTHOR"]),
-                      "undo": point_log.undoable(conn, card, point_id)})
+                      "undo": point_log.undoable(conn, card, point_id),
+                      "comment": point_comment(conn, card)})          # «Комментарий» of the order's window in «Выдано» too (2026-11-25)
     return found
 
 
@@ -450,11 +493,21 @@ def mark_shared_acts(rows: list) -> None:
 def _returns(conn, point_id) -> list:
     """«Возврат поставщику»: the orders of the point on «На ОТХ» agreed for the return, with a press token each."""
     today = local_iso()[:10]
-    return [{"card": r["card"], "label": mgr.label(r["card"]), "date": _short_date(r["plan"]["return_date"]),
+    return [{"card": r["card"], "label": mgr.label(r["card"]), "lines": point_lines(r["card"]),
+             "return_date": r["plan"]["return_date"], "date": _short_date(r["plan"]["return_date"]),
              "return_by": _full_date(r["plan"]["return_date"]),                 # «Вернуть дд.мм.гггг» by the number (the task of 2026-11-12)
              "late": r["plan"]["return_date"] < today, "token": secrets.token_hex(12), "act_order": order_oth.act_orders(conn, r["card"]["id"]),
-             "act_file": oth_return_act.find(conn, point_id, r["plan"]["return_date"])}      # «Скачать акт» (the owner 2026-11-12)
+             "act_file": oth_return_act.find(conn, point_id, r["plan"]["return_date"]),      # «Скачать акт» (the owner 2026-11-12)
+             "comment": point_comment(conn, r["card"])}                         # «Комментарий» of the order's window (2026-11-25)
             for r in order_oth.to_return(conn, point_id)]
+
+
+def _return_groups(rows: list) -> list:
+    groups = {}
+    for row in rows:
+        group = groups.setdefault(row["return_date"], {"first": row, "rows": []})
+        group["rows"].append(row)
+    return list(groups.values())
 
 
 def nav_counts(conn, point_id) -> dict:
@@ -483,6 +536,16 @@ def register(app) -> None:
 
     app.jinja_env.globals["point_nav"] = point_nav
 
+    def point_income_on() -> bool:
+        """«Доход» in the menu of a point: the manager of a point (or one working as it) while the owner's switch is on (ТЗ 80)."""
+        if own_point() is None:
+            return False
+        if "point_income_on" not in g:
+            g.point_income_on = order_report.income_shown(get_conn())
+        return g.point_income_on
+
+    app.jinja_env.globals["point_income_on"] = point_income_on
+
     def _the_point(conn):
         point_id = _point_id(conn)
         try:
@@ -506,11 +569,53 @@ def register(app) -> None:
                 return done
             error, form = done
         since = (date.fromisoformat(local_iso()[:10]) - timedelta(days=HANDED_DAYS)).isoformat()
+        paid = {}                                                               # order → the bonus of a client handed over (ТЗ 80): the report's
+        if point_id is not None and _income_open(conn):
+            paid = {e["order"]: e["handoff"] for e in order_report.point_income(conn, since, local_iso()[:10], point_id)["orders"] if e["handoff"]}
+        # the rates of the banner: from BONUS_FROM on, the day the bonuses start (the owner 2026-11-25), so «+200 ₽» is said before it too
+        rates = order_report.point_rates_now(conn, point_id, max(local_iso()[:10], order_report.BONUS_FROM)) if point_id is not None else {}
         return render_template(point_page("mypoint_handed.html"), point=point, choose=own_point() is None, user=current_user(),
                                points=points.list_points(conn) if own_point() is None else [],
                                handed=mgr.point_handoffs(conn, point_id, since) if point_id is not None else [], seasons=mgr.SEASONS,
-                               bonus=order_report.rate_on(order_report.list_rates(conn), "handoff_fee", local_iso()[:10]),
+                               bonus=rates["handoff_fee"] if rates else 0, paid=paid, rates=rates, bonus_from=order_report.BONUS_FROM,
                                handoff_token=secrets.token_hex(12), handoff_error=error, handoff_form=form), 400 if error else 200
+
+    def _income_open(conn) -> bool:
+        """The sums of «Доход» are shown: to a point while the owner's switch is on; to the office with the money right (the owner checks them)."""
+        return order_report.income_shown(conn) if own_point() is not None else has_right("money")
+
+    @app.route("/my-point/income")
+    @login_required
+    def mypoint_income():
+        """«Доход» of a point (ТЗ 80, 91, 92, 95): three tabs — «Доход» (the fee of the issued orders), «Бонусы» (the clients it handed over and
+        the tyres it sold from «На ОТХ»), «KPI» (the month's cycles) — and on top the active debt (what the office has not marked «Рассчитан»)
+        with «Вычли с кассы и получили бонусы». All from order_report.build (the count of the report and of the analytics) through
+        point_payouts. Its own point only (own_point); the rates and the sums only, nothing of the purchase, the profit or the prices; the
+        switch off: the point gets 404, as if the page were not there."""
+        conn = get_conn()
+        if not _income_open(conn):
+            abort(404 if own_point() is not None else 403)
+        point_id, point = _the_point(conn)
+        view = income_view.build(conn, point_id, request.args, local_iso()[:10]) if point_id is not None else income_view.empty(request.args, local_iso()[:10])
+        return render_template(point_page("mypoint_income.html"), point=point, choose=own_point() is None,
+                               points=points.list_points(conn) if own_point() is None else [], v=view, income=view.get("income", {"orders": []}),
+                               can_request=own_point() is not None)
+
+    @app.route("/my-point/income/request", methods=["POST"])
+    @login_required
+    def mypoint_income_request():
+        """«Вычли с кассы и получили бонусы» (ТЗ 95): a request to the office (a task to the admin); the sum stays until «Рассчитан»."""
+        conn = get_conn()
+        if own_point() is None or not order_report.income_shown(conn):
+            abort(404)
+        try:
+            done = point_payouts.request(conn, own_point(), local_iso()[:10], local_iso(), author())
+            conn.commit()
+            flash("Запрос отправлен в офис: %s. Сумма уйдёт из «К выплате», когда офис отметит «Рассчитан»." % income_view.rub(done["amount"]))
+        except point_payouts.PayoutError as err:
+            conn.rollback()
+            flash(str(err))
+        return redirect("/my-point/income")
 
     @app.route("/my-point", methods=["GET", "POST"])
     @login_required
@@ -525,7 +630,8 @@ def register(app) -> None:
         today = now[:10]
         cards = []
         tomorrow = (date.fromisoformat(today) + timedelta(days=1)).isoformat()
-        for card in ((_cards(conn, point_id) + _oth_cards(conn, point_id)) if point_id is not None else []):
+        loaded = (_cards(conn, point_id) + _oth_cards(conn, point_id)) if point_id is not None else []
+        for card in loaded:
             until = (card["reserve_until"] or "") if card["stage"]["code"] == "at_point" else ""     # «На ОТХ» has no term (2026-10-30)
             delivery = card["delivery_date"] or ""
             code = card["stage"]["code"]
@@ -555,6 +661,7 @@ def register(app) -> None:
                           "labels": order_intercity.labels(conn, card["id"]) if order_intercity.on(card) else [],
                           # «Итого» (the owner 2026-11-07): the order window's own sum of the positions already read; «На ОТХ»: no client, no sum
                           "sale": orders.totals(card["items"])["sale"] if card["items"] and code not in order_oth.RETURNING else None,
+                          "comment": point_comment(conn, card),     # «Комментарий» of the order's window, only when typed (2026-11-25)
                           "issue_lines": issue_lines(card), "undo": point_log.undoable(conn, card, point_id)})     # «Отменить» in the card (2026-11-09)
         labels = orders.origin_labels(conn, point_id, [row["card"]["id"] for row in cards]) if own_point() is not None else {}
         for row in cards:
@@ -611,15 +718,20 @@ def register(app) -> None:
                            key=lambda r: not (r["asked"] or r["oth_asked"]))
             issued = [r for r in issued if r["card"]["id"] in ids]
             returns = [r for r in returns if r["card"]["id"] in ids]
-        return render_template(point_page("mypoint.html"), point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, default_tab=DEFAULT_TAB, hot=hot, issued=issued,
+        landing = not request.args.get("tab") and found is None and not alerts_open     # the page as it opens: «Сегодня есть возвраты» (2026-11-21)
+        groups = _return_groups(returns)
+        today_group = next((g for g in groups if today_ret and g["first"]["return_date"] == today_ret["date"]), None)
+        return render_template(point_page("mypoint.html"), landing=landing, today_group=today_group, point=point, cards=shown, counts=counts, tab=tab, tabs=TABS, tab_notes=TAB_NOTES, default_tab=DEFAULT_TAB, hot=hot, issued=issued,
                                alerts=alerts if alerts_open else [], alerts_new=alerts_new, alerts_open=alerts_open, choose=own_point() is None,
                                points=points.list_points(conn) if own_point() is None else [], user=current_user(),
                                stages=_stages(conn, point_id) if point_id is not None else [], query=query,
                                found=found,
-                               returns=returns,
+                               returns=returns, return_groups=groups,
                                return_day=today_ret, return_day_mark=order_oth.RETURN_DAY_MARK, not_taken_next=oth_point_return.NOT_TAKEN_NEXT,
                                buyer_ask=oth_point_return.BUYER_ASK, comment_max=oth_point_return.COMMENT_MAX,
-                               undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL)
+                               undo_hint=point_log.UNDO_HINT, intercity_hint=order_intercity.HINT, took_label=reserve.TOOK_LABEL,
+                               notify=point_notify.state(conn, point_id) if point_id is not None else None,     # «Уведомления точек» (2026-11-25)
+                               rev=point_rev(conn, loaded, point_id, today) if own_point() is not None and point_id is not None else "")    # the feed's own point only
 
     def _undo(card_id):
         """«Отменить» a press that moved the order (point_log.undo; the address /my-point/<order>/undo, the endpoint of the presses): the
@@ -650,6 +762,53 @@ def register(app) -> None:
                                p=point_id if own_point() is None else None, back=back,
                                tab=(parse_qs(urlsplit(back).query).get("tab") or [""])[0])
 
+    def _sign_return_group(conn, point_id, back, card_id, token):
+        raw_ids = request.form.getlist("return_order")
+        if any(not re.fullmatch(r"[1-9][0-9]{0,17}", value) for value in raw_ids):
+            abort(400)
+        ids = list(dict.fromkeys(map(int, raw_ids)))
+        if card_id not in ids:
+            abort(400)
+        selected = {order_id: _own_card(conn, order_id, point_id) for order_id in ids}
+        return_date = request.form.get("return_date")
+        who, now = author(), local_iso()
+        failures, signed, last_answer = [], 0, ""
+        for order_id in ids:
+            # Lock before rechecking the date and the point. Reusing the single-order
+            # transaction preserves the refund, history and undo for each order.
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                card = orders.get_card(conn, order_id)
+                plan = order_oth.return_plan(conn, order_id)
+                if card["point_id"] != point_id or not plan or plan["return_date"] != return_date:
+                    failures.append(mgr.label(selected[order_id]))
+                    continue
+                claimed = conn.execute(
+                    "INSERT OR IGNORE INTO order_command_log (message_id, at, sender, word, order_id, outcome) VALUES (?,?,?,?,?,?)",
+                    ("page-%s-%d" % (token, order_id), now, "панель: %s" % who, ACTIONS["act_signed"], order_id, "акт подписан"))
+                if not claimed.rowcount:
+                    continue
+                outcome, last_answer, ok = act(conn, card, "act_signed", who, now, None, None)
+                if not ok:
+                    failures.append(mgr.label(card))
+                elif not outcome.startswith("уже"):
+                    signed += 1
+                    point_log.record(conn, now, who, point_id, "act_signed", order_id, outcome)
+                    point_log.remember(conn, card, "act_signed", point_id, who, now)
+            except (orders.OrderError, sqlite3.Error):
+                current_app.logger.exception("«Рабочее место»: bulk return failed for order %s", order_id)
+                failures.append(mgr.label(selected[order_id]))
+            finally:
+                if conn.in_transaction:
+                    conn.rollback()
+        if signed:
+            flash(last_answer if len(ids) == 1 else "Передача поставщику отмечена. Заказов: %d." % signed, "info")
+        if failures:
+            flash("Не отмечены заказы № %s. Проверьте статус или дату возврата." % ", № ".join(failures), "error")
+        elif not signed:
+            flash("Передача по этим заказам уже отмечена.", "info")
+        return redirect(back)
+
     @app.route("/my-point/<int:card_id>/<action>", methods=["POST"])
     @login_required
     def mypoint_action(card_id, action):
@@ -675,6 +834,8 @@ def register(app) -> None:
         if action == "act_signed" and request.form.get("handover") != "yes":    # the owner 2026-11-04: the second step of the button, checked here
             flash("Передача не отмечена: подтвердите передачу поставщику (водителю) кнопкой «Да, передал».", "error")
             return redirect(back)
+        if action == "act_signed" and request.form.getlist("return_order"):
+            return _sign_return_group(conn, point_id, back, card_id, token)
         if action == "oth_sold" and card.get("oth_record"):                    # a record of storage is sold by the window (ТЗ part D)
             return redirect(_sale_url(card_id, point_id, back))
         if action in CONFIRM and request.form.get("confirm") != "yes" and not (order_intercity.on(card) and action not in ("oth_issued", "oth_sold")):
@@ -735,7 +896,7 @@ def register(app) -> None:
             return redirect(back)
         try:
             sold = oth_point_sale.sell(conn, card["id"], pieces, form.get("name"), form.get("phone"), form.get("number"), form.get("transfer"),
-                                       form.get("anonymous") == "1", now, author())
+                                       form.get("anonymous") == "1", now, author(), seller=_acting_seller())
             error = ""
         except orders.OrderError as err:
             error = str(err)
@@ -753,6 +914,11 @@ def register(app) -> None:
         point_log.record(conn, now, author(), point_id, "oth_sold", card["id"], outcome)     # «История точки»
         flash("Заказ №%s — продано с ОТХ: заказ №%d на этапе «%s»." % (mgr.label(card), sold, orders.stage_name(conn, "done")), "info")
         return redirect(back)
+
+    def _acting_seller() -> str:
+        """The owner or the partner working as the point sells as themselves (the owner 2026-11-20); the point's own manager: nobody."""
+        user = current_user()
+        return user["login"] if user.get("as_point") is not None and user["real_role"] in ("owner", "partner") else ""
 
     def _sale_window(card, point_id, back, form, error):
         from urllib.parse import parse_qs, urlsplit
@@ -862,11 +1028,11 @@ def register(app) -> None:
         if point_id is None:
             return jsonify({"who": who, "items": calls})
         from .routes_alerts import HERE, grouped, href, with_orders
-        cards, now = _cards(conn, point_id), local_iso()
+        cards, oth_cards, now = _cards(conn, point_id), _oth_cards(conn, point_id), local_iso()     # read once: the items and the print
         items = [{"key": "question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Клиент забрал заказ № %s?" % mgr.label(card), "text": card["client_name"] or "",
                   "href": HERE} for card in cards if reserve.question_open(conn, card, now)]      # of the stay: a new stay rings again
         items += [{"key": "oth-question-%d-%s" % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")), "title": "Заказ № %s: выдали или на точке?"
-                   % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=%s" % ("oth" if card["stage"]["code"] == "oth" else "return")} for card in _oth_cards(conn, point_id)
+                   % mgr.label(card), "text": "7-й день на ОТХ", "href": "/my-point?tab=%s" % ("oth" if card["stage"]["code"] == "oth" else "return")} for card in oth_cards
                   if order_oth.question_open(conn, card)]
         today = order_oth.return_day(conn, point_id, now)                      # «Сегодня возврат!»: a new key at 09:00, 12:00 and 15:00
         if today and not today["not_taken"]:                                    # «Водитель не забрал» (G): the sound of the date stops
@@ -886,4 +1052,11 @@ def register(app) -> None:
         if own_point() is not None:                                             # the bell of the manager of the point: only theirs (routes_alerts)
             items += [{"key": "alert-%s-%s" % (r["id"], r["more"]), "title": "Чат без заказа" if r.get("chat_row") else "Заказ №%d" % r["order_id"],
                        "text": (r["text"] or "")[:200], "href": href(r)} for r in with_orders(conn, grouped(conn, who))]
-        return jsonify({"who": who, "items": items + calls})
+        answer = {"who": who, "items": items + calls}
+        if own_point() is not None:                                             # the page of the point's own person reloads on a change (point_rev)
+            answer["rev"] = point_rev(conn, cards + oth_cards, point_id, now[:10])
+            # «Уведомления точек» (the owner 2026-11-25): off — no sound nor notification (the page still refreshes); «ask» — the asks
+            # «Разрешите уведомления» left today, the point's own person only (never the owner working as it)
+            on = point_notify.enabled(conn, point_id)
+            answer["notify"] = {"on": on, "ask": point_notify.asks_left(conn, who, now) if on and current_user()["as_point"] is None else 0}
+        return jsonify(answer)

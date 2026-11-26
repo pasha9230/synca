@@ -3,6 +3,8 @@ the calls, a comment), the proposals to join two clients, joining, undoing a joi
 own. Every change is in the journal."""
 from __future__ import annotations
 
+from urllib.parse import parse_qsl, urlencode
+
 from flask import abort, flash, redirect, render_template, request
 
 from .. import clients, connections, order_manager
@@ -10,6 +12,10 @@ from .common import author, can, get_conn, has_right, now_iso, own_point, point_
 from .routes_design import office_page
 
 DUPLICATES_SHOWN = 300                  # the page of the duplicates shows this many pairs at most (the rest after these are joined or waved off)
+
+
+def _url(base: str, pairs) -> str:
+    return base + ("?" + urlencode(pairs) if pairs else "")
 
 
 def register(app) -> None:
@@ -20,8 +26,17 @@ def register(app) -> None:
         if own_point() is not None:                     # the manager of a point: the clients of its own part only, no tags (the owner 2026-10-26)
             return render_template("clients.html", rows=clients.list_clients_for_point(conn, own_point(), point_account(), query), query=query,
                                    tag="", tags=[], narrow=True, PRAGMATIC=clients.PRAGMATIC, HANDED=clients.HANDED)
-        return render_template(office_page("clients.html"), rows=clients.list_clients(conn, query, fold=True, tag=tag), query=query, tag=tag,
-                               tags=clients.all_tags(conn), PRAGMATIC=clients.PRAGMATIC, HANDED=clients.HANDED)
+        f = clients.list_filter(request.args)
+        found = clients.list_page(conn, f)
+        rest = f.pairs(page=False)
+        page_url = lambda n: _url("/clients", rest + ([("p", str(n))] if n > 1 else []))
+        f.page = found["page"]
+        return render_template(office_page("clients.html"), rows=found["rows"], total=found["total"], page=found["page"], pages=found["pages"],
+                               prev_url=page_url(found["page"] - 1) if found["page"] > 1 else "",
+                               next_url=page_url(found["page"] + 1) if found["page"] < found["pages"] else "",
+                               dup_url=_url("/clients/duplicates", f.pairs()), f=f, query=f.query, tag=f.tag, tags=clients.all_tags(conn),
+                               origins=clients.origin_options(conn), NAMED=clients.NAMED, ORDER_COUNTS=clients.ORDER_COUNTS,
+                               DATE_KINDS=clients.DATE_KINDS, PRAGMATIC=clients.PRAGMATIC, HANDED=clients.HANDED)
 
     @app.route("/clients/duplicates")
     def clients_duplicates():
@@ -30,7 +45,9 @@ def register(app) -> None:
         more, pairs = max(0, len(pairs) - DUPLICATES_SHOWN), pairs[:DUPLICATES_SHOWN]
         ids = sorted({p["a"] for p in pairs} | {p["b"] for p in pairs})
         names = dict(conn.execute("SELECT id, name FROM client WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)) if ids else {}
-        return render_template("clients_duplicates.html", pairs=pairs, names=names, more=more)
+        kept = clients.list_filter(request.args).pairs()                # the view of the list it came from: the tab «Клиенты» goes back to it
+        return render_template(office_page("clients_duplicates.html"), pairs=pairs, names=names, more=more, list_qs=urlencode(kept),
+                               list_url=_url("/clients", kept), dup_url=_url("/clients/duplicates", kept))
 
     @app.route("/clients/<int:client_id>")
     def client_page(client_id):
@@ -59,8 +76,9 @@ def register(app) -> None:
                                HANDED=clients.HANDED, GAP=clients.NEW_INQUIRY_GAP_HOURS)
 
     def _back(client_id):
-        if request.form.get("back") == "duplicates":
-            return redirect("/clients/duplicates")
+        if request.form.get("back") == "duplicates":                  # the view of the list is kept, read again (never an address as posted)
+            kept = clients.list_filter(dict(parse_qsl(request.form.get("list", "")[:1000]))).pairs()
+            return redirect(_url("/clients/duplicates", kept))
         return redirect("/clients/%d" % client_id)
 
     @app.route("/clients/<int:client_id>/save", methods=["POST"])

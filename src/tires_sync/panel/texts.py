@@ -23,7 +23,9 @@ def author_label(author: str) -> str:
     return AUTHOR_NAMES.get(author, author)
 
 
-ORDER_RATES = {"point_fee": ("Выплата точке за заказ", "₽"), "owner_share": ("Доля собственника", "%"), "handoff_fee": ("За переданного клиента", "₽")}
+ORDER_RATES = {"point_fee": ("Выплата точке за заказ", "₽"), "owner_share": ("Доля собственника", "%"), "handoff_fee": ("За переданного клиента", "₽"),
+               "oth_sale_fee": ("За шину, проданную с ОТХ", "₽"), "kpi_orders": ("KPI: заказов за месяц", "шт."),
+               "kpi_tyres": ("KPI: шин за месяц", "шт."), "kpi_bonus": ("Премия KPI", "₽")}
 INQUIRY_EVENTS = {"message": "сообщение", "call": "звонок", "handoff": "передача заказа"}
 
 
@@ -138,6 +140,10 @@ def audit_text(entry: dict) -> str:
         return "Цены поставщика: принята новая цена (%d поз.)" % len(d.get("goods") or [])
     if action == "price_guard_keep":
         return "Цены поставщика: оставлена прежняя цена (%d поз.)" % len(d.get("goods") or [])
+    if action == "order_chain_link":
+        return "Заказы связаны в цепочку клиента: %s" % ", ".join("№%s" % i for i in d.get("chain") or [])
+    if action == "order_chain_unlink":
+        return "Заказ №%s отвязан от цепочки клиента" % d.get("order", "?")
     if action == "order_merge":
         return "Заказы %s объединены в заказ №%s" % (", ".join("№%s" % i for i in d.get("orders") or []), d.get("into", "?"))
     if action == "order_unmerge":
@@ -176,6 +182,32 @@ def audit_text(entry: dict) -> str:
         return "Подписи долей в отчёте по заказам: «%s» и «%s»" % (to.get("owner") or "по умолчанию", to.get("partner") or "по умолчанию")
     if action == "order_rate":
         return _order_rate_text(d)
+    if action == "point_rate":
+        text = _order_rate_text(d).replace("Ставка", "Ставка точки №%s" % d.get("point", "?"), 1)
+        return text.replace("→ — ", "→ общая ") if d.get("to") is None else text
+    if action == "point_paid":
+        return "Расчёт с точками: отмечено «Рассчитан» %s поз. на %s ₽" % (d.get("count", "?"), d.get("amount", "?"))
+    if action == "point_paid_cancel":
+        return "Расчёт с точкой №%s отменён: %s (%s ₽ снова к выплате)" % (d.get("point", "?"), d.get("item", "?"), d.get("amount", "?"))
+    if action == "point_adjust":
+        return "Корректировка выплаты точке №%s: %s ₽ — %s" % (d.get("point", "?"), d.get("amount", "?"), d.get("reason") or "без причины")
+    if action == "point_item_fix":
+        return "Начисление точке №%s изменено: %s (%s) → %s ₽ — %s" % (d.get("point", "?"), d.get("item", "?"), d.get("part", "?"),
+                                                                     d.get("amount", "?"), d.get("reason") or "без причины")
+    if action == "point_item_fix_undone":
+        return "Начисление точке №%s: %s снова по расчёту" % (d.get("point", "?"), d.get("item", "?"))
+    if action == "order_no_arrival":
+        return "Заказ №%s: шины физически не приезжали — начисление точке за выдачу снято" % d.get("order", "?")
+    if action == "order_no_arrival_undone":
+        return "Заказ №%s: отметка «шины не приезжали» снята" % d.get("order", "?")
+    if action == "point_paid_request_closed":
+        return "Запрос точки №%s «Вычли с кассы» закрыт офисом" % d.get("point", "?")
+    if action == "point_paid_request":
+        return "Точка №%s: «Вычли с кассы и получили бонусы» — %s ₽, запрос офису" % (d.get("point", "?"), d.get("amount", "?"))
+    if action == "order_source_point":
+        return "Заказ №%s: откуда клиент — точка %s" % (d.get("order", "?"), d.get("name") or "не указана")
+    if action == "point_income_shown":
+        return "Страница «Доход» у точек: %s" % ("показывается" if d.get("on") else "скрыта")
     if action == "inquiry":
         from ..inquiry import STATUSES
         return "Обращение клиента №%s: %s → %s%s" % (d.get("client", "?"), STATUSES.get(d.get("from"), d.get("from") or "—"),

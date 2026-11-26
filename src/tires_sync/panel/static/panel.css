@@ -561,6 +561,9 @@ a.menu-item{text-decoration:none}
 .feed li.is-note{background:var(--warn-50);border:1px solid var(--warn-200)}
 .feed li.is-red{background:var(--err-50);border:1px solid var(--err-200);color:var(--err-700)}
 .feed time{color:var(--gray-500);margin-right:var(--s-2)}
+.feed .feed-clip{white-space:pre-line}
+.feed .feed-clip.is-folded{display:-webkit-box;-webkit-line-clamp:4;line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.feed .feed-more{margin-top:var(--s-1);padding:0;border:0;background:none;color:var(--primary-700);font-size:var(--fs-sm);cursor:pointer;text-decoration:underline}
 @media (max-width:1100px){.ocard-layout{grid-template-columns:1fr}}
 
 .ocard.waiting { box-shadow: inset 4px 0 0 var(--warn-500); }
@@ -649,6 +652,8 @@ a.menu-item{text-decoration:none}
 .suggest .s-meta{font-size:var(--fs-xs);color:var(--gray-500);white-space:nowrap}
 .suggest .s-price{font-weight:600;white-space:nowrap}
 .suggest .s-empty{color:var(--gray-500);cursor:default}
+.suggest li:has(.s-warn){flex-wrap:wrap;row-gap:2px}
+.suggest .s-warn{flex-basis:100%;font-size:var(--fs-xs);color:var(--warn-700)}
 .sb-count--red{background:var(--err-500);color:var(--gray-0)}
 
 /* «Отправить клиенту?»: окно с готовым текстом задачи-сообщения */
@@ -843,4 +848,38 @@ tr[data-href].is-link:hover td,li[data-href].is-link:hover{background:var(--gray
   body.ui-new .row>form{min-width:0;max-width:100%}
   body.ui-new input[type=file],body.ui-new .field{max-width:100%;min-width:0}
   body.ui-new .btn:not(.btn--link):not(.btn--link-gray){white-space:normal;height:auto;max-width:100%;text-align:center;line-height:1.25}
+}
+
+/* Return orders at a point, grouped by their scheduled handover date. */
+.mp-return-group {
+  margin: 0 0 var(--s-3);
+  padding: var(--s-3);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-md);
+  background: var(--gray-0);
+}
+.mp-return-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-2) var(--s-3); }
+.mp-return-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+  gap: var(--s-2) var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--gray-200);
+  overflow-wrap: anywhere;
+}
+.mp-return-status { margin-inline-start: var(--s-2); color: var(--gray-600); }
+.mp-return-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); }
+.mp-return-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+  align-items: start;
+  gap: var(--s-2) var(--s-3);
+  margin-top: var(--s-2);
+}
+.mp-return-controls > .mp-handover { grid-column: 2; }
+.mp-return-buttons .btn, .mp-return-controls .mp-handover .btn { width: 100%; height: auto; min-height: 44px; white-space: normal; text-align: center; }
+.mp-return-group form, .mp-return-group .mp-act-links { margin: 0; }
+@media (max-width: 640px) {
+  .mp-return-row, .mp-return-controls { grid-template-columns: minmax(0, 1fr); }
+  .mp-return-controls > .mp-handover { grid-column: auto; }
 }

@@ -2,6 +2,8 @@
 «Свой остаток (ОТХ)» of the catalog card (oth_manual, the owner 2026-11-03): the owner and the partner, from the office."""
 from __future__ import annotations
 
+import re
+from datetime import timedelta
 from urllib.parse import quote
 
 from flask import Response, abort, flash, redirect, render_template, request
@@ -9,6 +11,8 @@ from flask import Response, abort, flash, redirect, render_template, request
 from .. import connections, oth_manual, oth_point_return, oth_return_act, oth_stock, order_oth, order_points, order_sheet, orders, store
 from ..settings_store import active_settings
 from .common import author, can_post, current_user, get_conn, has_right, login_required, now_iso
+
+RETURNED_DAYS = 365                                          # «Вернули поставщику» keeps a year (the owner 2026-11-22)
 
 
 def manual_block(goods_id: str) -> dict:
@@ -130,7 +134,10 @@ def _back() -> str:
     """Where a form of «На ОТХ» returns: the page with the point it was sent from (the owner 2026-11-10: the filter of the point stays until
     the person takes it off; the hidden field `point` of oth.html). A point (the role) has no filter of points: the bare page, as before."""
     point = request.form.get("point", type=int)
-    return "/oth?point=%d" % point if point and point > 0 and current_user()["role"] != "point" else "/oth"
+    tab = request.form.get("tab", "")                                    # the tab the form was sent from stays (2026-11-22)
+    args = ([("tab", tab)] if tab in ("agree", "return", "returned") else []) + (
+        [("point", str(point))] if point and point > 0 and current_user()["role"] != "point" else [])
+    return "/oth" + ("?" + "&".join("%s=%s" % a for a in args) if args else "")
 
 
 def register(app) -> None:
@@ -156,6 +163,19 @@ def register(app) -> None:
             flash("Неизвестная точка.")
         return redirect("/catalog/item/" + quote(goods_id, safe=""))
 
+    def _sorted(rows, tab):
+        """The order of each tab (the owner 2026-11-22: no sort to choose): the oldest on «На ОТХ» first, the newest return first."""
+        return sorted(rows, key=lambda r: r.get("filter_at") or r.get("returned_at") or "", reverse=tab == "returned")
+
+    def _returned_filters() -> dict:
+        """The search and the filters of «Возвращено поставщику» as typed (`raw`, back into the form) and as read: a wrong number or day is left out."""
+        args = request.args
+        raw = {k: str(args.get(k) or "").strip()[:order_oth.RETURNED_QUERY_MAX] for k in ("q", "qty_from", "qty_to", "from", "to")}
+        number = lambda v: int(v) if v.isascii() and v.isdigit() else None
+        day = lambda v: v if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) else ""
+        return {"raw": raw, "query": raw["q"], "qty_from": number(raw["qty_from"]), "qty_to": number(raw["qty_to"]),
+                "day_from": day(raw["from"]), "day_to": day(raw["to"])}
+
     @app.route("/oth")
     @login_required
     def oth_page():
@@ -166,6 +186,7 @@ def register(app) -> None:
         dates, marks = order_oth.reserve_dates(conn), order_oth.item_marks(conn)
         codes = {r[0]: r[1] for r in conn.execute("SELECT c.id, s.code FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN ('oth', 'return_agree', 'return_given')")}
         agreed = order_oth.plans(conn)
+        card_numbers = {}
         titles = {cid: order_sheet.mim_title(conn, orders.get_card(conn, cid)) for cid, code in codes.items() if code == "oth"}   # 2026-11-06
         actable = {cid for cid in codes if oth_point_return.can_act(conn, orders.get_card(conn, cid))}     # one act for several orders (E3)
         boxed = set()
@@ -182,16 +203,48 @@ def register(app) -> None:
             row["to_return"] = order_oth.item_mark(marks, row["item_id"], row["since"]) if codes.get(row["order_id"]) == "oth" else None
         own = manual_list(conn)
         test = oth_stock._test_points(conn)
+        signed = conn.execute("SELECT DISTINCT c.point_id, COALESCE(p.name, '') FROM oth_return_plan rp JOIN order_card c ON c.id = rp.order_id "
+                              "LEFT JOIN point p ON p.id = c.point_id WHERE rp.signed_at IS NOT NULL AND c.point_id IS NOT NULL").fetchall()
         places = {(r["point_id"], r["point"] or "") for r in data["stock"] + data["returned"] + own if r["point_id"] and r["point_id"] not in test}
+        places |= {(pid, name) for pid, name in signed if pid not in test}           # the points of the returns by act (2026-11-21)
         point = request.args.get("point", type=int)
         if point not in {p[0] for p in places}:                       # an unknown point, or one with nothing left: the whole page
             point = None
         if point:
             data = {k: [r for r in rows if r["point_id"] == point] for k, rows in data.items()}
             own = [r for r in own if r["point_id"] == point]
-        tab = "returned" if request.args.get("tab") == "returned" else "stock"     # two tabs (the owner 2026-11-08)
+        # four tabs (the owner 2026-11-22), as the point's «Рабочее место» sees the same orders: «На точке» (on «На ОТХ»), «На согласовании»
+        # (order_oth.agreeing), «На возврат» (agreed, the act not signed), «Вернули поставщику» (every return of the last year)
+        tab = request.args.get("tab", "")
+        tab = {"returned": "returned", "agree": "agree", "return": "return"}.get(tab, "point")
+        tab_of = {}
+        for cid in {r["order_id"] for r in data["stock"]}:
+            card = orders.get_card(conn, cid)
+            plan = agreed.get(cid)
+            tab_of[cid] = ("return" if plan and not plan["signed_at"] else "agree" if order_oth.agreeing(conn, card) else "point")
+            card_numbers[cid] = (card.get("webmim_number") or "", card.get("transfer_number") or "")
+        for r in data["stock"]:
+            r["webmim_number"], r["transfer_number"] = card_numbers.get(r["order_id"], ("", ""))
+            r["filter_at"] = r["oth_since"] or r["since"] or ""
         from .routes_orders import local_now
-        return render_template("oth.html", manual=own, places=sorted(places, key=lambda p: (p[1].casefold(), p[0])), point=point, tab=tab,
+        year_ago = (local_now().date() - timedelta(days=RETURNED_DAYS)).isoformat()
+        history = [r for r in order_oth.returned_history(conn, data["returned"])
+                   if r["point_id"] not in test and (not point or r["point_id"] == point) and (r["returned_at"] or "")[:10] >= year_ago]
+        lists = {key: [r for r in data["stock"] if tab_of.get(r["order_id"]) == key] for key in ("point", "agree", "return")}
+        lists["returned"] = history
+        counts = {key: sum(r["qty"] for r in rows) for key, rows in lists.items()}      # the tabs' counters: the whole lists, never filtered
+        filters = _returned_filters()
+        rows = order_oth.filter_returned(lists[tab], **{k: v for k, v in filters.items() if k != "raw"})
+        rows = _sorted(rows, tab)
+        boxed = set()                                                 # the checkbox on the first row shown of the order (review: after the search)
+        for row in rows:
+            if "act_box" in row:
+                row["act_box"] = row["order_id"] in actable and row["order_id"] not in boxed
+                boxed.add(row["order_id"])
+        data.update(stock=rows if tab != "returned" else [], returned=rows if tab == "returned" else [], returned_all=len(lists[tab]),
+                    returned_pieces=counts["returned"])
+        return render_template("oth.html", manual=own if tab == "point" else [], places=sorted(places, key=lambda p: (p[1].casefold(), p[0])),
+                               point=point, tab=tab, counts=counts, listed=len(lists[tab]), returned_filters=filters,
                                acts=oth_return_act.listed(conn), act_points=[p for p in order_points.list_points(conn) if p["id"] not in test],
                                act_day=order_oth.return_date(local_now().date()), **data)
 
@@ -223,16 +276,33 @@ def register(app) -> None:
                                                    upload.filename if upload else "", data, local_now().date(), local_iso(), author())
         except (order_oth.OthError, oth_return_act.ActError) as err:
             flash(str(err), "error")
-            return redirect(_back() + "#return-acts")
+            return redirect(_back() + ("" if request.form.get("tab") else "#return-acts"))
         day = "%s.%s" % (done["date"][8:10], done["date"][5:7])
         if done["agreed"]:
-            flash("Возврат %s согласован: заказы %s. Акт возврата %s." % (day, ", ".join("№%d" % i for i in done["agreed"]),
-                                                                     "заменён" if done["replaced"] else "прикреплён"), "ok")
+            act = (" Акт возврата %s." % ("заменён" if done["replaced"] else "прикреплён")) if done.get("act") else " Акт можно прикрепить позже в «Акты возврата»."
+            flash("Возврат %s согласован: заказы %s.%s" % (day, ", ".join("№%d" % i for i in done["agreed"]), act), "ok")
         for card_id, why in done["failed"].items():
             flash("Заказ №%d не согласован: %s" % (card_id, why), "error")
         if order_oth.off_day(done["date"]):
             flash(order_oth.OFF_DAY + ".")
-        return redirect(_back() + "#return-acts")
+        return redirect(_back() + ("" if request.form.get("tab") else "#return-acts"))
+
+    @app.route("/oth/sent-back", methods=["POST"])
+    @login_required
+    def oth_sent_back():
+        """«Вернули поставщику» of the tab «На возврат» (the owner 2026-11-22): the orders ticked were given to the supplier — each as the
+        point's «Подписал акт и отдал» (oth_point_return.sent_back); they go to «Вернули поставщику»."""
+        from .routes_orders import local_iso
+        try:
+            done = oth_point_return.sent_back(get_conn(), request.form.getlist("order"), local_iso(), author())
+        except order_oth.OthError as err:
+            flash(str(err), "error")
+            return redirect(_back())
+        if done["done"]:
+            flash("Отмечено: отдали поставщику, заказы %s." % ", ".join("№%d" % i for i in done["done"]), "ok")
+        for card_id, why in done["failed"].items():
+            flash("Заказ №%d не отмечен: %s" % (card_id, why), "error")
+        return redirect(_back())
 
     @app.route("/oth/return-act/<int:act_id>/delete", methods=["POST"])
     @login_required

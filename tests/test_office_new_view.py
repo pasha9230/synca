@@ -97,7 +97,11 @@ def test_off_the_owner_keeps_the_old_pages(w, state):
     if state:
         flag(w, state)
     for page, html in snap(w, w["owner"]).items():
-        assert not is_new(html) and "office2/" not in html and 'class="o2' not in html, page
+        assert not is_new(html) and "office2/" not in html, page
+        if page.split("?", 1)[0] != "/catalog":
+            assert 'class="o2' not in html, page
+        else:
+            assert 'class="bulkbar o2-bulkbar"' not in html
     assert 'class="chats-layout"' in snap(w, w["owner"], ["/chats/{chat}"])["/chats/{chat}"]
 
 
@@ -159,7 +163,7 @@ def test_the_chats_are_two_columns_and_keep_the_hooks_of_app_js(w):
     bar = lst.split('class="chats-filter o2-cl-top"', 1)[1].split('<a class="chat-row', 1)[0]
     assert bar.count("ml-auto") == 1 and 'class="ml-auto">Всего: 2' in bar         # «Обновить список» swaps the count by the first .ml-auto
     assert bar.endswith('</span></div>\n</div>\n')                                 # and puts the fresh rows right after the bar
-    assert 'class="o2-chip is-on"' in html and ">Ждут ответа</a>" in html                      # the state as chips
+    assert 'class="o2-chip is-on"' in html and ">Непрочитанные</a>" in html                    # the state as chips (ТЗ №93)
     assert 'class="card-head chat-head o2-cl-head"' in html and 'class="chat-thread o2-cl-msgs"' in html
     assert 'class="chats-deal o2-cl-panel" id="chats-deal"' in html and "data-order-panel" in html     # a panel on the right (the owner 2026-11-04), no folding
     assert 'action="/chats/%d/send"' % w["chat"] in html and "data-photo-form" in html and 'name="reply_token"' in html
@@ -187,8 +191,8 @@ def test_a_late_task_of_the_chat_shows_on_the_folded_button(w):
 def test_the_catalog_has_the_filters_in_rows_the_season_tags_and_the_bulk_panels(w):
     flag(w, "all")
     html = w["owner"].get("/catalog").get_data(as_text=True)
-    assert 'class="filters o2-filters oc-filters" data-oc' in html and "office_catalog.js" in html     # the block as MIM (2026-11-11)
-    for field in ('name="w"', 'name="size"', 'name="q"', 'name="s"', 'name="t"', 'name="st"', 'name="own"', 'data-name="b"', 'name="bm" value="x"'):
+    assert 'class="filters oc-filters" data-oc' in html and "office_catalog.js" in html     # the block as MIM (2026-11-11)
+    for field in ('name="w"', 'name="q"', 'name="s"', 'name="t"', 'name="st"', 'name="own"', 'data-name="b"', 'name="bm" value="x"'):
         assert field in html, field
     assert 'class="ico-sun"' in html and 'class="ico-snow"' in html and "o2-wstud" in html         # sun, snowflake, winter with studs
     assert 'class="o2-season o2-season--winter"' in html
@@ -211,7 +215,8 @@ def test_crm_the_list_and_the_card_with_the_deleted_order(w):
     flag(w, "all")
     html = w["owner"].get("/clients").get_data(as_text=True)
     assert 'class="card o2-crm-list"' in html and 'href="/clients/duplicates"' in html and 'data-href="/clients/%d"' % w["client"] in html
-    assert "<th class=\"t-c\">Заказы</th><th class=\"t-c\">Чаты</th><th class=\"t-c\">Звонки</th>" in html and 'name="q"' in html   # columns (2026-11-08) and 'name="tag"' in html
+    assert "<th class=\"t-c\" title=\"Без отменённых\">Заказы</th><th class=\"t-c\">Чаты</th><th class=\"t-c\">Звонки</th>" in html \
+        and 'name="q"' in html                                     # columns (2026-11-08); the orders without the cancelled (ТЗ №79)
     card = w["owner"].get("/clients/%d" % w["client"]).get_data(as_text=True)
     assert 'class="o2-client-cols"' in card and 'href="#o2-orders"' in card and 'id="o2-orders"' in card and 'id="o2-merge"' in card
     assert 'badge badge--err">удалён</span>' in card                                                     # the purchases keep the deleted

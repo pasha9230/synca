@@ -57,7 +57,7 @@ def test_filters_unread_without_a_deal_and_account(tmp_path):
     page = client.get("/chats?f=nodeal").get_data(as_text=True)
     assert "Иван" in page and "Татьяна" not in page
     page = client.get("/chats?f=unread").get_data(as_text=True)                                    # «Не прочитанные» is gone (п. 7, 2026-11-08)
-    assert "Не прочитанные" not in page and "Татьяна" in page and "Иван" in page                     # an unknown state: «Открытые»
+    assert "Не прочитанные" not in page and "Татьяна" in page and "Иван" in page                     # an unknown state: «Все»
     assert "Татьяна" in client.get("/chats?acc=%d" % account).get_data(as_text=True)
     assert "Татьяна" not in client.get("/chats?acc=999").get_data(as_text=True)
 
@@ -66,7 +66,7 @@ def _menus(page):
     """{the label of a filter button: [(item, href, on)]} of the list's filter row."""
     found = {}
     for label, body in re.findall(r'<details class="menu chats-filter-menu"><summary class="btn[^"]*">([^<]*)</summary>(.*?)</details>', page, re.S):
-        found[label] = [(item, href, bool(on)) for on, href, item in re.findall(r'<a class="menu-item( is-on)?" href="([^"]*)"[^>]*>([^<]*)</a>', body)]
+        found[label] = [(item, href, bool(on)) for on, href, item in re.findall(r'<a class="menu-item( is-on)?" href="([^"]*)"[^>]*>([^<]*?)(?: <b>\d+</b>)?</a>', body)]
     return found
 
 
@@ -76,9 +76,9 @@ def test_the_state_and_the_account_are_two_buttons_that_combine_and_keep_their_p
     page = client.get("/chats").get_data(as_text=True)
     assert 'name="f"' not in page and 'name="acc"' not in page and "Показать" not in page                      # no selects, no «Показать»
     menus = _menus(page)
-    assert list(menus) == ["Состояние: Открытые"]                                                               # one account: no «Аккаунт» button
-    assert menus["Состояние: Открытые"] == [(v, "/chats" + ("?f=" + k if k else ""), k == "") for k, v in FILTERS.items()]
-    assert list(FILTERS.values()) == ["Открытые", "Ждут ответа", "Без заказа", "Не требуют ответа", "Закрытые"]      # no «Не прочитанные» (п. 7)
+    assert list(menus) == ["Состояние: Все"]                                                                    # one account: no «Аккаунт» button
+    assert menus["Состояние: Все"] == [(v, "/chats" + ("?f=" + k if k else ""), k == "") for k, v in FILTERS.items()]
+    assert list(FILTERS.values()) == ["Все", "Открытые", "Непрочитанные", "С заказом", "Без заказа", "Закрытые"]   # ТЗ №93 (2026-11-25)
     assert "Всего: 2" in page and 'href="/deleted?k=chat"' in page
     second = connections.create_account(conn, "Партнёр-2", NOW, "o")
     connections.set_modes(conn, second, True, True, NOW, "o")
@@ -91,13 +91,13 @@ def test_the_state_and_the_account_are_two_buttons_that_combine_and_keep_their_p
     assert accounts == {"Все аккаунты": ("/chats?f=nodeal&amp;q=%D0%A2%D0%B0%D1%82", False),                  # an account keeps the state and the search
                         "Основной": ("/chats?f=nodeal&amp;acc=%d&amp;q=%%D0%%A2%%D0%%B0%%D1%%82" % account, True),
                         "Партнёр-2": ("/chats?f=nodeal&amp;acc=%d&amp;q=%%D0%%A2%%D0%%B0%%D1%%82" % second, False)}
-    assert list(_menus(client.get("/chats").get_data(as_text=True))) == ["Состояние: Открытые", "Аккаунт: Все аккаунты"]
+    assert list(_menus(client.get("/chats").get_data(as_text=True))) == ["Состояние: Все", "Аккаунт: Все аккаунты"]
 
 
 def test_a_stale_account_in_the_address_shows_in_the_filter_and_can_be_dropped(tmp_path):
     app, client, tok, conn, account = setup(tmp_path)
     menus = _menus(client.get("/chats?acc=999").get_data(as_text=True))
-    assert list(menus) == ["Состояние: Открытые", "Аккаунт: аккаунт №999"]
+    assert list(menus) == ["Состояние: Все", "Аккаунт: аккаунт №999"]
     assert ("Все аккаунты", "/chats", False) in menus["Аккаунт: аккаунт №999"]
 
 
@@ -164,13 +164,13 @@ def test_the_open_chat_stays_in_the_list_when_it_no_longer_fits_the_state(tmp_pa
     assert re.search(r'<a class="chat-row is-active[^"]*" href="/chats/%d\?f=wait">' % tanya["id"], page)
     conn.execute("UPDATE avito_chat SET status = 'closed' WHERE id = ?", (ivan["id"],))                # closed in «Открытые»
     conn.commit()
-    page = client.get("/chats/%d" % ivan["id"]).get_data(as_text=True)
+    page = client.get("/chats/%d?f=open" % ivan["id"]).get_data(as_text=True)
     assert _names(page) == ["Иван", "Татьяна"] and "Всего: 1" in page
-    assert _names(client.get("/chats/%d?acc=999" % ivan["id"]).get_data(as_text=True)) == []          # the account filter still holds
-    assert _names(client.get("/chats/%d?q=Татьяна" % ivan["id"]).get_data(as_text=True)) == ["Татьяна"]   # and the search
+    assert _names(client.get("/chats/%d?f=open&acc=999" % ivan["id"]).get_data(as_text=True)) == []          # the account filter still holds
+    assert _names(client.get("/chats/%d?f=open&q=Татьяна" % ivan["id"]).get_data(as_text=True)) == ["Татьяна"]   # and the search
     conn.execute("UPDATE avito_chat SET unread = 0")
     conn.commit()
-    assert _names(client.get("/chats/%d?f=unread" % tanya["id"]).get_data(as_text=True)) == ["Татьяна"]
+    assert _names(client.get("/chats/%d?f=open" % tanya["id"]).get_data(as_text=True)) == ["Татьяна"]
 
 
 def test_the_list_keeps_its_place_after_a_reload_and_after_update_list():
@@ -182,9 +182,13 @@ def test_the_list_keeps_its_place_after_a_reload_and_after_update_list():
     place = js[js.index("the list keeps its place"):js.index("the order column folds away")]
     assert 'sessionStorage.getItem(KEY)' in place and 'sessionStorage.setItem(KEY' in place and 'addEventListener("pagehide"' in place
     assert place.count("try {") == 2 and place.count("catch (e)") == 2                                # no storage: the list as before
-    assert "live.dataset.place" in place and "all[place] = list.scrollTop" in place                    # by the list as the server reads it
+    assert "live.dataset.place" in place and "all[place] = box.scrollTop" in place                     # by the list as the server reads it
+    assert "box = visible ? chatScroller(list) : list" in place                                        # ТЗ №87: the box the list moves with (.main of «Новый вид»)
     assert "list.innerHTML" not in place and "after(bar).forEach" in place                              # «Обновить список»: the search and the menus stay
-    assert "scrollIntoView" not in place and "list.scrollTop +=" in place                            # only the list moves, never the page
+    reveal = place[place.index("function reveal()"):place.index("function places()")]
+    assert "scrollIntoView" not in place and "if (!row || shared) return;" in reveal and "box.scrollTop +=" in reveal   # only the box of the list moves
+    assert "thread.scrollTop" not in reveal and "window.scroll" not in reveal                                         # (the list, or .main beside the chat)
+    assert "list.scrollTop +=" in place                                                                               # «Обновить список»: the list itself
     assert 'closest("[data-chats-relist]")' in place and "e.preventDefault()" in place and 'getElementById("chats-offline")' in place
     assert 'href="" data-chats-relist>Обновить список</a>' in (root / "templates" / "chats.html").read_text(encoding="utf-8")
 
@@ -779,7 +783,7 @@ def test_the_kept_open_chat_is_marked_out_of_the_filter_and_the_count_says_so(tm
     tanya = next(c for c in chats.list_chats(conn) if c["peer_name"] == "Татьяна")
     conn.execute("UPDATE avito_chat SET status = 'closed' WHERE id = ?", (tanya["id"],))
     conn.commit()
-    page = client.get("/chats/%d?f=noreply" % tanya["id"]).get_data(as_text=True)
+    page = client.get("/chats/%d?f=wait" % tanya["id"]).get_data(as_text=True)
     assert _names(page) == ["Татьяна"] and "Всего: 0 · открытый чат вне фильтра" in page
     assert page.count(">вне фильтра</span>") == 1
     page = client.get("/chats/%d?f=closed" % tanya["id"]).get_data(as_text=True)     # it fits: no mark

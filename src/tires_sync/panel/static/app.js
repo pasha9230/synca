@@ -3,6 +3,7 @@
   "use strict";
   // Крестик из набора иконок (_ui.html, icon("x", "i-sm")): кнопки «закрыть / убрать», которые строит скрипт
   var X_ICON = '<svg class="i i-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  var pageToast = null;                                               // the toast of 10) for the other blocks (13d)
 
   // 1) Фильтры применяются сразу при выборе
   document.addEventListener("change", function (e) {
@@ -170,6 +171,7 @@
       box.appendChild(t);
       setTimeout(function () { t.remove(); }, kind === "err" ? 12000 : 7000);
     }
+    pageToast = toast;                                                // 13d: the answer of a press, seen where the page stays
     function setPending(n) {
       document.querySelectorAll("[data-pend-count]").forEach(function (el) {
         el.textContent = n;
@@ -724,37 +726,38 @@
     var over = end.getBoundingClientRect().bottom - chatBottom(box);
     if (over > 0) box.scrollTop += over + 8;
   }
-  var orderChat = document.querySelector(".order-chat");   // the order window: at the end unless it is a point's long phone page (data-open-end)
-  if (document.querySelector(".chat-thread") && ((!window.location.hash && (!orderChat || orderChat.hasAttribute("data-open-end"))) || window.location.hash === "#order-chat")) {
-    chatToEnd();                                    // #order-chat: back from a send in the order window (its scroll-margin, panel.css, sets the place)
-    var chatMoved = false;                          // photos load after the first scroll and push the end down: follow them until the person scrolls
-    ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { chatMoved = true; }, {once: true, passive: true}); });
-    document.querySelectorAll(".chat-thread img").forEach(function (img) {
-      if (!img.complete) img.addEventListener("load", function () { if (!chatMoved) chatToEnd(); });
-    });
-  }
+  var chatListHeld = false;                         // the list put its place back in the box the chat scrolls too: the chat's end stays where it is (below)
   (function () {                                    // «Чаты»: the list keeps its place (owner's word 2026-10-24: a chat picked low in the list, a reload, and the list was at the top again)
     var list = document.querySelector(".chats-list"), live = document.getElementById("chats-live");
     if (!list || !live) return;
     var KEY = "chats-list-place", place = live.dataset.place || "";    // the list as the server reads it: state, account, search (not the address as typed)
     function active() { return list.querySelector(".chat-row.is-active"); }
-    function reveal() {                              // the open chat in sight, moving the list only (never the page)
+    // ТЗ №87: the list of «Новый вид» (and the old one on a middle screen) has no scroll of its own, it moves with .main of the panel or the page;
+    // its place is the place of that box. A narrow screen with the list and the chat one under the other in that box: the chat's last message wins (as before).
+    var visible = !!list.getClientRects().length, box = visible ? chatScroller(list) : list, thread = document.querySelector(".chat-thread");
+    var lr = list.getBoundingClientRect(), tr = thread && thread.getClientRects().length ? thread.getBoundingClientRect() : null;
+    var shared = box !== list && !!tr && chatScroller(thread) === box && lr.left < tr.right && tr.left < lr.right;
+    function reveal() {                              // the open chat's row in sight, moving the box of the list (the list, or .main beside the chat); a stacked chat: nothing moves
       var row = active();
-      if (!row) return;
-      var box = list.getBoundingClientRect(), at = row.getBoundingClientRect();
-      if (at.top < box.top || at.bottom > box.bottom) list.scrollTop += at.top - box.top - Math.max(0, (list.clientHeight - row.offsetHeight) / 2);
+      if (!row || shared) return;
+      var page = box === document.scrollingElement || box === document.documentElement;
+      var top = page ? 0 : box.getBoundingClientRect().top, bottom = page ? window.innerHeight : box.getBoundingClientRect().bottom, at = row.getBoundingClientRect();
+      if (at.top < top || at.bottom > bottom) box.scrollTop += at.top - top - Math.max(0, (bottom - top - row.offsetHeight) / 2);
     }
     function places() {
       try { var all = JSON.parse(sessionStorage.getItem(KEY) || "{}"); return all && typeof all === "object" ? all : {}; } catch (e) { return {}; }
     }
     var mark = places()[place];                     // a click on a chat, a form of the chat, F5: the page is loaded again, the list comes back where it was
-    if (typeof mark === "number") list.scrollTop = mark;
-    reveal();
+    if (typeof mark === "number" && visible && !shared) {
+      box.scrollTop = mark;
+      chatListHeld = box !== list && !!thread && chatScroller(thread) === box;   // side by side in one box: no jump to the chat's end, now or when photos load
+    }
+    if (visible) reveal();
     window.addEventListener("pagehide", function () {    // each list (state, account, search) keeps its own place in this tab
-      if (!list.getClientRects().length) return;      // hidden beside the order panel: its scroll reads 0, the place it had stays
+      if (!visible || shared || !list.getClientRects().length) return;      // hidden beside the order panel or a phone's open chat: the place it had stays
       var all = places();
       if (!(place in all) && Object.keys(all).length >= 20) all = {};
-      all[place] = list.scrollTop;
+      all[place] = box.scrollTop;
       try { sessionStorage.setItem(KEY, JSON.stringify(all)); } catch (e) { /* private mode: the list starts at the top */ }
     });
     function after(bar) {                            // what follows the filter row: the rows of the chats or the empty note
@@ -766,7 +769,7 @@
       var link = e.target.closest && e.target.closest("[data-chats-relist]");
       if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
       e.preventDefault();
-      var row = active(), offset = row ? row.getBoundingClientRect().top - list.getBoundingClientRect().top : null, top = list.scrollTop;
+      var row = active(), offset = row ? row.getBoundingClientRect().top - list.getBoundingClientRect().top : null, top = list.scrollTop;   // the list's own scroll; a box above it keeps its place by itself
       fetch(window.location.href, {credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
         .then(function (r) { if (!r.ok || r.redirected) throw new Error("page"); return r.text(); })
         .then(function (html) {
@@ -791,6 +794,19 @@
         });
     });
   })();
+  // «Чаты» with no anchor: the page (or the chat's own box) at the last message. The order card (ТЗ №87, instead of the owner's 2026-11-09):
+  // its chat column never scrolls the page on opening, F5, «Сохранить» or a new stage, only back from a send there (#order-chat, its
+  // scroll-margin in panel.css sets the place). A list whose place came back in the box the chat scrolls too (a middle screen, side by side): the list wins.
+  var chatThread = document.querySelector(".chat-thread"), orderChat = document.querySelector(".order-chat");
+  var inOrder = !!(orderChat && chatThread && orderChat.contains(chatThread));
+  if (chatThread && !chatListHeld && ((!window.location.hash && !inOrder) || window.location.hash === "#order-chat")) {
+    chatToEnd();
+    var chatMoved = false;                          // photos load after the first scroll and push the end down: follow them until the person scrolls
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { chatMoved = true; }, {once: true, passive: true}); });
+    document.querySelectorAll(".chat-thread img").forEach(function (img) {
+      if (!img.complete) img.addEventListener("load", function () { if (!chatMoved) chatToEnd(); });
+    });
+  }
   (function () {                                    // «Чаты»: the order column folds away and comes back; the choice is remembered on this computer
     var layout = document.querySelector(".chats-layout");
     if (!layout) return;
@@ -1000,7 +1016,7 @@
     function show(found) {
       items = found; active = -1; list.innerHTML = "";
       if (!found.length) {
-        var none = document.createElement("li"); none.className = "s-empty"; none.textContent = "Нет позиций с остатком по этому запросу";
+        var none = document.createElement("li"); none.className = "s-empty"; none.textContent = "Нет позиций по этому запросу";
         list.appendChild(none);
       }
       found.forEach(function (it, i) {
@@ -1008,8 +1024,12 @@
         li.setAttribute("role", "option");
         name.className = "s-name"; name.textContent = it.point ? "«" + it.name + "»" : it.name;
         meta.className = "s-meta"; meta.textContent = it.point ? "шина с точки, нет в выгрузке WebMIM" : it.size + " · остаток " + it.stock + " · код " + it.goods_id + (it.oth ? " · " + it.oth : "");
-        cost.className = "s-price"; cost.textContent = it.point ? "впишите цену" : (it.price != null ? Math.round(it.price).toLocaleString("ru-RU") + " ₽" : "нет цены");
+        cost.className = "s-price"; cost.textContent = it.point ? "впишите цену" : (it.price != null ? Math.round(it.price).toLocaleString("ru-RU") + " ₽" : (it.marks ? "нет цены — впишите" : "нет цены"));
         li.appendChild(name); li.appendChild(meta); li.appendChild(cost);
+        if (it.marks && it.marks.length) {                            // ТЗ 94: the office may order it, the list says what it is not (a warning, not a block)
+          var warn = document.createElement("span"); warn.className = "s-warn"; warn.textContent = "⚠ " + it.marks.join(" · ");
+          li.appendChild(warn);
+        }
         li.addEventListener("mousedown", function (e) { e.preventDefault(); pick(i); });
         list.appendChild(li);
       });
@@ -1183,6 +1203,33 @@
       }
     });
   });
+  // 13c) Карточка заказа (ТЗ №87) держит место прокрутки: F5, «Сохранить», смена этапа (страница грузится снова с того же адреса) — то же место;
+  //     вход из другого места — сверху; явный якорь (#webmim-parts, #items…) — туда, куда он ведёт, кроме F5
+  (function () {
+    var KEY = "card-place", path = window.location.pathname + window.location.search;
+    if (!document.querySelector("[data-keep-place]")) {       // another page between two visits: the next visit to the card starts at its top
+      try { sessionStorage.removeItem(KEY); } catch (e) { /* no storage: nothing kept */ }
+      return;
+    }
+    function pageBox() {                                    // .main of the panel scrolls on a computer; a phone scrolls the page itself
+      var main = document.querySelector(".main");
+      if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
+      return document.scrollingElement || document.documentElement;
+    }
+    var mark = null, moved = false, nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
+    try { mark = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch (e) { mark = null; }
+    var again = !!mark && mark.path === path && typeof mark.top === "number";
+    function put() { if (again && !moved) pageBox().scrollTop = mark.top; }
+    if (again && (!window.location.hash || (nav && nav.type === "reload"))) {
+      put();
+      ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { moved = true; }, {once: true, passive: true}); });
+      window.addEventListener("load", put);                 // photos above push the place down: put it again unless the person scrolled
+    }
+    window.addEventListener("pagehide", function () {
+      try { sessionStorage.setItem(KEY, JSON.stringify({path: path, top: pageBox().scrollTop})); } catch (e) { /* private mode: the card opens at its top */ }
+    });
+  })();
+
   // 13a) Заказ: ссылка на часть страницы (#wants после правки строки «Что нужно клиенту») раскрывает её, если она свёрнута
   //      и при щелчке по ссылке на этой же странице (#intercity у метки «В другой город»)
   (function () {
@@ -1195,6 +1242,54 @@
     document.addEventListener("click", function (e) {                 // the same #part again: no hashchange, the part folded by hand opens
       var a = e.target.closest && e.target.closest('a[href^="#"]');
       if (a && a.getAttribute("href") === location.hash) openPart();
+    });
+  })();
+
+  // 13d) Списки и разделы (ТЗ №90): фильтр, вкладка, кнопка или F5 грузят ту же страницу снова — она остаётся на том же месте прокрутки,
+  //      а не прыгает наверх. Только тот же адрес без учёта параметров (фильтры меняют их) и только после действия на самой странице
+  //      (отправка формы, выбор в фильтре, ссылка на эту же страницу) или F5; вход из другого места — сверху. Другая страница выдачи
+  //      (?page=), якорь в адресе и ошибка у поля — как прежде. Карточка заказа держит место сама (13c), «Чаты» — своё место списка.
+  (function () {
+    var KEY = "list-place", path = window.location.pathname, armed = false, mark = null;
+    try { mark = JSON.parse(sessionStorage.getItem(KEY) || "null"); sessionStorage.removeItem(KEY); } catch (e) { mark = null; }
+    if (document.querySelector("[data-keep-place], [data-no-keep-place], .chats-list")) return;
+    if (path === "/my-point") return;                       // «Рабочее место»: its own place across its refresh (notify.js, tires.mypoint.scroll)
+    function pageBox() {                                    // the same box as 13c: .main of the panel on a computer, the page on a phone
+      var main = document.querySelector(".main");
+      if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
+      return document.scrollingElement || document.documentElement;
+    }
+    function samePage(a) {                                  // a link to this very page: another filter or tab, not another page of the list (nav.pager),
+      if (!a || a.target === "_blank" || a.hasAttribute("download") || a.closest(".pager, .sidebar, [data-sec]")) return false;   // nor the menu's section
+      var to;
+      try { to = new URL(a.href, window.location.href); } catch (e) { return false; }
+      if (to.origin !== window.location.origin || to.pathname !== path) return false;
+      return to.search !== window.location.search || !to.hash;          // only an anchor of this page: no new page at all
+    }
+    window.addEventListener("submit", function (e) { if (!e.defaultPrevented) armed = true; });     // last of all: a window that asks first (5b) sends again
+    document.addEventListener("change", function (e) { if (e.target.closest && e.target.closest("form[data-autosubmit], details.msel-box")) armed = true; }, true);
+    document.addEventListener("click", function (e) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;        // a link in a new tab leaves this page where it is
+      if (samePage(e.target.closest && e.target.closest("a[href]"))) armed = true;
+    }, true);
+    window.addEventListener("pagehide", function () {
+      try { sessionStorage.setItem(KEY, JSON.stringify({path: path, top: pageBox().scrollTop, keep: armed})); } catch (e) { /* private mode: the page opens at its top */ }
+    });
+    var nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
+    var reload = !!nav && nav.type === "reload";
+    if (nav && nav.type !== "navigate" && !reload) return;  // «Назад» / «Вперёд»: the browser's own place
+    if (!mark || mark.path !== path || typeof mark.top !== "number" || !(mark.keep || reload)) return;
+    if ((window.location.hash && !reload) || document.querySelector("[aria-invalid=true]")) return;     // an anchor or a field's error: there
+    var moved = false;
+    function put() { if (!moved) pageBox().scrollTop = mark.top; }
+    put();
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { moved = true; }, {once: true, passive: true}); });
+    window.addEventListener("load", put);                   // photos above push the place down: put it again unless the person scrolled
+    var msgs = document.querySelector(".page > .msgs"), boxed = pageBox();
+    var top = boxed === document.scrollingElement || boxed === document.documentElement ? 0 : boxed.getBoundingClientRect().top;
+    if (!pageToast || !msgs || msgs.getBoundingClientRect().bottom > top) return;    // the answer is in sight at the top: nothing more
+    msgs.querySelectorAll(":scope > .flash").forEach(function (note) {   // out of sight: as a toast too; one with a link stays only at the top
+      if (!note.querySelector("a")) pageToast(note.textContent.trim(), note.classList.contains("flash--err") ? "err" : "ok");
     });
   })();
 
@@ -1643,5 +1738,21 @@
     var win = box.closest(".modal-backdrop");
     if (win) new MutationObserver(function () { if (!win.classList.contains("is-open")) window.location.replace(window.location.pathname + "#webmim"); })
       .observe(win, {attributes: true, attributeFilter: ["class"]});
+  })();
+  // Журнал заказа: запись длиннее 4 строк свёрнута, «показать полностью» открывает её (владелец 2026-11-24)
+  (function () {
+    document.querySelectorAll("[data-clip]").forEach(function (clip) {
+      clip.classList.add("is-folded");
+      if (clip.scrollHeight <= clip.clientHeight + 1) { clip.classList.remove("is-folded"); return; }
+      var more = document.createElement("button");
+      more.type = "button";
+      more.className = "feed-more";
+      more.textContent = "показать полностью";
+      more.addEventListener("click", function () {
+        var folded = clip.classList.toggle("is-folded");
+        more.textContent = folded ? "показать полностью" : "свернуть";
+      });
+      clip.parentNode.appendChild(more);
+    });
   })();
 })();

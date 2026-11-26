@@ -441,6 +441,36 @@ def _stage(conn, code: str) -> dict:
     return found
 
 
+SELLER_TEXT = "Продажа с ОТХ: ответственный «%s» → «%s» (продал с ОТХ)"
+MOVED_TEXT = "Продажа с ОТХ: открытые задачи (%d) и чаты (%d) заказа переданы «%s»"
+POINT_KEEPS_TEXT = "Продажа с ОТХ точкой: ответственный не меняется (остаётся «%s»)"
+
+
+def credit_seller(conn, card_id, seller: str, now: str, commit: bool = True) -> bool:
+    """The owner 2026-11-20 (a rule of the owner: the code and tests/test_oth_seller*.py hold it): a sale of tyres from OTH is the one who made it — the order that sells them takes the
+    seller as its responsible (and so «Аккаунт» of the Google table, order_sheet.account_label). A sale by a point (oth_point_sale) keeps
+    the responsible of the order that made it: never through here. True: the responsible changed (a record says from whom to whom)."""
+    seller = str(seller or "").strip()
+    row = conn.execute("SELECT responsible, created_by FROM order_card WHERE id = ?", (int(card_id),)).fetchone()
+    if not seller or orders.ACTING_MARK in seller or row is None:     # «<имя> за точку «X»» is no login: a point's sale keeps it (review)
+        return False
+    shown = row[0] or ("" if orders.ACTING_MARK in (row[1] or "") else row[1])     # an empty responsible is the maker (orders.get_card)
+    if shown == seller:
+        return False
+    conn.execute("UPDATE order_card SET responsible = ?, updated_at = ? WHERE id = ?", (seller, now, int(card_id)))
+    orders.add_event(conn, int(card_id), now, seller, "field", SELLER_TEXT % (shown or "не назначен", seller))
+    # the owner 2026-11-20: the open tasks of the order and its chats go to the seller with it (those of the former responsible or of nobody;
+    # a task given to somebody else on purpose stays theirs); the journal counts them
+    tasks = conn.execute("UPDATE callback_task SET assignee = ? WHERE order_id = ? AND done_at IS NULL AND cancelled_at IS NULL AND assignee IN (?, '')",
+                         (seller, int(card_id), shown or "")).rowcount
+    chats = conn.execute("UPDATE avito_chat SET responsible = ? WHERE order_id = ? AND responsible IN (?, '')", (seller, int(card_id), shown or "")).rowcount
+    if tasks or chats:
+        orders.add_event(conn, int(card_id), now, seller, "field", MOVED_TEXT % (tasks, chats, seller))
+    if commit:
+        conn.commit()
+    return True
+
+
 def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     """«Взять с ОТХ»: the supplier's position `line_id` of the order gives up to its pieces to tyres of the position `from_item` lying on «На ОТХ».
     One transaction (the old order emptied is moved to «Отмена» in it). Returns the pieces taken; OthSaleError says why nothing was.
@@ -448,8 +478,12 @@ def take(conn, card_id, line_id, from_item, now: str, author: str) -> int:
     from . import oth_storage
     owner = conn.execute("SELECT order_id FROM order_item WHERE id = ?", (int(from_item),)).fetchone()     # a manual row (below zero): none
     if owner is not None and oth_storage.is_record(conn, owner[0]):
-        return oth_storage.take(conn, card_id, from_item, now, author)
-    return _take_order(conn, card_id, line_id, from_item, now, author)
+        pieces = oth_storage.take(conn, card_id, from_item, now, author)
+    else:
+        pieces = _take_order(conn, card_id, line_id, from_item, now, author)
+    if pieces:
+        credit_seller(conn, card_id, author, now)                       # the one who took them from OTH sold them (2026-11-20)
+    return pieces
 
 
 def _take_order(conn, card_id, line_id, from_item, now: str, author: str, commit: bool = True) -> int:
@@ -602,7 +636,9 @@ def to_new_client(conn, old_id, name, phone, now: str, author: str) -> int:
                   qty=int(r["qty"]), sale_unit=items[r["item_id"]]["sale_unit"], supplier_price=items[r["item_id"]]["supplier_price"],
                   terms=items[r["item_id"]]["terms"], fee_pct=items[r["item_id"]]["fee_pct"], promo_pct=items[r["item_id"]]["promo_pct"]) for r in rows]
     try:
-        new = orders.create_card_with_items(conn, {"client_name": name, "client_phone": phone, "point_id": old["point_id"]}, lines, now, author)
+        seller = {} if orders.ACTING_MARK in author else {"responsible": author}
+        new = orders.create_card_with_items(conn, dict({"client_name": name, "client_phone": phone, "point_id": old["point_id"]}, **seller),
+                                            lines, now, author)                  # the seller answers for it (2026-11-20)
     except orders.OpenOrderExists as err:
         raise OthSaleError("У клиента с телефоном %s уже есть открытый заказ №%d этой точки: откройте его." % (phone, err.order_id)) from None
     orders.add_event(conn, new, now, author, "field", "Заказ создан для нового клиента шин с ОТХ заказа №%d." % old_id)
@@ -757,10 +793,16 @@ def point_text(conn, card: dict, now: str) -> str:
     """The point's message of «Шины уже на точке»: the owner's template «Точке: шины с ОТХ отложены под клиента» if there is one, else the
     sample (also in place of a retired sample kept word for word); the values it lacks are left out."""
     from . import order_templates as templates
+    return templates.render(conn, card, point_template(conn), now)[0]
+
+
+def point_template(conn) -> str:
+    """The template text of point_text (vk_point_fix rebuilds the point's message with it)."""
+    from . import order_templates as templates
     row = conn.execute("SELECT body FROM order_template WHERE name = ? AND audience = 'manager' ORDER BY id LIMIT 1",
                        (templates.OTH_POINT_SAMPLE[0],)).fetchone()
     kept = row and row[0] not in templates.RETIRED.get(templates.OTH_POINT_SAMPLE[0], ())
-    return templates.render(conn, card, row[0] if kept else templates.OTH_POINT_SAMPLE[2], now)[0]
+    return row[0] if kept else templates.OTH_POINT_SAMPLE[2]
 
 
 def note_sales(conn, card: dict, items: List[dict], ids: List[int]) -> None:

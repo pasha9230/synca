@@ -46,13 +46,14 @@ def test_the_sound_is_the_same_for_russian_and_latin_spelling():
 def test_the_name_finds_positions_with_a_stock_with_their_price(tmp_path, monkeypatch):
     app, client, tok, conn = setup(tmp_path, monkeypatch)
     items = found(client, "icon tires автограф")
-    assert {i["goods_id"] for i in items} == {"100", "101"}                                    # no stock (102) is not offered, Pirelli does not match
-    assert items[0]["goods_id"] == "101"                                                       # the larger stock first
-    assert all(i["price"] and i["price"] > 0 and i["stock"] > 0 and i["size"] for i in items)
+    # ТЗ 94 (the owner 2026-11-25): the office finds a position without a stock too, marked and last; Pirelli does not match
+    assert [i["goods_id"] for i in items] == ["101", "100", "102"]                              # the larger stock first
+    assert all(i["price"] and i["price"] > 0 and i["stock"] > 0 and i["size"] and not i["marks"] for i in items[:2])
+    assert items[2]["stock"] == 0 and items[2]["warn"] and "нет в наличии" in items[2]["marks"]
     assert [i["goods_id"] for i in found(client, "айкон автограф снов")] == ["100"]
     assert [i["goods_id"] for i in found(client, "Autograph Ice")] == ["101"]
     assert [i["goods_id"] for i in found(client, "фгещпкфзр шсу")] == ["101"]                 # «autograph ice» in the Russian layout
-    assert [i["goods_id"] for i in found(client, "205/55 R16 ikon")] == ["100"]
+    assert [i["goods_id"] for i in found(client, "205/55 R16 ikon")] == ["100", "102"]           # 102 without a stock: last (ТЗ 94)
     assert {i["goods_id"] for i in found(client, "ice")} == {"101", "103"}
     assert found(client, "мишлен") == [] and found(client, "a") == []
     assert app.test_client().get("/orders/items/find?q=ikon").status_code == 302             # only after login

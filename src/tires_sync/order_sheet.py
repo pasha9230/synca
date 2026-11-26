@@ -7,7 +7,8 @@ written once with every column, then only the columns that follow the order (UPD
 rows are never touched. The table is written by a web app of Apps Script in the table itself (`docs/integrations/google-sheet-apps-script.md`):
 it finds a row by the value «tires:<order>:<position>» in its hidden column «tires_id» (the script adds and hides it; a value moves with
 its row when the sheet is sorted; the notes of «Дата счета» and «Дата» held it before 2026-11-01 — the script moves those marks over and
-drops the notes: the owner wants no note of a mark), not by a cell the owner may edit, and writes into it only while its «Артикул» and «Телефон» are still what the panel wrote (CHECK; the name the owner may correct).
+drops the notes: the owner wants no note of a mark), not by a cell the owner may edit, and writes into it only while its «Артикул» and «Телефон» are still what the panel wrote (CHECK).
+«Имя» and «Телефон» follow the order since 24.11 (CLIENT): a change in the panel is written over the cell, an unchanged one leaves the cell alone.
 
 Nothing waits for Google in a request: `enroll` only queues the order (`sheet_order`) in the transaction of the move, `flush` sends what
 changed since the last answer, after the request in a thread of its own (panel) and every hour (`orders-tick`). A failure is retried later
@@ -39,18 +40,22 @@ OPTIONAL = ("Аккаунт",)                     # the owner 2026-11-02: sent 
 SENT = tuple(c for c in COLUMNS if c not in OWNERS + OPTIONAL)  # what a new row is written with (a sheet without «Примечание» still takes it)
 ASKED = tuple(c for c in COLUMNS if c != "Примечание" and c not in OPTIONAL)   # what «Проверить» needs; never «tires_id» (the script's KEY_COLUMN:
                                                                # it adds the hidden column by itself, the panel never sends nor reads it)
+CLIENT = ("Имя", "Телефон")                                  # the owner 24.11 (ТЗ №88): changed in the panel, they follow the order in every
+                                                             # row of it, over a correction in the cell (as «Аккаунт»); not changed — the cell stays
 UPDATED = ("№ заказа MIM", "Перемещение MIM", "Дата счета", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
-           "Уведомление точке", "Уведомление клиенту")          # the rest is written once: a correction of the owner in the cell stays
+           "Уведомление точке", "Уведомление клиенту") + CLIENT  # the rest is written once: a correction of the owner in the cell stays
 FOLLOWED = ("Кол-во", "Сумма MIM", "Сумма продажи")              # a position that gave tyres from «На ОТХ» (oth_sale): its row goes down
-CHECK = ("Артикул", "Телефон")                              # written once: the script finds the row by its mark and checks it is still there;
+CHECK = ("Артикул", "Телефон")                              # the script finds the row by its mark and checks it is still there;
                                                              # the phone too (the lead's review 2026-11-01): two rows of one code swapped
-                                                             # by a sort that left their marks behind are «missing», never written over
+                                                             # by a sort that left their marks behind are «missing», never written over.
+                                                             # Always the values the panel wrote last: a new phone is checked by the old one
 RECENT_DAYS = 45                                               # the hourly look: the orders placed so recently (and every failing one)
 URL = re.compile(r"^https://script\.google\.com/(?:macros|a/macros/[a-z0-9.-]{1,100})/s/[A-Za-z0-9_-]{10,200}/exec$")   # a/macros/<domain>: Workspace
 REDIRECT = "https://script.googleusercontent.com/"            # Google answers a web app with a redirect there; anywhere else is refused
-RETRY_MINUTES = (1, 5, 15, 60)                                 # then every hour
+RETRY_MINUTES = (5, 5, 5, 5, 5, 10)                            # the owner 2026-11-23: every 5–10 minutes, then every 10 (the minutely chats-sync sends them)
 CLAIM_MINUTES = 3
 BATCH = 20                                                     # orders sent by one flush after a request (the hourly one takes all)
+MINUTE_BATCH = 3                                               # the minutely retries (chats-sync): a hung Google holds the chats no longer (review 2026-11-23)
 AUTHOR = "Google-таблица"
 REALIZED, REFUSED, FROM_STOCK = "Р", "О", "Б"                  # the legend of «Реализация» (docs/integrations/google-sheet-columns.md)
 
@@ -182,7 +187,7 @@ def enroll_open(conn, now: str) -> List[int]:
     return found
 
 
-def _due(conn, now: str, full: bool) -> List[int]:
+def _due(conn, now: str, full: bool, limit: Optional[int] = None) -> List[int]:
     """The orders to look at: those that failed and wait no longer, never sent, or with a record in the journal since the last look;
     `full` (the hourly tick) looks at every order placed in the last RECENT_DAYS (a WebMIM date read by the snapshot leaves no record) and
     at every failing one: an old closed order is not counted again every hour."""
@@ -199,7 +204,7 @@ def _due(conn, now: str, full: bool) -> List[int]:
     rows = conn.execute("SELECT s.order_id FROM sheet_order s JOIN order_card c ON c.id = s.order_id WHERE (s.next_at = '' OR s.next_at <= ?)"
                         " AND (s.claim_until = '' OR s.claim_until < ?)" + changed + kept +
                         " AND s.order_id NOT IN (SELECT CAST(substr(key, 13) AS INTEGER) FROM app_state WHERE key LIKE 'oth_storage:%')"
-                        " ORDER BY s.order_id LIMIT ?", [now, now] + args + day + [-1 if full else BATCH])
+                        " ORDER BY s.order_id LIMIT ?", [now, now] + args + day + [limit if limit else (-1 if full else BATCH)])
     return [r[0] for r in rows]
 
 
@@ -258,9 +263,16 @@ def _sent(conn, card_id: int) -> Dict[str, str]:
     return out
 
 
+# the rows of the orders sold before this day keep the bonuses they were written with (order_report.legacy_fee: 50 ₽ for a handed client,
+# the bonus of «На ОТХ» to the owner working as the point too) — for ever, whatever is sent when: the move of the bonuses to 2026-12-01 (the owner 2026-11-25) sends no recount of
+# old rows (the review 2026-11-26); from this day the rows are counted as the report; a sum the office sets counts as everywhere
+KEEPS_BEFORE = "2026-11-27"
+
+
 def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     """Position → (profit ₽, profit %) as the analytics counts it (order_report): the margin of the position's sale (at WebMIM's price where
-    there is one) less its share of the order's fixed sums (75 ₽ to the point, 50 ₽ for a client a point handed over), shared by the sum of
+    there is one) less its share of the order's fixed sums (order_report.fee_parts — the fee of the issue, the bonus of a handed-over client
+    and of the tyres sold from «На ОТХ» — with the sums the office set, order_report.fixes), shared by the sum of
     the sale, so the rows add up to the net profit of the order. None before the sale is written and after it is reversed."""
     ids = [i for i in card["sale_ids"] if i > 0]
     if not ids or len(ids) != len(card["sale_ids"]):
@@ -272,10 +284,28 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
         return {}
     counted = {r["id"]: r for r in order_report._counted(conn, [rows[i] for i in ids])}
     rates, day = order_report.list_rates(conn), min(r["day"] for r in counted.values())
-    fee = order_report.rate_on(rates, "point_fee", day)
-    from . import oth_swap
-    if oth_swap.handed_fee(conn, card["id"]):                                     # never for a client who left (oth_swap)
-        fee += order_report.rate_on(rates, "handoff_fee", day)
+    by_point = order_report._by_point(order_report.list_point_rates(conn))           # a point's own rates (ТЗ 95), as the report
+    issued = next((r["point_id"] for r in counted.values() if r.get("point_id") is not None), None)
+    pieces = sum(r["pieces"] for r in counted.values())
+    handed, _names = order_report.handed_points(conn)                             # «чей клиент»: the report's one rule (a handoff, «Откуда
+    key = ("id", issued) if issued is not None else ("name", "")                  # клиент», the merge, the swap on «На ОТХ»)
+    oth_sold = bool(order_report.oth_sold_orders(conn, [card["id"]]))
+    got = order_report.fee_parts(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]), oth_sold)   # the report's formula
+    fixed = order_report.fixes(conn)                                              # the sums the office set (point_item_fix), as the report
+    from . import point_arrival
+    item = order_report.item_of(card["id"], point_arrival.apart(conn))           # as the report: «sale:N» apart from its arrival
+    theirs = got["handoff_to"][1] if got["handoff_to"] is not None and got["handoff_to"][0] == "id" else None
+    if day < KEEPS_BEFORE and not fixed.get((issued, item)) and not fixed.get((theirs, item)):
+        # the rows of the orders sold before the bonuses moved to 2026-12-01 keep the sums they were written with (the review 2026-11-26:
+        # the deploy sends no recount of old rows); a sum the office sets for such an order counts as everywhere
+        fee = order_report.legacy_fee(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]),
+                                      bool(order_report.oth_sold_orders(conn, [card["id"]], acting=True)))     # the bonus as it was written
+    else:
+        mine = order_report._fix(dict(got), fixed.get((issued, item)), ("issue", "oth"))
+        fee = got["issue"] + got["oth"] + sum(mine.values())
+        if got["handoff_to"] is not None:
+            fee += got["handoff"] + sum(order_report._fix(dict(got), fixed.get((theirs, item)), ("handoff",)).values())
+    fee = round(fee, 2)
     total = sum(r["sale_total"] for r in counted.values())
     pairs = _pair(card["items"], [counted[i] for i in ids])
     out = {}
@@ -497,6 +527,61 @@ def followed(conn, card_id: int) -> set:
     return {key(card_id, i) for i in oth_sale.given(conn, card_id) | order_merge.ever(conn, card_id)} | seconds
 
 
+BASELINE_KEY = "sheet_client_baseline"   # app_state: when the first pass after ТЗ №88 took the names and phones of the panel as followed
+SEEN_PHONE = "_seen_phone"               # a written row: the panel's phone taken as followed by that pass; «Телефон» stays what the cell has
+                                         # (CHECK), so the next change is still checked by it
+
+
+def client_baseline(conn, now: str) -> int:
+    """Once, at the first pass after ТЗ №88 (the review 24.11): a name or phone changed in the panel BEFORE it is never written over the
+    cell (the owner may have corrected it by hand) — only a later change follows. Every written row of an order whose journal has no record
+    the table has not looked at yet (seen_event: a change made after the deploy waits there and goes as any change) takes the panel's name
+    as written and its phone as SEEN_PHONE. Nothing is sent. An order being sent now (claim) is left: its sender has passed here already.
+    Returns the orders touched."""
+    if store.get_state(conn, BASELINE_KEY):
+        return 0
+    touched = 0
+    for card_id, seen, rows in conn.execute("SELECT order_id, seen_event, rows FROM sheet_order WHERE rows != '' AND rows != '{}'").fetchall():
+        if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND id > ? AND author != ? LIMIT 1", (card_id, seen, AUTHOR)).fetchone():
+            continue
+        try:
+            card = orders.get_card(conn, card_id)
+        except orders.OrderError:
+            continue
+        name, phone = " ".join(str(card["client_name"] or "").split()), sheet_phone(card["client_phone"])
+        if not _take_as_seen(json.loads(rows or "{}"), name, phone) or not _claim(conn, card_id, now):
+            continue
+        written = json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0] or "{}")   # after the claim
+        _take_as_seen(written, name, phone)
+        conn.execute("UPDATE sheet_order SET rows = ?, claim_until = '' WHERE order_id = ?", (json.dumps(written, ensure_ascii=False), card_id))
+        conn.commit()
+        touched += 1
+    store.set_state(conn, BASELINE_KEY, now)
+    conn.commit()
+    return touched
+
+
+def _take_as_seen(written: Dict[str, dict], name: str, phone: str) -> bool:
+    """client_baseline on the rows of one order (changed in place): True when a row took something."""
+    changed = False
+    for row in written.values():
+        if "Имя" in row and _differs("Имя", row.get("Имя"), name):
+            row["Имя"], changed = name, True
+        if "Телефон" in row and _differs("Телефон", row.get(SEEN_PHONE, row.get("Телефон")), phone):
+            row[SEEN_PHONE], changed = phone, True
+    return changed
+
+
+def _differs(column: str, before, now) -> bool:
+    """A column of UPDATED changed since the panel wrote it. «Телефон» by its number (sheet_phone: a row written as «+7 911 …» before
+    2026-10-30 is the same number as «8911…»), «Имя» without the spaces around and inside (ТЗ №88): a new form is no change."""
+    if column == "Телефон":
+        return sheet_phone(before) != sheet_phone(now)
+    if column == "Имя":
+        return " ".join(str(before or "").split()) != " ".join(str(now or "").split())
+    return before != now
+
+
 def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey: bool = False) -> List[dict]:
     """What to send: a new position with every column (`create`), a written one with the columns of UPDATED that changed and the cells
     of CHECK as written (the script writes nothing into a row that no longer has them). A row marked `_missing` (rewritten by hand, or
@@ -513,7 +598,8 @@ def changes(now_rows: Dict[str, dict], written: Dict[str, dict], follow=(), grey
             if grey:
                 op["shade"] = True
         elif not before.get("_missing") and not before.get("_removed"):  # a row removed before 2026-11-11 is never made again (the owner)
-            diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if before.get(c) != fields[c]}
+            base = dict(before, **({"Телефон": before[SEEN_PHONE]} if SEEN_PHONE in before else {}))   # a phone of before 24.11: not sent
+            diff = {c: fields[c] for c in UPDATED + (FOLLOWED if mark in follow else ()) if _differs(c, base.get(c), fields[c])}
             shade = grey != bool(before.get("_grey"))
             if not diff and not extra and not shade:
                 continue
@@ -607,13 +693,25 @@ def _last_event(conn, card_id: int) -> int:
                         "(SELECT CAST(value AS INTEGER) FROM app_state WHERE key = 'oth_stored:' || ?)", (card_id, card_id)).fetchone()[0]
 
 
-def _names(items: List[dict]) -> str:
+def _names(items: List[dict], skip=()) -> str:
     seen: List[str] = []
     for op in items:
         for c in list(op["fields"]) + list(op.get("extra") or {}):
-            if c not in seen:
+            if c not in seen and c not in skip:
                 seen.append(c)
     return ", ".join(c for c in COLUMNS if c in seen)
+
+
+def client_line(kept: List[dict]) -> str:
+    """One record per send of the rows whose «Имя» or «Телефон» the table took (ТЗ №88): how many, never the values (the record of the
+    change in the order has them). "" when none."""
+    rows = [op for op in kept if any(c in op["fields"] for c in CLIENT)]
+    if not rows:
+        return ""
+    name = any("Имя" in op["fields"] for op in rows)
+    phone = any("Телефон" in op["fields"] for op in rows)
+    what = "имя и телефон обновлены" if name and phone else ("имя обновлено" if name else "телефон обновлён")
+    return "Google-таблица: %s (%d стр.)." % (what, len(rows))
 
 
 def _failed(conn, card_id: int, failing: int, why: str, now: str, seen: int) -> str:
@@ -652,6 +750,27 @@ def _recreate(http: Transport, url: str, secret: str, ops: List[dict], replies: 
     return ops, replies, ""
 
 
+def _recheck_phone(http: Transport, url: str, secret: str, ops: List[dict], replies: List[dict], failed: str) -> Tuple[List[dict], List[dict], str]:
+    """A row said «edited» to an update carrying a new «Телефон» (the review 24.11): the cell may hold that new phone already — the script
+    wrote it and its answer was lost (a timeout, a rollback of send_order), or the owner typed it before the panel had it. The same op goes
+    once more, checked by the new phone (the code as before): «updated» — the row is the order's, its columns are written and taken; «edited»
+    again — a row rewritten by hand, as before. A failed second send leaves those rows not taken (an error: they go again later, never
+    marked «edited» by a doubt). The script is not changed: it checks what the panel says."""
+    again = [dict(op, check=dict(op["check"], **{"Телефон": op["fields"]["Телефон"]})) for op in ops
+             if not op["create"] and "Телефон" in op["fields"] and _status(replies, op["key"]) == EDITED]
+    if not again:
+        return ops, replies, failed
+    keys = {op["key"] for op in again}
+    try:
+        answer = call(http, url, {"secret": secret, "sheet": SHEET, "rows": again})
+        fresh = [r for r in answer.get("results") or [] if isinstance(r, dict)]
+    except SheetError as err:
+        fresh, failed = [{"key": k, "status": "error", "error": str(err)[:200]} for k in keys], failed or str(err)[:200]
+    ops = [op for op in ops if op["key"] not in keys] + again
+    replies = [r for r in replies if str(r.get("key")) not in keys] + fresh
+    return ops, replies, failed
+
+
 def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: str) -> str:
     """Send what changed in one order (claimed by the caller); returns what happened, in words. No row is ever removed (the owner
     2026-11-11): an order on «Отмена» gets its columns as any other; a row removed before that (`_removed`) is never made again."""
@@ -676,7 +795,8 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     replies = [r for r in answer.get("results") or [] if isinstance(r, dict)]
     lost_rows = [op["key"] for op in ops if not op["create"] and _status(replies, op["key"]) == GONE]
     ops, replies, failed = _recreate(http, url, secret, ops, replies, current, lost_rows, grey=not listed(conn, card_id))
-    results = {str(r.get("key")): str(r.get("status")) for r in replies}
+    ops, replies, failed = _recheck_phone(http, url, secret, ops, replies, failed)
+    results ={str(r.get("key")): str(r.get("status")) for r in replies}
     shaded = {str(r.get("key")): r.get("shade") for r in replies}          # the fill the script made (a script before 2026-11-02 says nothing)
     why = next((str(r.get("error"))[:200] for r in replies if r.get("error")), "") or failed
     unshaded = [op for op in ops if "shade" in op and results.get(op["key"]) in ("created", "updated") and shaded.get(op["key"]) is not op["shade"]]
@@ -689,6 +809,8 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     remade = [op for op in made if op["key"] in lost_rows]
     for op in made + kept:
         written[op["key"]] = dict(written.get(op["key"], {}), **op["fields"], **op.get("extra", {}))
+        if "Телефон" in op["fields"]:                                       # the cell has the panel's phone now: no baseline of it is left
+            written[op["key"]].pop(SEEN_PHONE, None)
         if "shade" in op:
             written[op["key"]]["_grey"] = op["shade"]
         elif op in remade:                                                 # made again white: no fill of the lost row is left
@@ -698,8 +820,11 @@ def send_order(conn, card_id: int, url: str, secret: str, http: Transport, now: 
     lines = []
     if made:
         lines.append("Записано в Google-таблицу: %d стр." % len(made))
-    if any(op["fields"] or op.get("extra") for op in kept):
-        lines.append("Google-таблица обновлена: %s." % _names([op for op in kept if op["fields"] or op.get("extra")]))
+    others = _names([op for op in kept if op["fields"] or op.get("extra")], skip=CLIENT)    # the name and phone: a line of their own
+    if others:
+        lines.append("Google-таблица обновлена: %s." % others)
+    if client_line(kept):
+        lines.append(client_line(kept))
     greyed = [op for op in made + kept if op.get("shade") is True]
     cleared = [op for op in kept if op.get("shade") is False]
     if greyed:
@@ -814,7 +939,7 @@ def _restore_order(conn, card_id: int, marks: List[str], url: str, secret: str, 
     return out
 
 
-def flush(conn, box, http: Transport, now: str, full: bool = False) -> Dict[int, str]:
+def flush(conn, box, http: Transport, now: str, full: bool = False, limit: Optional[int] = None) -> Dict[int, str]:
     """Send the queued orders whose rows changed (order → what happened). The table off, no address or no secret: nothing goes."""
     s = settings(conn)
     if not (s["enabled"] and s["url"]) or box is None:
@@ -822,8 +947,9 @@ def flush(conn, box, http: Transport, now: str, full: bool = False) -> Dict[int,
     secret = _secret(conn, box, s)
     if not secret:
         return {}
+    client_baseline(conn, now)                                             # once: the names and phones changed before ТЗ №88 stay
     done: Dict[int, str] = {}
-    for card_id in _due(conn, now, full):
+    for card_id in _due(conn, now, full, limit):
         if not _claim(conn, card_id, now):
             continue
         try:
@@ -846,16 +972,16 @@ def status(conn) -> dict:
 
 # ---- a lasting failure --------------------------------------------------------------------------------------------------------------
 
-LASTING_HOURS = 3                  # the retries (1/5/15/60 minutes) and two hourly looks: a short hiccup of Google wakes nobody (the lead 2026-10-24)
+LASTING_MINUTES = 55               # the owner 2026-11-23: five retries and more, then at 55 minutes «Нужно действие» and a task to the admin
 ALERTED_KEY = "sheet_lasting_alerted"
 STREAK_STARTS = ("Ошибка Google-таблицы:%", "Google-таблица не приняла%")       # said once, when a streak of failures begins (_failed, send_order)
-LASTING_ALERT = "Tires Sync: Google-таблица не принимает заказы дольше %d ч: %s (последняя ошибка: %s). Проверьте «Подключения → Google-таблица»."
+LASTING_ALERT = "Tires Sync: Google-таблица не принимает заказы дольше %d мин: %s (последняя ошибка: %s). Проверьте «Подключения → Google-таблица»."
 RECOVERED = "Tires Sync: Google-таблица снова принимает заказы."
 
 
 def lasting(conn, now: str) -> List[dict]:
-    """The orders whose failures go on for LASTING_HOURS or longer (the streak begins at its first record in the order's journal)."""
-    edge = (datetime.fromisoformat(now[:19]) - timedelta(hours=LASTING_HOURS)).isoformat(timespec="seconds")
+    """The orders whose failures go on for LASTING_MINUTES or longer (the streak begins at its first record in the order's journal)."""
+    edge = (datetime.fromisoformat(now[:19]) - timedelta(minutes=LASTING_MINUTES)).isoformat(timespec="seconds")
     found = []
     kept, day = _kept(conn)                                                # an order left alone never keeps the alarm on
     for card_id, error in conn.execute("SELECT s.order_id, s.error FROM sheet_order s WHERE s.failing > 0" + kept + " ORDER BY s.order_id",
@@ -868,7 +994,7 @@ def lasting(conn, now: str) -> List[dict]:
 
 
 def lasting_alarm(conn, now: str) -> Optional[Tuple[str, bool]]:
-    """(text, notice) for the owner, once per episode: the alert when an order has failed for LASTING_HOURS, the note when none has any more.
+    """(text, notice) for the owner, once per episode: the alert when an order has failed for LASTING_MINUTES, the note when none has any more.
     The episode turns only when the caller says it was told (alarm_told). None: nothing new to say. The table switched off: the episode is
     over without a word."""
     alerted = store.get_state(conn, ALERTED_KEY)
@@ -879,7 +1005,7 @@ def lasting_alarm(conn, now: str) -> Optional[Tuple[str, bool]]:
     found = lasting(conn, now)
     if found and not alerted:
         names = ", ".join("№%d" % f["order_id"] for f in found[:10]) + (" и ещё %d" % (len(found) - 10) if len(found) > 10 else "")
-        return LASTING_ALERT % (LASTING_HOURS, names, (found[-1]["error"] or "без текста")[:200]), False
+        return LASTING_ALERT % (LASTING_MINUTES, names, (found[-1]["error"] or "без текста")[:200]), False
     if alerted and not found:
         return RECOVERED, True
     return None
@@ -889,3 +1015,58 @@ def alarm_told(conn, now: str, notice: bool) -> None:
     """The owner was told what lasting_alarm gave: the episode begins (the alert) or ends (the note). cli._alert said False (Telegram refused
     it): the next hour says it again."""
     store.set_state(conn, ALERTED_KEY, "" if notice else now[:19])
+
+
+# ---- «Нужно действие» (the owner 2026-11-23: the row must reach the table) ----------------------------------------------------------
+
+ESCALATED_KEY = "sheet_escalated:%d"         # app_state, per order: the start of the streak already escalated (one red record and one task)
+NEED_ACTION = ("Нужно действие: заказ не записан в Google-таблицу %d мин (попыток: %d). Ошибка: %s. Проверьте «Подключения → "
+               "Google-таблица» и лист «Заказы»; после исправления строка запишется сама.")
+TASK_TITLE = "Важное · Google-таблица не приняла заказ №%s: разобраться"
+
+
+def admin_login(conn) -> str:
+    """Whom «Нужно действие» goes to: the owner's login of the alerts (the panel's setting of the alerts; the admin who hears the failures)."""
+    from . import order_notify
+    return order_notify.get_owner_login(conn)
+
+
+def escalate(conn, now: str) -> List[int]:
+    """Every order whose rows the table has refused for LASTING_MINUTES (lasting): once per streak, a red record «Нужно действие» in its
+    journal (the bell shows it) and a task «Важное · …» to the admin with the error and the order's data. A streak over (sent at last):
+    its mark goes, so a new streak is told again. Returns the orders told now."""
+    from . import order_manager, tasks
+    told = []
+    if not enabled(conn):                                                  # switched off on purpose: nothing to escalate (review 2026-11-23)
+        return told
+    failing = {r[0] for r in conn.execute("SELECT order_id FROM sheet_order WHERE failing > 0")}
+    for key, in conn.execute("SELECT key FROM app_state WHERE key LIKE 'sheet_escalated:%'").fetchall():
+        if int(key.split(":")[1]) not in failing:                      # sent at last: the next streak is a new one
+            conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+    for found in lasting(conn, now):
+        card_id, since = found["order_id"], found["since"]
+        if store.get_state(conn, ESCALATED_KEY % card_id) == since:
+            continue
+        try:
+            card = orders.get_card(conn, card_id)
+        except orders.OrderError:
+            continue
+        tries = conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0]
+        minutes = int((datetime.fromisoformat(now[:19]) - datetime.fromisoformat(since[:19])).total_seconds() // 60)
+        error = (found["error"] or "без текста")[:150]
+        orders.add_event(conn, card_id, now, AUTHOR, "sheet", NEED_ACTION % (minutes, tries, error), level="red")
+        label = order_manager.label(card)
+        point = (card.get("point") or {}).get("name") or "точка не указана"
+        items = sum(int(i["qty"] or 0) for i in card["items"])
+        note = ("Ошибка таблицы: %s. Заказ №%s (панель №%d), этап «%s», %s, позиций %d (%d шт.), клиент %s. Не записан с %s, попыток %d."
+                % (error, label, card_id, card["stage"]["name"], point, len(card["items"]), items, card["client_name"] or "без имени",
+                   since[11:16], tries))[:tasks.NOTE_MAX]
+        try:                                                             # the owner's login of the alerts: a panel user or the main login
+            tasks.add(conn, kind="other", title=(TASK_TITLE % label)[:tasks.TITLE_MAX], due_at=now[:16], note=note, now=now, author=AUTHOR,
+                      assignee=admin_login(conn), allowed=None, order_id=card_id, commit=False)
+        except tasks.TaskError:
+            pass                                                         # the red record is there all the same
+        store.set_state(conn, ESCALATED_KEY % card_id, since)
+        told.append(card_id)
+    conn.commit()
+    return told

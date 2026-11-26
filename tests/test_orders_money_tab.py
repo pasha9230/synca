@@ -29,7 +29,7 @@ def test_the_owner_has_the_tab_with_both_forms_and_the_report_has_none(tmp_path)
     assert '<a href="/orders/settings/money">Расчёты</a>' in tabs
     page = client.get("/orders/settings/money").get_data(as_text=True)
     assert 'class="is-active" aria-current="page">Расчёты</a>' in page and "<h2>Ставки</h2>" in page and "<h2>Подписи долей</h2>" in page
-    assert page.count('action="/orders/report/rates"') == 2                    # the same POST as on the report
+    assert page.count('action="/orders/report/rates"') == 3                    # the same POST as on the report (+ «Доход точек», ТЗ 80)
     report = client.get("/orders/report").get_data(as_text=True)
     assert "<h2>Ставки</h2>" not in report and "<h2>Подписи долей</h2>" not in report and 'action="/orders/report/rates"' not in report
     r = client.post("/orders/report/rates", data={"csrf": tok, "point_fee": "80", "point_fee_was": "75", "owner_pct": "50", "owner_pct_was": "50",

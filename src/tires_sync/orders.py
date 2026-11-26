@@ -446,18 +446,19 @@ MARKS = {"settled_point_at": "Расчёт с точкой", "codes_written_off_
 EDITABLE = ("client_name", "client_phone", "avito_chat", "point_id", "delivery_date", "delivery_time", "tags", "comment",
             "webmim_id", "webmim_number", "webmim_status", "cancel_reason", "return_kind", "return_reason", "return_amount",
             "source", "deal_kind", "transfer_number", "settled_point_at", "codes_written_off_at", "settled_supplier_at", "responsible", "reserve_until",
-            "special_terms", "special_amount", "receipt_needed")
+            "special_terms", "special_amount", "receipt_needed", "wait_wish", "wait_analogs")
 LABELS = {"client_name": "Клиент", "client_phone": "Телефон", "avito_chat": "Чат Авито", "point_id": "Точка", "delivery_date": "Дата доставки",
           "delivery_time": "Время доставки", "tags": "Теги", "comment": "Комментарий", "webmim_id": "ID заказа WebMIM",
           "webmim_number": "Номер заказа WebMIM", "webmim_status": "Статус WebMIM", "cancel_reason": "Причина отмены",
           "return_kind": "Тип возврата", "return_reason": "Причина возврата", "return_amount": "Сумма возврата",
           "source": "Откуда", "deal_kind": "Тип сделки", "transfer_number": "Номер перемещения", "responsible": "Ответственный", "reserve_until": "Крайняя дата резерва", "special_terms": "Особые условия", "special_amount": "Сумма по особым условиям",
-          "receipt_needed": "Нужен товарный чек", **MARKS}
+          "receipt_needed": "Нужен товарный чек", "wait_wish": "Пожелания клиента (лист ожидания)", "wait_analogs": "Подойдут аналоги", **MARKS}
 CARD_FIELDS = ("id, pipeline_id, stage_id, client_name, client_phone, avito_chat, point_id, delivery_date, delivery_time, tags, comment, "
                "webmim_id, webmim_number, webmim_status, cancel_reason, return_kind, return_reason, return_amount, sale_ids, "
                "source, deal_kind, transfer_number, settled_point_at, codes_written_off_at, settled_supplier_at, responsible, reserve_until, special_terms, special_amount, receipt_needed, "
-               "created_at, created_by, entered_at, updated_at")
+               "wait_wish, wait_analogs, created_at, created_by, entered_at, updated_at")
 MAX_TAGS, MAX_TAG, MAX_COMMENT, MAX_NOTE = 10, 30, 2000, 2000
+MAX_WISH = 1000                  # «Пожелания клиента» of «Лист ожидания» (the owner 2026-11-26): what the client waits for, in words
 
 
 def tag_list(text) -> List[str]:
@@ -545,7 +546,12 @@ def _clean(key: str, value, conn):
         if not 0 <= amount <= 10_000_000 or amount != amount:
             raise OrderError("%s: от 0 до 10 000 000 ₽." % label)
         return round(amount, 2)
-    if key == "receipt_needed":
+    if key == "wait_wish":
+        text = str(value or "").strip()
+        if len(text) > MAX_WISH:
+            raise OrderError("Пожелания клиента: не длиннее %d знаков." % MAX_WISH)
+        return text
+    if key in ("receipt_needed", "wait_analogs"):
         return 1 if str(value or "").strip().lower() in ("1", "on", "true", "да") else 0
     if key == "responsible":
         return _single(value, 60, label)
@@ -632,6 +638,9 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
     if base["webmim_number"]:                                 # typed in the window of a new order: after the release too (re-review 2026-11-09)
         _mark_number(conn, cur.lastrowid, base["webmim_number"], now)
     add_event(conn, cur.lastrowid, now, author, "created", "Заказ создан на этапе «%s»" % stage["name"])
+    if stage.get("code") == "at_point":                       # made right on «На точке» (a merge): the tyres are there
+        from . import point_arrival
+        point_arrival.came(conn, cur.lastrowid, now, author)
     _attach_client(conn, cur.lastrowid, now, author)
     if commit:
         conn.commit()
@@ -640,13 +649,16 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
 
 
 def create_card_with_items(conn, fields: dict, items: List[dict], now: str, author: str, require_contact: bool = True,
-                           scope_point: Optional[int] = None) -> int:
+                           scope_point: Optional[int] = None, stage: Optional[dict] = None, events: tuple = ()) -> int:
     """A new card with its positions, all or nothing: a position that cannot be added leaves no card behind. `items` are the keyword
-    arguments of add_item (with qty). The rules of the first stage run after the positions, so that their texts see them."""
+    arguments of add_item (with qty). The rules of the first stage run after the positions, so that their texts see them.
+    `stage`: the card is made right on it (the window's «Поставить в ожидание»: «Ожидает наличие»); `events`: (kind, text) for its journal."""
     try:
-        card_id = create_card(conn, fields, now, author, require_contact, commit=False, scope_point=scope_point)
+        card_id = create_card(conn, fields, now, author, require_contact, commit=False, scope_point=scope_point, stage=stage)
         for item in items:
             add_item(conn, card_id, now=now, author=author, commit=False, **item)
+        for kind, text in events:
+            add_event(conn, card_id, now, author, kind, text)
     except Exception:
         conn.rollback()
         raise
@@ -744,7 +756,7 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
     if "webmim_number" in changed:                                      # when it was typed (webmim_cabinet.typed_since_release)
         _mark_number(conn, card_id, changed["webmim_number"], now)
     for key, value in changed.items():
-        if key == "receipt_needed":
+        if key in ("receipt_needed", "wait_analogs"):
             shown = "да" if value else "нет"
         elif key == "special_amount":
             shown = ("%.2f" % value).rstrip("0").rstrip(".") if value else "(пусто)"
@@ -859,7 +871,7 @@ def _no_sale(conn, card_id) -> None:
 
 
 def add_item(conn, card_id, *, goods_id, name, brand_key, season, diameter, territory, qty, sale_unit, supplier_price, terms,
-             fee_pct, promo_pct, now: str, author: str, code: str = "", commit: bool = True) -> int:
+             fee_pct, promo_pct, now: str, author: str, code: str = "", commit: bool = True, awaiting_sale_price: bool = False) -> int:
     _row(conn, card_id)
     _no_sale(conn, card_id)
     goods_id, name = str(goods_id or "").strip(), " ".join(str(name or "").split())
@@ -869,7 +881,7 @@ def add_item(conn, card_id, *, goods_id, name, brand_key, season, diameter, terr
     if point and _row(conn, card_id)["deal_kind"] != "stock":
         raise OrderError("Шину без выгрузки WebMIM можно добавить только в сделку «Из наличия точки»: выберите этот тип сделки и нажмите «Сохранить».")
     qty = _qty(qty)
-    sale = _number(sale_unit, "Цена продажи", 0, 1_000_000, low_open=True)
+    sale = 0 if awaiting_sale_price else _number(sale_unit, "Цена продажи", 0, 1_000_000, low_open=True)
     price = _number(supplier_price, "Цена поставщика", 0, 10_000_000, low_open=not point)       # a point tyre: 0 until the purchase is typed
     fee = _number(fee_pct or 0, "Комиссия", 0, 100)
     promo = _number(promo_pct or 0, "Реклама", 0, 100)
@@ -878,7 +890,8 @@ def add_item(conn, card_id, *, goods_id, name, brand_key, season, diameter, terr
         " purchase_manual) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (card_id, goods_id, str(code or "").strip()[:60], name, str(brand_key or ""), str(season or "all"), int(diameter or 0), str(territory or ""), qty, price, sale,
          json.dumps(terms or {}, ensure_ascii=False), fee, promo, 1 if point else 0))
-    add_event(conn, card_id, now, author, "item", "Добавлено: %s × %d по %s ₽" % (name, qty, format(sale, ".0f")))
+    price_note = " · цена продажи не указана" if awaiting_sale_price else " по %s ₽" % format(sale, ".0f")
+    add_event(conn, card_id, now, author, "item", "Добавлено: %s × %d%s" % (name, qty, price_note))
     order_alerts.resolve_position_added(conn, card_id, now, author)          # «Позиция не добавлена» of before is fixed
     from . import oth_sale
     oth_sale.items_changed(conn, card_id, now, author)                  # a number of tyres «с ОТХ» gives way: the supplier is to be asked
@@ -1000,6 +1013,8 @@ def missing_for(card: dict, stage: dict, placed: Optional[dict] = None) -> List[
     if _needs_placed(stage, placed):
         if not any(int(i["qty"]) >= 1 for i in card["items"]):
             gaps.append("позиции")
+        elif any(i["qty"] >= 1 and i["sale_unit"] <= 0 for i in card["items"]):
+            gaps.append("цены продажи в позициях")
         if not card["point_id"]:
             gaps.append("точка")
         record = bool(card.get("oth_record")) and code in ("oth", "done")     # a record of storage: no client, the tyres are there; «Выполнено»:
@@ -1013,7 +1028,7 @@ def missing_for(card: dict, stage: dict, placed: Optional[dict] = None) -> List[
     if code == "wait":
         if not (card["client_name"] or card["client_phone"]):
             gaps.append("клиент (имя или телефон)")
-        if not card.get("wants"):
+        if not card.get("wants") and not str(card.get("wait_wish") or "").strip():     # a line, or the client's wishes in words (2026-11-26)
             gaps.append("что нужно клиенту")
     if code == SHIPPED and not (card.get("intercity") or {}).get("on"):
         gaps.append("доставка в другой город")                         # «Отправлен» is the courier of the transport company only
@@ -1193,6 +1208,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         conn.rollback()
         return False
     add_event(conn, card_id, now, author, "stage", "Этап: «%s» → «%s»" % (card["stage"]["name"], stage["name"]))
+    from . import point_arrival
+    point_arrival.moved(conn, card_id, card["stage"].get("code"), stage["code"], now, author, stage["kind"])   # the tyres the point got (2026-11-25)
     for (refused,) in conn.execute("SELECT e.id FROM order_event e WHERE e.order_id = ? AND e.kind = 'refused' AND e.level = 'red' AND NOT EXISTS ("
                                    "SELECT 1 FROM order_event_ack a WHERE a.event_id = e.id AND a.login = ?)", (card_id, order_alerts.EVERYBODY)).fetchall():
         order_alerts.resolve(conn, refused, now, author)                       # the card moved: its refused moves are no longer a cause to act
@@ -1338,14 +1355,20 @@ def account_tags(conn) -> set:
     return {" ".join(str(r[0]).split())[:MAX_TAG].lower() for r in conn.execute("SELECT name FROM account WHERE name != ''")}
 
 
-def without_account_names(conn, text: str) -> str:
-    """A text a manager of a point reads (the journal of the order, a row of the bell, the comment) with the names of the Avito accounts put
-    out (the owner 2026-10-29: a point never sees an account's name): a whole word or phrase, in any case; never a piece of a word."""
-    text = str(text or "")
+def account_names(conn) -> set:
+    """The names of the Avito accounts without_account_names puts out: as saved, cut as a tag, and the cabinet's own name."""
     names = {" ".join(str(r[0]).split()) for r in conn.execute("SELECT name FROM account WHERE name != ''")}
     names |= {n[:MAX_TAG].strip() for n in names}                       # the tag of a long name is cut (chat_deals._account_tag)
     from . import connections
-    names |= connections.avito_names(conn)                               # the cabinet's own name, as the panel shows it (2026-10-30)
+    return names | connections.avito_names(conn)                         # the cabinet's own name, as the panel shows it (2026-10-30)
+
+
+def without_account_names(conn, text: str, names: Optional[set] = None) -> str:
+    """A text a manager of a point reads (the journal of the order, a row of the bell, the comment) with the names of the Avito accounts put
+    out (the owner 2026-10-29: a point never sees an account's name): a whole word or phrase, in any case; never a piece of a word.
+    `names`: account_names read once for many texts."""
+    text = str(text or "")
+    names = account_names(conn) if names is None else names
     for name in sorted(names, key=len, reverse=True):
         if len(name) >= 2 and name.lower() in text.lower():
             text = re.sub(r"(?<!\w)%s(?!\w)" % r"\s+".join(re.escape(w) for w in name.split()), ACCOUNT_SHOWN, text, flags=re.I)
@@ -1400,8 +1423,8 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     articles = board_articles(conn) if wanted[0] else {}
     columns = {s["id"]: {"stage": s, "count": 0, "sum": 0.0, "cards": []} for s in stages}
     summary = {"open": 0, "overdue": 0, "new_today": 0, "sum_open": 0.0}
-    rows = conn.execute("SELECT id, stage_id, client_name, client_phone, point_id, delivery_date, tags, created_at, entered_at, webmim_number "
-                        "FROM order_card ORDER BY id DESC").fetchall()
+    rows = conn.execute("SELECT id, stage_id, client_name, client_phone, point_id, delivery_date, tags, created_at, entered_at, webmim_number, "
+                        "wait_wish, wait_analogs FROM order_card ORDER BY id DESC").fetchall()
     from . import oth_sale, order_oth, order_sheet
     stocked = oth_sale.in_stock_ids(conn)                                       # no date of delivery: «Товар в наличии на точке» (open stages only)
     plans = order_oth.plans(conn)                                               # the labels of «На возврат» (2026-11-03)
@@ -1409,7 +1432,7 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
     intercity = {r[0] for r in conn.execute("SELECT order_id FROM order_intercity WHERE enabled = 1")}     # «В другой город» (2026-11-02)
     since = order_oth.migrated_since(conn)                                      # the day of the stage of a migrated order (2026-11-06)
     gone = unlinked_orders(conn)                                                # «На возврат» and after: «клиента нет» (the owner 2026-11-09)
-    for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim in rows:
+    for cid, sid, name, phone, pid, delivery, tags, created, entered, webmim, wish, analogs in rows:
         if sid not in columns:
             continue
         tag_names = tag_list(tags)
@@ -1435,7 +1458,8 @@ def board(conn, now: datetime, point_id: Optional[int] = None, tag: str = "", qu
         columns[sid]["cards"].append({"id": cid, "client": oth_title or (NO_CLIENT if cid in gone else name or phone or "Без имени"), "oth_title": oth_title, "items_text": items_text, "point": names.get(pid, ""),
                                       "delivery_date": delivery, "in_stock": cid in stocked and stage["kind"] == "open", "sum": total if with_sums else None, "days": int(seconds // 86400), "stage_day": stage_day(since.get(cid, entered)), "overdue": overdue,
                                       "tags": tag_names, "intercity": cid in intercity, "webmim": webmim or "", "created": (created or "")[:10],
-                                      "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid), "oth_card": oth_card})
+                                      "returning": order_oth.label_of(plans.get(cid)) if state else "", "oth_dates": on_oth.get(cid), "oth_card": oth_card,
+                                      "wait_wish": (wish or "") if stage["code"] == "wait" else "", "wait_analogs": bool(analogs) and stage["code"] == "wait"})
         columns[sid]["count"] += 1
         columns[sid]["sum"] = round(columns[sid]["sum"] + total, 2)
         if stage["kind"] == "open":
@@ -1461,6 +1485,8 @@ def record_sales(conn, card_id, day: str, now: str, author: str, today: str) -> 
     sold = [it for it in card["items"] if int(it["qty"]) >= 1]       # a position emptied by «Взять с ОТХ» (oth_sale) has nothing to sell
     if not sold:
         raise OrderError("В заказе нет позиций: записывать нечего.")
+    if any(it["sale_unit"] <= 0 for it in sold):
+        raise OrderError("Укажите цены продажи во всех позициях заказа.")
     unknown = [it["name"] for it in sold if not float(it["supplier_price"]) > 0]      # a point tyre before its purchase: never a made-up profit
     if unknown:
         raise OrderError("Не указана закупка: «%s». Впишите «Закупка за 1 шт» в позиции и запишите продажу снова." % "», «".join(unknown))

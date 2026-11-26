@@ -1431,7 +1431,8 @@ def _google_sheet(conn, key_file) -> None:
         done = order_sheet.flush(conn, box, _http(), now, full=True)
         if done:
             print("Google-таблица: %d заказ(ов) просмотрено, с ошибкой: %d" % (len(done), sum(1 for v in done.values() if v.startswith("ошибка"))))
-        said = order_sheet.lasting_alarm(conn, now)                 # a failure of hours: one alert to the owner, one note when it is over
+        order_sheet.escalate(conn, now)                              # «Нужно действие» and the admin's task (the owner 2026-11-23)
+        said = order_sheet.lasting_alarm(conn, now)                 # a lasting failure: one alert to the owner, one note when it is over
         if said and _alert(conn, box, said[0], notice=said[1], recovery=said[1]):        # said[1]: only «снова принимает» (RECOVERED)
             order_sheet.alarm_told(conn, now, said[1])
     except Exception as err:      # noqa: BLE001
@@ -2741,7 +2742,26 @@ def _cmd_chats_sync(args) -> int:
         if not held:
             print("чтение чатов уже идёт, этот запуск пропущен")
             return 0
-        return _chats_sync_locked(conn, box, args, now)
+        result = _chats_sync_locked(conn, box, args, now)
+    _google_sheet_retries(conn, box, now)
+    return result
+
+
+def _google_sheet_retries(conn, box, now: str) -> None:
+    """The owner 2026-11-23: the row must reach the table. Every minute (chats-sync): the orders whose retry is due (every 5–10 minutes,
+    order_sheet.RETRY_MINUTES) or that changed are sent; a failure of 55 minutes brings «Нужно действие» and a task to the admin
+    (order_sheet.escalate) and the alert to the owner (lasting_alarm). A failure here is only a warning: the chats are read all the same."""
+    try:
+        from . import order_sheet
+        now = moscow_now().isoformat(timespec="seconds")          # the moment of the retries, not of the chats read before (review 2026-11-23)
+        order_sheet.flush(conn, box, _http(), now, limit=order_sheet.MINUTE_BATCH)
+        order_sheet.escalate(conn, now)
+        said = order_sheet.lasting_alarm(conn, now)
+        if said and _alert(conn, box, said[0], notice=said[1], recovery=said[1]):
+            order_sheet.alarm_told(conn, now, said[1])
+    except Exception as err:      # noqa: BLE001
+        conn.rollback()
+        print("предупреждение: повтор Google-таблицы не выполнен (%s)" % type(err).__name__, file=sys.stderr)
 
 
 def _cmd_calls_sync(args) -> int:
