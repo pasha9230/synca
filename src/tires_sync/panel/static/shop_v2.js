@@ -23,6 +23,20 @@
     });
     return (form.getAttribute("action") || location.pathname) + (pairs.length ? "?" + pairs.join("&") : "");
   }
+  function updateReset() {
+    var reset = form.querySelector("[data-reset]");
+    if (!reset) return;
+    var active = Array.prototype.some.call(form.elements, function (el) {
+      if (!el.name || ["o", "r", "v", "bm"].indexOf(el.name) >= 0 || el.disabled) return false;
+      if ((el.type === "radio" || el.type === "checkbox") && !el.checked) return false;
+      return !!String(el.value || "").trim();
+    });
+    reset.setAttribute("aria-disabled", active ? "false" : "true");
+    reset.tabIndex = active ? 0 : -1;
+  }
+  form.addEventListener("change", updateReset);
+  form.addEventListener("input", updateReset);
+  updateReset();
   function load() {
     var url = target(), mine = ++seq;
     fetch(url, {credentials: "same-origin"}).then(function (r) {
@@ -38,6 +52,7 @@
     }).catch(function () { if (mine === seq) location.href = url; });
   }
   function later() {
+    updateReset();
     found("Подбираем…");
     clearTimeout(timer);
     timer = setTimeout(load, DELAY);
@@ -49,6 +64,13 @@
     var chips = box.querySelector("[data-ms-chips]"), counter = box.querySelector("[data-ms-n]");
     var name = box.getAttribute("data-name"), one = box.hasAttribute("data-one"), text = box.hasAttribute("data-text");
     var prefix = box.getAttribute("data-prefix") || "", active = -1;
+    box.querySelectorAll("[data-brand-mode]").forEach(function (radio) {
+      radio.addEventListener("change", function () {
+        name = radio.value === "x" ? "xb" : "b";
+        chips.querySelectorAll("input[type=hidden]").forEach(function (h) { h.name = name; });
+        now();
+      });
+    });
     var options = Array.prototype.slice.call(list.querySelectorAll("[role=option]"));
     if (!one) input.removeAttribute("name");          // the typed text is never sent: only the chips (their hidden inputs)
     options.forEach(function (o, i) { o.id = list.id + "-" + i; });
@@ -180,6 +202,9 @@
   });
 
   Array.prototype.forEach.call(form.querySelectorAll("input[type=radio]"), function (r) { r.addEventListener("change", later); });
+  form.querySelectorAll("input[type=number], input[type=checkbox]:not([data-ms-mixed])").forEach(function (input) {
+    input.addEventListener("change", later);
+  });
   var mixed = form.querySelector("[data-ms-mixed]");
   if (mixed) mixed.addEventListener("change", now);       // other fields: the page anew at once
   form.addEventListener("submit", function (e) { e.preventDefault(); clearTimeout(timer); found("Подбираем…"); load(); });

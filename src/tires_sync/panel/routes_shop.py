@@ -140,7 +140,7 @@ def _view2(app, conn, login: str, base: str, f, here: list, items, shots, cart: 
     mixed-width sets. With «Подбор разношироких шин» (`mixed=1`) the rows are the sets (a front and a rear tyre of one model, 2 of
     each by default), then the tyres of each axis in no set; no pages."""
     out = dict(pick2=cc.size_pick2(base, here, {"w": f.widths, "h": f.heights, "d": f.diameters}, cc.size_values(items)),
-               brand_pick=cc.brand_pick(base, here, items, f.brands), mixed=None, any_sizes=cc.ANY_SIZES)
+               brand_pick=cc.brand_pick(base, here, items, f.without or f.brands), mixed=None, any_sizes=cc.ANY_SIZES)
     if request.args.get("mixed") != "1":
         return out
     axes = {p: cc.axis_of(request.args, p) for p, _ in cc.AXES}
@@ -297,7 +297,7 @@ def register(app) -> None:
         f = values["f"]                             # «Недавние» and «Колонки» of the client's own page only (never the owner's preview)
         recent = cc.remember_sizes(conn, login, cc.searched_sizes(f.widths, f.heights, f.diameters, f.sizes), now().isoformat(timespec="seconds"))
         here = [(k, v) for k, v in request.args.items(multi=True) if k in cc.PARAMS]
-        values.update(recent=[] if values.get("mixed") is not None else cc.recent_links("/shop", here, recent), hidden=cc.hidden_columns(conn, login) + ([] if values["wh_both"] else ["wh"]))
+        values.update(recent=[] if values.get("mixed") is not None else cc.recent_links("/shop", here, recent), hidden=cc.hidden_columns(conn, login) + ["year"] + ([] if values["wh_both"] else ["wh"]))
         return _page("shop.html", conn, login, **values)
 
     @app.route("/shop/filters-view", methods=["POST"])

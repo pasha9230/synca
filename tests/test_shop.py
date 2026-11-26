@@ -126,6 +126,9 @@ def make_shop(tmp_path, rows=ROWS, tochki=(), role=(10, 20), rows_of=(), warehou
         warehouses = (1, 2)
     if warehouses is not None:
         client_terms.set_warehouses(conn, "buyer", warehouses, NOW, "o")
+    # Most legacy shop tests exercise the explicitly selected script-free view.
+    from tires_sync import user_prefs
+    user_prefs.put(conn, "buyer", "shop.fview2", 1, NOW)
     client = app.test_client()
     with client.session_transaction() as session:
         session["user"] = "buyer"
