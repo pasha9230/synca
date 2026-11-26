@@ -155,7 +155,7 @@ def update_want(conn, want_id, fields: dict, now: str, author: str) -> None:
 def remove_want(conn, want_id, now: str, author: str) -> None:
     line = _get(conn, want_id)
     card = orders.get_card(conn, line["order_id"])
-    if card["stage"]["code"] == "wait" and len(card["wants"]) <= 1:
+    if card["stage"]["code"] == "wait" and len(card["wants"]) <= 1 and not str(card.get("wait_wish") or "").strip():     # the wishes in words hold the stage too
         raise orders.OrderError("Это последняя строка: заказ на этапе «%s» без неё нельзя. Перенесите заказ на другой этап." % card["stage"]["name"])
     conn.execute("DELETE FROM order_want WHERE id = ?", (want_id,))
     orders.add_event(conn, line["order_id"], now, author, "want", "Строка убрана: %s" % describe(line))

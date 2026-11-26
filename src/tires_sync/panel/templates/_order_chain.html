@@ -15,7 +15,6 @@
 {% if chain %}<div class="row" style="gap:var(--s-2);flex-wrap:wrap">{% for o in chain %}<a class="badge badge--neutral" href="/orders/{{ o.id }}" data-chain-order="{{ o.id }}" title="{{ o.stage }}, создан {{ o.created|day }}">№ {{ o.label }} · {{ o.stage }}</a>{% endfor %}</div>
 {% else %}<p class="small muted" style="margin:0">Этот заказ ни с чем не связан. Если клиент заказывал раньше или заказывает ещё, свяжите заказы: номера будут видны в каждом из них. Заказы останутся отдельными.</p>{% endif %}
 {% if chain_edit %}<div class="row" style="gap:var(--s-2);flex-wrap:wrap;align-items:flex-end">
-<button class="btn btn--primary btn--sm" form="ow-again" data-chain-again>Новый заказ этому клиенту</button>
 <label class="field"><span class="label">Связать с заказом №</span><input class="input" form="ow-chain" name="other" maxlength="40" required placeholder="номер МИМ или панели" inputmode="numeric" autocomplete="off"></label>
 <button class="btn btn--secondary btn--sm" form="ow-chain">Связать</button>
 {% if chain %}<button class="btn btn--ghost btn--sm" form="ow-chain-unlink" data-chain-unlink>Отвязать этот заказ</button>{% endif %}

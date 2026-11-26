@@ -761,7 +761,9 @@ def _migrate(conn) -> None:
                         ("reserve_until", "TEXT NOT NULL DEFAULT ''"), ("special_terms", "TEXT NOT NULL DEFAULT ''"),
                         ("special_amount", "REAL NOT NULL DEFAULT 0"), ("receipt_needed", "INTEGER NOT NULL DEFAULT 0")):
         _add_column(conn, "order_card", column, ddl)
-    _add_column(conn, "order_card", "supplier_number", "TEXT NOT NULL DEFAULT ''")   # the number of the order of 4 Точки, «Оформил вручную» (order_supplier)
+    _add_column(conn, "order_card", "supplier_number", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "order_card", "wait_wish", "TEXT NOT NULL DEFAULT ''")         # «Лист ожидания» of the new order (2026-11-26): what the client waits for, in words
+    _add_column(conn, "order_card", "wait_analogs", "INTEGER NOT NULL DEFAULT 0")    # 1: «подойдут аналоги»   # the number of the order of 4 Точки, «Оформил вручную» (order_supplier)
     # order_arrival of the first version (2026-11-25): the point, the tyres and the day it left came after (the review 2026-11-26)
     _add_column(conn, "order_arrival", "point_id", "INTEGER")
     _add_column(conn, "order_arrival", "pieces", "INTEGER NOT NULL DEFAULT 0")
