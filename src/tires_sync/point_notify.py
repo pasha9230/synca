@@ -1,13 +1,13 @@
-"""Уведомления точек и «Оповещение» точки (the owner 2026-11-25, plan parts D and E).
+"""Уведомления точек и «Сводки» точки (the owner 2026-11-25, plan parts D and E).
 
 D. The notifications of a point (the sound and the browser's notification of notify.js) are on by default: a point without a row of
 point_notify is on. The office (the owner, the partner, the chats' manager) switches them off and on for a point on «Уведомления точек»
 (/points/notify); the point itself on «Рабочее место» — and to switch them off it writes who does it (a name). Every switch is a record of
-point_event (who, when, which point, the name and the reason), as the actions of «Оповещение» are; the office reads them on «Уведомления
+point_event (who, when, which point, the name and the reason), as the actions of «Сводки» are; the office reads them on «Уведомления
 точек». While they are on and the browser has not been answered, a person of the point is asked «Разрешите уведомления» at most
 ASKS_A_DAY times a calendar day, ASK_GAP_MINUTES apart (point_notify_ask, per login and day; notify.js never asks while one types).
 
-E. «Оповещение» of a point (/my-point/notices): the last calendar week — the orders that came to the point, were handed out and the clients
+E. «Сводки» of a point (/my-point/notices): the last calendar week — the orders that came to the point, were handed out and the clients
 it handed over; whether there is a return today (the button says «Есть возвраты!» that day); the open tasks the office set to the managers
 of the point (a red «!» on the button from the task's day on, while it is open), with «Прочитал» and «Выполнено» — both recorded.
 
@@ -128,7 +128,7 @@ def history(conn, point_id=None, since: str = "", until: str = "", kind: str = "
              "author": r[4], "who": r[5], "text": r[6], "task_id": r[7]} for r in rows]
 
 
-# ---- «Оповещение» --------------------------------------------------------------------------------------------------------------------
+# ---- «Сводки» --------------------------------------------------------------------------------------------------------------------
 
 def last_week(today: str) -> tuple:
     """The calendar week before this one: (Monday, Sunday) as days."""
@@ -206,12 +206,12 @@ def task_text(task: dict) -> str:
 
 
 def marks(conn, point_id, today: str) -> Dict[str, bool]:
-    """What the button «Оповещение» says: `returns` — «Есть возвраты!» (a return today); `urgent` — the red «!» (an open task of the
+    """What the button «Сводки» says: `returns` — «Есть возвраты!» (a return today); `urgent` — the red «!» (an open task of the
     office whose day has come). Never raises: a busy base shows the button plain."""
     if point_id is None:
         return {"returns": False, "urgent": False}
     try:
         return {"returns": bool(returns_today(conn, point_id, today)), "urgent": any(t["urgent"] for t in office_tasks(conn, point_id, today))}
     except Exception:                                                     # noqa: BLE001 - the mark is a hint; the page itself opens
-        log.exception("the marks of «Оповещение» of point %s", point_id)
+        log.exception("the marks of «Сводки» of point %s", point_id)
         return {"returns": False, "urgent": False}

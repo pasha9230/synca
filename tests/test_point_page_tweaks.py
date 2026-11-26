@@ -24,7 +24,7 @@ def test_notify_button_is_in_the_head_beside_the_alerts(tmp_path, view):
     page = manager(app, conn, pid).get("/my-point").get_data(as_text=True)
     top = head(page)
     assert page.count("data-notify-enable") == 1 and "data-notify-enable" in top
-    alerts, button = top.index('aria-label="Оповещения'), top.index("data-notify-enable")
+    alerts, button = top.index('aria-label="Сводки'), top.index("data-notify-enable")
     between = top[alerts:button]
     assert alerts < button and between.count("<a ") == 0                                    # right after «Оповещения», nothing between
     assert re.search(r'<button type="button" class="[^"]*(btn--secondary|p2-ico)[^"]*" data-notify-enable hidden>Включить уведомления</button>', top)

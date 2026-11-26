@@ -487,8 +487,9 @@ def test_the_income_page_folds_the_filters_and_tells_the_rule(tmp_path):
     mine = manager(app, conn, a)
     page = mine.get("/my-point/income").get_data(as_text=True).replace("\xa0", " ")
     assert "data-income-filters" in page and "data-filters-toggle" in page and "data-income-more open" not in page
-    assert "data-income-about" in page and "показать полностью" in page and "физически получила" in page
-    assert "отменённые заказы не входят" not in page and "75 ₽ за каждую шину" in page
+    assert "data-income-about" in page and "показать полностью" in page and "физически не приезжали" in page
+    assert "отменённые заказы не входят" not in page and "300 ₽ за комплект (4 шт.)" in page and "за итог: шины выданы клиенту или ушли поставщику возвратом" in page
+    assert "27.11" not in page and "мы платим" not in page and "ваша точка" not in page      # the owner 2026-11-26: one team, no date of the rate
     opened = mine.get("/my-point/income?pay=all").get_data(as_text=True)
     assert re.search(r"data-income-more\s*open|open data-income-more|<details class=\"inc-f-more\" open", opened)
     assert "data-income-filter-on" in opened

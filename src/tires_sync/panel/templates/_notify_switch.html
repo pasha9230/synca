@@ -1,4 +1,4 @@
-{# «Уведомления точек» in the head of «Рабочее место» and «Оповещение» (routes_point_notify, the owner 2026-11-25), both views: the point
+{# «Уведомления точек» in the head of «Рабочее место» and «Сводки» (routes_point_notify, the owner 2026-11-25), both views: the point
    switches its own (off: who does it, required, and why); the office looking at a point sees the state and switches it on /points/notify.
    `cls`: the button's class of the view, `back`: where the press comes back. #}
 {% macro notify_switch(notify, point, user, choose, cls, back) %}{% if point and notify %}
