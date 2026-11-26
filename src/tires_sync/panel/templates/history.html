@@ -2,8 +2,9 @@
 {% from "_ui.html" import icon %}
 {% block title %}История · Tires Sync{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>История</h1><p class="sub">Последняя публикация, журнал действий и версии настроек. Каждое применение черновика — новая версия. Откат создаёт новую версию и не стирает текущую.</p></div></header>
-{% set tab = "log" %}{% include "_history_tabs.html" %}
+{% set tab = "history" %}{% include "_settings_head.html" %}
+{% set htab = "log" %}{% include "_history_tabs.html" %}
+<p class="sub">Последняя публикация, журнал действий и версии настроек. Каждое применение черновика — новая версия. Откат создаёт новую версию и не стирает текущую.</p>
 {% if last_publish %}
 <section class="card" id="last-publish">
 <div class="card-head"><h3>Последняя публикация</h3><span class="sub">{% if last_publish.at %}{{ last_publish.at }} МСК{% else %}ещё не публиковался{% endif %}</span></div>

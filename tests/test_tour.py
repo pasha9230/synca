@@ -131,7 +131,7 @@ def test_every_step_of_the_staff_lights_an_element_of_the_home_page_and_only_its
     if role in ("chats", "viewer"):
         assert "Настройки" not in titles and "История" not in titles and "Главная" in titles and "Чаты" in titles
     else:
-        assert {"Главная", "Заказы", "Чаты", "Каталог", "Настройки", "История"} <= titles
+        assert {"Главная", "Заказы", "Чаты", "Каталог", "Настройки"} <= titles and "История" not in titles    # a tab of «Настройки» (2026-11-26)
 
 
 def test_every_step_of_the_point_lights_an_element_of_its_workplace(tmp_path):

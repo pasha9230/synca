@@ -42,7 +42,6 @@
 {% if can("orders") or can("chats") or can("calls") or can("alerts") %}{% call sb_section("sales", "Продажи") %}
 {% if can("orders") and current_user().role != "point" %}<a class="sb-link{% if path.startswith('/orders') and not path.startswith(('/orders/report', '/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders">{{ icon("clipboard") }}Заказы</a>{% endif %}{# the point: hidden (the owner 2026-11-02) #}
 {% if current_user().role != "point" %}{% include "_nav_tasks.html" %}{% endif %}
-{% if can("orders") and current_user().role != "point" %}<a class="sb-link{% if path.startswith('/points/notify') %} is-active{% endif %}" href="/points/notify">{{ icon("alert") }}Уведомления точек</a>{% endif %}{# «Уведомления точек» (routes_point_notify, 2026-11-25) #}
 {% if can("chats") %}<a class="sb-link{% if path.startswith('/chats') %} is-active{% endif %}" href="/chats">{{ icon("chat") }}Чаты{% if nav.chat_wait %}<span class="sb-count">{{ nav.chat_wait }}</span>{% endif %}</a>{% endif %}
 {% if can("calls") %}<a class="sb-link{% if path.startswith('/calls') %} is-active{% endif %}" href="/calls">{{ icon("clock") }}Звонки</a>{% endif %}
 {% if can("clients") %}<a class="sb-link{% if path.startswith('/clients') %} is-active{% endif %}" href="/clients">{{ icon("users") }}CRM</a>{% endif %}
@@ -65,12 +64,13 @@
 <a class="sb-link{% if path.startswith('/orders/report') %} is-active{% endif %}" href="/orders/report">{{ icon("report") }}Отчёт по заказам</a>
 <a class="sb-link{% if path.startswith('/points/payouts') %} is-active{% endif %}" href="/points/payouts">{{ icon("layers") }}Пункты выдачи</a>{% endif %}
 {% endcall %}{% endif %}
-{% if can("setup") or can("users") %}{% call sb_section("setup", "Настройка") %}
+{% set notify_office = can("orders") and current_user().role != "point" %}{# «Настройки → Уведомления» holds «Уведомления точек» (2026-11-26) #}
+{% if can("setup") or can("users") or notify_office %}{% call sb_section("setup", "Настройка") %}
 {% if can("setup") %}<a class="sb-link{% if path.startswith('/connections') or path.startswith('/accounts') %} is-active{% endif %}" href="/connections">{{ icon("plug") }}Подключения</a>
-<a class="sb-link{% if path.startswith('/settings') %} is-active{% endif %}" href="/settings">{{ icon("sliders") }}Настройки</a>
+<a class="sb-link{% if path.startswith(('/settings', '/history', '/points/notify')) %} is-active{% endif %}" href="/settings">{{ icon("sliders") }}Настройки</a>{# «История» is its tab (the owner 2026-11-26) #}
 <a class="sb-link{% if path.startswith(('/orders/settings', '/orders/templates')) %} is-active{% endif %}" href="/orders/settings">{# «Шаблоны сообщений» is its tab (п. 19, 2026-11-08) #}{{ icon("layers") }}Настройки заказов</a>
-<a class="sb-link{% if path.startswith('/history') %} is-active{% endif %}" href="/history">{{ icon("clock") }}История</a>
 <a class="sb-link{% if path.startswith('/ui-new') %} is-active{% endif %}" href="/ui-new">{{ icon("sparkle") }}Новый вид</a>{% endif %}
+{% if not can("setup") and notify_office %}<a class="sb-link{% if path.startswith(('/settings', '/history')) %} is-active{% endif %}" href="/settings/notify">{{ icon("sliders") }}Настройки</a>{% endif %}{# who has «Заказы» without «Настройка»: «Уведомления точек» #}
 {% if can("users") %}<a class="sb-link{% if path.startswith('/users') %} is-active{% endif %}" href="/users">{{ icon("users") }}Пользователи</a>{% endif %}
 {% endcall %}{% endif %}
 <nav class="sb-group"><a class="sb-link{% if path.startswith('/whats-new') %} is-active{% endif %}" href="/whats-new">{{ icon("sparkle") }}Что нового{% if whatsnew_dot() %}<span class="wn-dot" title="Есть новое"><span class="sr-only">есть новое</span></span>{% endif %}</a></nav>{# every role (routes_whatsnew) #}

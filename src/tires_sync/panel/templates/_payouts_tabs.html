@@ -1,0 +1,5 @@
+{# the tabs of «Аналитика → Пункты выдачи» (the owner 2026-11-26): the ledger and «Аналитика точек» (routes_point_payouts) #}
+<nav class="tabs" data-payouts-tabs>
+<a href="/points/payouts"{% if ptab == "ledger" %} class="is-active" aria-current="page"{% endif %}>Ведомость</a>
+<a href="/points/payouts/analytics"{% if ptab == "analytics" %} class="is-active" aria-current="page"{% endif %}>Аналитика точек</a>
+</nav>
