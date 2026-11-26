@@ -71,3 +71,38 @@ def test_client_cannot_open_office_wheel_catalog(tmp_path):
     from test_shop import make_shop
     _, client, _, _ = make_shop(tmp_path)
     assert client.get('/catalog?category=wheels').status_code == 403
+
+
+def test_wheel_markup_is_staged_and_does_not_enable_publication(tmp_path):
+    from test_catalog_filters import setup
+    from panel_helpers import post
+    from tires_sync import connections, staging
+    from tires_sync.fetcher import wheel_snapshot_path
+    from tires_sync.settings_store import active_settings
+    from tires_sync.wheel_pricing import price_for
+
+    app, owner, token, conn = setup(tmp_path)
+    territory = connections.supplier_territory(conn, 1, active_settings(conn))
+    xml = ('<CATALOG>' + wheel(territory=territory) + '</CATALOG>').encode()
+    wheel_snapshot_path(app.config['UNLOAD_PATH']).write_bytes(xml)
+    html = owner.get('/settings/brands').get_data(as_text=True)
+    assert 'Диски: калькуляция и публикация' in html and 'Не публикуется' in html
+    response = post(owner, '/settings/pricing', token, scope='wheel', brand='BRAND', small='10', large='15')
+    assert response.status_code == 302
+    rules = staging.effective_raw(conn)['wheel_pricing']
+    assert rules == {'BRAND': {'pct_small': 10.0, 'pct_large': 15.0}}
+    assert price_for(parse_unload(xml, territory).offers['42'], rules) == 1400
+    assert 'enabled' not in rules['BRAND']
+
+
+def test_wheel_markup_uses_existing_confirmation_limit(tmp_path):
+    import pytest
+    from test_settings_store import fresh, T2
+    from tires_sync import staging
+    from tires_sync.settings_store import confirm_draft, PercentLimitError
+
+    conn = fresh(tmp_path)
+    staging.set_wheel_pricing(conn, 'BRAND', 500, 500, T2)
+    draft_id = staging.summary(conn)['draft_id']
+    with pytest.raises(PercentLimitError):
+        confirm_draft(conn, draft_id, T2, 'owner')

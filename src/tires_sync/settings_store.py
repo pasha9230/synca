@@ -29,7 +29,7 @@ ALLOWED_KEYS = frozenset({
     "territory_rn", "min_stock", "hysteresis", "min_diameter", "portion_limit", "stale_days",
     "price_jump_limit", "guard_min", "guard_fraction", "allow_mass_removal", "pct_limit", "date_end_days",
     "date_end_renew_days", "contact_phone", "point_mode", "point_values", "point_rest", "enabled", "pricing", "pack4", "pack4_rules", "overrides", "excluded_brands", "excluded_sizes",
-    "price_overrides",
+    "price_overrides", "wheel_pricing",
 })
 
 
@@ -42,6 +42,7 @@ def _check_keys(changes: dict) -> None:
 def _pct_map(raw: dict) -> dict:
     """Every percent of the settings: the brands' ones and the own percents of positions (they need the same extra confirmation)."""
     out = {(k, f): float(v[f]) for k, v in raw["pricing"].items() for f in ("pct_small", "pct_large")}
+    out.update({("wheel", k, field): float(v[field]) for k, v in (raw.get("wheel_pricing") or {}).items() for field in ("pct_small", "pct_large")})
     out.update({("own", k): float(v["pct"]) for k, v in (raw.get("price_overrides") or {}).items() if isinstance(v, dict) and "pct" in v})
     return out
 

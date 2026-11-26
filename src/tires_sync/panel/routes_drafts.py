@@ -4,6 +4,8 @@ import json
 import re
 import sys
 from datetime import timedelta
+from pathlib import Path
+import xml.etree.ElementTree as ET
 
 from flask import abort, flash, jsonify, redirect, render_template, request
 
@@ -12,6 +14,9 @@ from ..cycle import run_for_accounts
 from ..publishing import feed_lock, publish_live_accounts, remember_expected
 from ..settings_store import active_settings
 from ..transport import urllib_transport
+from ..fetcher import wheel_snapshot_path
+from ..webmim import brand_key
+from ..webmim_wheels import parse_unload as parse_wheels
 from .data import load_merged, load_reference
 from ..settings_store import (
     PercentLimitError, StaleDraftError, cancel_draft, confirm_draft, get_active,
@@ -202,11 +207,28 @@ def register(app) -> None:
         return render_template("settings.html", raw=raw, point_names=point_names,
                                pack4_rules=pack4_rules, pack4_brands=pack4_brands, pack4_diameters=pack4_diameters)
 
+    def _wheel_brands(conn):
+        path = wheel_snapshot_path(Path(app.config["UNLOAD_PATH"]))
+        territory = connections.supplier_territory(conn, 1, active_settings(conn))
+        try:
+            data = parse_wheels(path.read_bytes(), territory)
+        except (OSError, ET.ParseError):
+            return None
+        result = {}
+        for wheel in data.offers.values():
+            key = brand_key(wheel.brand)
+            if key:
+                result.setdefault(key, {"label": wheel.brand, "count": 0})["count"] += 1
+        return result
+
     @app.route("/settings/brands")
     @login_required
     def settings_brands_page():
         conn = get_conn()
-        return render_template("settings_brands.html", raw=get_active(conn)[1], pricing_tables=[
+        wheel_brands = _wheel_brands(conn)
+        wheel_rules = staging.effective_raw(conn).get("wheel_pricing", {})
+        return render_template("settings_brands.html", wheel_brands=wheel_brands, wheel_rules=wheel_rules,
+                               raw=get_active(conn)[1], pricing_tables=[
             {"supplier": sp, "rows": service.pricing_table(conn, sp["id"], app.config["UNLOAD_PATH"], load_reference(app.config["REFERENCE_PATH"])),
              "stale": service.supplier_stale_text(conn, sp["id"], app.config["UNLOAD_PATH"]),
              "tochki_off": service.tochki_off_state(conn, sp["id"], app.config["UNLOAD_PATH"])}
@@ -262,6 +284,19 @@ def register(app) -> None:
     def settings_pricing():
         conn = get_conn()
         form = request.form
+        if form.get("scope") == "wheel":
+            try:
+                brands = _wheel_brands(conn)
+                brand = form.get("brand", "")
+                if brands is None or brand not in brands:
+                    raise ValueError("Бренд отсутствует в выгрузке дисков МИМ.")
+                small = float(form.get("small", "").strip().replace(",", "."))
+                large = float(form.get("large", "").strip().replace(",", "."))
+                staging.set_wheel_pricing(conn, brand, small, large, now_iso())
+            except (ValueError, StaleDraftError) as err:
+                flash(str(err), "error")
+                return redirect("/settings/brands#pricing-wheels")
+            return review_or_back(conn, "/settings/brands#pricing-wheels")
         try:
             supplier_id = int(form.get("supplier", ""))
         except ValueError:

@@ -1322,7 +1322,17 @@ def describe_changes(raw: dict, changes: dict, offers=None, min_stock=None) -> l
                 brand, SEASON_NAMES.get(season, season),
                 _pct(old_rule["pct_small"] if old_rule else None), _pct(new_rule["pct_small"]),
                 _pct(old_rule["pct_large"] if old_rule else None), _pct(new_rule["pct_large"])))
+    if "wheel_pricing" in changes:
+        old_rules = raw.get("wheel_pricing") or {}
+        for brand, new_rule in sorted(changes["wheel_pricing"].items()):
+            old_rule = old_rules.get(brand) or {}
+            if new_rule != old_rule:
+                lines.append("Диски %s: до R17 %s → %s, от R18 %s → %s" % (
+                    brand, _pct(old_rule.get("pct_small")), _pct(new_rule["pct_small"]),
+                    _pct(old_rule.get("pct_large")), _pct(new_rule["pct_large"])))
     for key in sorted(changes):
+        if key == "wheel_pricing":
+            continue
         if key == "excluded_brands":
             old_set, new_set = set(raw.get(key) or []), set(changes[key] or [])
             for brand in sorted(new_set - old_set):

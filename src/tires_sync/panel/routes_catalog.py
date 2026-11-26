@@ -15,6 +15,7 @@ from .. import catalog_archive, connections, market, own_bulk, order_oth, order_
 from ..config import own_price_value, settings_from_dict
 from ..fetcher import wheel_snapshot_path
 from ..webmim_wheels import parse_unload as parse_wheels
+from ..wheel_pricing import price_for as wheel_price
 from ..pricing import position_price
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
@@ -621,7 +622,9 @@ def register(app) -> None:
                 {"label": sp["name"], "url": "/catalog?sup=" + str(sp["id"]), "on": False} for sp in suppliers]
             index = next((i for i, tab in enumerate(tabs) if "4точки" in tab["label"].casefold()), len(tabs))
             tabs.insert(index, {"label": "Диски", "url": "/catalog?category=wheels", "on": True})
-            return render_template("catalog_wheels.html", wheels=wheels, supplier_tabs=tabs, q=query, available=snapshot is not None)
+            rules = staging.effective_raw(conn).get("wheel_pricing", {})
+            rows = [{"wheel": wheel, "price": wheel_price(wheel, rules)} for wheel in wheels]
+            return render_template("catalog_wheels.html", wheels=rows, supplier_tabs=tabs, q=query, available=snapshot is not None)
         args = request.args                                                    # «Недавние» of the person (the owner 2026-11-09): the sizes searched
         client_catalog.remember_sizes(get_conn(), current_user()["login"], client_catalog.searched_sizes(
             _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), _view_filters(args)["sizes"]), now_iso())

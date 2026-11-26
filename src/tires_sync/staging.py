@@ -14,7 +14,7 @@ from .overrides import override_key
 from .settings_store import StaleDraftError, cancel_draft, get_active
 
 KEY = "work_draft"
-TRACKED = ("enabled", "pricing", "overrides", "excluded_brands", "excluded_sizes", "price_overrides")
+TRACKED = ("enabled", "pricing", "overrides", "excluded_brands", "excluded_sizes", "price_overrides", "wheel_pricing")
 SEASONS = ("winter", "summer", "all")
 SEASON_RU = {"winter": "зима", "summer": "лето", "all": "всесезонные"}
 
@@ -375,3 +375,12 @@ def cancel_all(conn, now: str, author: str) -> None:
     if draft is not None:
         cancel_draft(conn, draft["id"], now, author)
     store.set_state(conn, KEY, "")
+
+
+def set_wheel_pricing(conn, brand: str, small: float, large: float, now: str) -> None:
+    if not isinstance(brand, str) or not brand.strip() or len(brand) > 120:
+        raise ValueError("Некорректный бренд дисков.")
+    rule = {"pct_small": _pct(small, "до R17"), "pct_large": _pct(large, "от R18")}
+    def fn(eff):
+        eff["wheel_pricing"][brand] = rule
+    _mutate(conn, fn, now)
