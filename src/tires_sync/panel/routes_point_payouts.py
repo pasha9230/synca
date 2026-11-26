@@ -3,7 +3,7 @@
 needs the right «money»); «Рассчитан» writes, so it is of the section «orders» with the right «money» (the owner and the partner)."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from flask import abort, flash, redirect, render_template, request
 
@@ -82,6 +82,24 @@ def register(app) -> None:
 
     def _done():
         return redirect(_back(*_period(request.form, local_iso()[:10]), request.form.get("p", ""), request.form.get("pay", "active")))
+
+    @app.route(PAGE + "/analytics")
+    @login_required
+    def points_analytics_page():
+        """«Пункты выдачи → Аналитика точек» (the owner 2026-11-26): per point and in all, for the period — order → arrived, arrived → the
+        end at the point (median, mean), the shares of not bought / cancelled / returned, the hand-outs, the arrivals, the clients handed over
+        (point_metrics). Section «analytics» (the money right): the owner and the partner; no purchase nor price in it."""
+        from .. import point_metrics
+        conn = get_conn()
+        today = local_iso()[:10]
+        start, end = _period({"from": request.args.get("from") or (date.fromisoformat(today) - timedelta(days=29)).isoformat(),
+                              "to": request.args.get("to", "")}, today)
+        names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM point ORDER BY name")}
+        chosen = request.args.get("p", "").strip()
+        point_id = int(chosen) if chosen.isdigit() and int(chosen) in names else None
+        found = point_metrics.report(conn, start, end, point_id)
+        return render_template("points_analytics.html", start=start, end=end, names=names, point_id=point_id, rows=found["rows"],
+                               total=found["total"], outcome_names=point_metrics.OUTCOME_NAMES)
 
     @app.route(PAGE + "/settle", methods=["POST"])
     @login_required

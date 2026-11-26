@@ -1,5 +1,5 @@
 {# «Уведомления точек» in the head of «Рабочее место» and «Сводки» (routes_point_notify, the owner 2026-11-25), both views: the point
-   switches its own (off: who does it, required, and why); the office looking at a point sees the state and switches it on /points/notify.
+   switches its own (off: who does it, required, and why); the office looking at a point sees the state and switches it on «Настройки → Уведомления».
    `cls`: the button's class of the view, `back`: where the press comes back. #}
 {% macro notify_switch(notify, point, user, choose, cls, back) %}{% if point and notify %}
 {% if user.role == "point" %}<details class="notify-switch" data-notify-switch><summary class="{{ cls }}" data-notify-switch-state="{{ 'on' if notify.enabled else 'off' }}">{{ "Уведомления: вкл" if notify.enabled else "Уведомления выключены" }}</summary>
@@ -12,5 +12,5 @@
 <form method="post" action="/my-point/notify" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="on" value="1"><input type="hidden" name="back" value="{{ back }}">
 <label class="field"><span class="label">Кто включает (необязательно)</span><input class="input" name="who" maxlength="60" autocomplete="off"></label>
 <button class="btn btn--primary btn--sm" data-notify-on>Включить</button></form>{% endif %}</div></details>
-{% elif choose %}<span class="{{ cls }} notify-switch-office" data-notify-switch-state="{{ 'on' if notify.enabled else 'off' }}">{{ "Уведомления: вкл" if notify.enabled else "Уведомления выключены" }}{% if can("orders") %} · <a href="/points/notify?p={{ point.id }}" data-notify-office>изменить</a>{% endif %}</span>{% endif %}
+{% elif choose %}<span class="{{ cls }} notify-switch-office" data-notify-switch-state="{{ 'on' if notify.enabled else 'off' }}">{{ "Уведомления: вкл" if notify.enabled else "Уведомления выключены" }}{% if can("orders") %} · <a href="/settings/notify#points-notify" data-notify-office>изменить</a>{% endif %}</span>{% endif %}
 {% endif %}{% endmacro %}

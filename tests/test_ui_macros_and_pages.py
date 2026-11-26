@@ -75,7 +75,7 @@ def test_every_html_page_has_a_nonempty_title_and_sidebar_marks_the_section(tmp_
     app = make_app(tmp_path)
     client = app.test_client()
     login(client)
-    for url, label in (("/catalog", "Каталог"), ("/mappings", "Сопоставления"), ("/history", "История"), ("/settings", "Настройки")):
+    for url, label in (("/catalog", "Каталог"), ("/mappings", "Сопоставления"), ("/history", "Настройки"), ("/settings", "Настройки")):    # «История» is a tab of «Настройки» (2026-11-26)
         html = client.get(url).get_data(as_text=True)
         assert re.search(r"<title>[^<]+</title>", html)
         assert re.search(r'sb-link is-active"[^>]*>(?:<svg.*?</svg>)?%s' % label, html, re.S), url
