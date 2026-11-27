@@ -495,6 +495,7 @@ def test_the_income_page_folds_the_filters_and_tells_the_rule(tmp_path):
     assert "data-income-filters" in page and "data-filters-toggle" in page and "data-income-more open" not in page
     assert "data-income-about" in page and "показать полностью" in page and "Отмены по вине точки не начисляются на баланс точки." in page
     assert "причина отмены «Точка не передала статус»" in page and "не были в статусе «На точке»" in page
+    assert "продажа тех же шин другому клиенту оплачивается как обычно" in page and "Заказ отменён после приезда шин (шины не на ОТХ) — тоже итог, платим." in page
     # the owner 2026-11-27: the phrases nobody understood are gone
     assert "Заказ отменили, а шины на ОТХ не оставались" not in page and "Дата в списке" not in page
     assert "отменённые заказы не входят" not in page and "300 ₽ за комплект (4 шт.)" in page and "за итог: шины выданы клиенту или ушли поставщику возвратом" in page
@@ -879,7 +880,7 @@ def test_a_settled_arrival_stays_when_the_reason_comes_later(tmp_path):
     go(conn, cid, "placed", "moving", "at_point", "cancel")
     conn.commit()
     point_payouts.settle(conn, [(a, "order:%d" % cid)], START, END, NOW, "owner", today="2026-12-15")
-    orders.update_card(conn, cid, {"cancel_reason": orders.NO_STATUS}, NOW, "o")
+    point_arrival.set_no_status(conn, cid, True)                           # the mark after the settling
     assert issue_of(conn, a) == {cid: (300, True)}                         # «Рассчитан» is never recounted
     assert cid not in point_arrival.no_status(conn)
 
@@ -917,3 +918,43 @@ def test_the_kpi_text_shows_the_premium_of_the_settings_and_follows_a_change(tmp
     assert "30 заказов (от 108 шин) — +6 000 ₽" in page and "+ 2 160 ₽" in page          # the example: 36 tyres × 60 ₽
     bonus = mine.get("/my-point/income?tab=bonus").get_data(as_text=True).replace("\xa0", " ")
     assert "Бонус +240 ₽ за комплект" in bonus and bonus.index("data-bonus-banner") < bonus.index("data-income-tabs")
+
+
+def test_the_mark_goes_when_the_order_is_back_in_work_and_a_text_never_sets_it(tmp_path):
+    from tires_sync import clients
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    cid = card(conn, a)
+    go(conn, cid, "placed", "moving", "at_point")
+    assert orders.move_card(conn, cid, stage(conn, "oth"), DAY, "o", {"cancel_reason": "Отказ клиента на точке: Точка не передала статус"},
+                            oth_split=False)
+    assert cid in point_arrival.no_status(conn)
+    assert orders.move_card(conn, cid, stage(conn, "at_point"), "2026-12-11T10:00:00", "o")      # back to the client: in work again
+    assert cid not in point_arrival.no_status(conn)
+    assert orders.move_card(conn, cid, stage(conn, "oth"), "2026-12-12T10:00:00", "o", oth_split=False)   # a real refusal, no new reason
+    _give_back(conn, cid, "2026-12-14T10:00:00")
+    conn.commit()
+    assert issue_of(conn, a)[cid] == (300, True)
+    client = clients.client_of_order(conn, cid)
+    assert client is None or clients.REFUSED_ORDER_TAG in clients.tags_of(conn, client["id"])
+    other = card(conn, a, phone="+7 900 000 00 08")                         # «другое» naming the words: no mark, paid
+    go(conn, other, "placed", "moving", "at_point")
+    assert orders.move_card(conn, other, stage(conn, "cancel"), DAY, "o",
+                            {"cancel_reason": orders.cancel_reason_of("другое", "точка не передала статус вовремя, но клиент ждал")},
+                            oth_split=False)
+    conn.commit()
+    assert other not in point_arrival.no_status(conn) and issue_of(conn, a)[other] == (300, True)
+
+
+def test_the_split_of_a_refusal_keeps_the_mark_on_the_cancelled_order(tmp_path):
+    from tires_sync import oth_storage
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    cid = card(conn, a)
+    go(conn, cid, "placed", "moving", "at_point")
+    assert orders.move_card(conn, cid, stage(conn, "oth"), DAY, "o", {"cancel_reason": "Отказ клиента на точке: Точка не передала статус"})
+    record = oth_storage.record_of(conn, cid)
+    if record:
+        _give_back(conn, record, "2026-12-14T10:00:00")
+    conn.commit()
+    assert cid in point_arrival.no_status(conn) and cid not in issue_of(conn, a)

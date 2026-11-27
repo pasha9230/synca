@@ -1198,8 +1198,13 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     requested_stage = stage["code"]
     reason = (changes or {}).get("cancel_reason") or card.get("cancel_reason") or ""
     refusal_kind = str(reason).partition(":")[0].strip().casefold()
+    from . import point_arrival
+    # «точка не передала статус» (the owner 2026-11-27): a mark of its own, set by the reason given with this move (never found in an old
+    # text), kept while the tyres wait (cancel, «На ОТХ», the return), taken off when the order is back in work (the review 2026-11-27)
+    no_status = point_arrival.no_status_move(conn, card_id, card["stage"].get("code"), stage["code"], stage["kind"],
+                                             (changes or {}).get("cancel_reason"))
     if requested_stage in ("cancel", "oth") and refusal_kind in ("отменил клиент", "отказ клиента", "отказ клиента на точке") \
-            and NO_STATUS not in str(reason).casefold():                  # the point's fault, not the client's (the owner 2026-11-27)
+            and not no_status:                                              # the point's fault, not the client's
         from . import clients
         clients.mark_order_refusal(conn, card_id, now, author)
     stored = None                                                           # the record of storage this move makes (the owner 2026-11-10)

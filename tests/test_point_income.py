@@ -231,6 +231,7 @@ def test_switched_on_the_point_sees_its_own_sums_only(tmp_path, view):
     assert "Продавайте шины, которые числятся на ОТХ: бонус +200 ₽ / комплект" in shown and "Бонус +200 ₽ за комплект" in shown
     assert "(50 ₽ за шину)" not in shown and "Начисляется после выдачи" not in shown and "ожидаемый бонус" not in shown
     assert "«Передать клиента»" in shown and "Звонки, Чаты и Рабочее место" in shown
+    assert "Если клиента передали и ему же продали со своего ОТХ — засчитывается только бонус за ОТХ." in shown and "Нельзя" not in shown
     october = mine.get("/my-point/income?tab=bonus&m=2026-10").get_data(as_text=True).replace("\xa0", " ")
     # before the bonuses start (BONUS_FROM, the owner 2026-11-25): the hint says the rates of that day and the day, never «+0 ₽»
     assert "бонус +200 ₽ / комплект" in october and "+0 ₽" not in october

@@ -20,6 +20,15 @@ def rub(value) -> str:
     return text + " ₽"
 
 
+MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря")
+
+
+def long_day(day: str) -> str:
+    """«2026-12-01» → «01 декабря 2026 года» (the texts of «KPI»)."""
+    found = date.fromisoformat(day[:10])
+    return "%02d %s %d года" % (found.day, MONTHS[found.month - 1], found.year)
+
+
 def _day(text, default: str) -> str:
     try:
         return date.fromisoformat(str(text or "").strip()[:10]).isoformat()
@@ -239,7 +248,7 @@ def _kpi(report: dict, conn, point_id: int, month: str, today: str) -> dict:
                 sets=round(count["need_tyres"] / 4),
                 steps=[{"orders": count["need_orders"] * n, "tyres": count["need_tyres"] * n, "fee": round(count["bonus"] * n, 2)}
                        for n in (1, 2, 3)],
-                example=_kpi_example(rates, count), kpi_from=order_report.KPI_FROM,
+                example=_kpi_example(rates, count), kpi_from=order_report.KPI_FROM, kpi_from_text=long_day(order_report.KPI_FROM),
                 started=last >= order_report.KPI_FROM, this_month=month == today[:7])
 
 

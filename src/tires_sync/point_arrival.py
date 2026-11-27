@@ -193,20 +193,51 @@ def state(conn, order_id: int) -> Dict[str, object]:
 
 
 NO_STATUS_STAGES = ("cancel", "oth", "return_agree", "return_given", "return")   # where an order cancelled by that reason stands
+NO_STATUS_KEY = "order_no_status:%d"                                             # app_state: the mark of «точка не передала статус»
+
+
+def is_no_status(reason) -> bool:
+    """The reason given is «точка не передала статус»: the choice of «Отменить заказ» (orders.cancel_reason_of, a text after it allowed)
+    or of the point's «ОТКАЗ» (order_manager.REFUSE_REASON). Not «другое: …» that only names it."""
+    from . import orders, order_manager
+    text = " ".join(str(reason or "").split()).casefold().replace("ё", "е")
+    refused = (order_manager.REFUSE_REASON % orders.NO_STATUS).casefold()
+    return text == orders.NO_STATUS or text.startswith(orders.NO_STATUS + ":") or text == refused
+
+
+def set_no_status(conn, order_id: int, on: bool) -> None:
+    """The mark of «точка не передала статус» on or off (no commit)."""
+    if on:
+        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, '1')", (NO_STATUS_KEY % int(order_id),))
+    else:
+        conn.execute("DELETE FROM app_state WHERE key = ?", (NO_STATUS_KEY % int(order_id),))
+
+
+def no_status_move(conn, order_id: int, was_code: str, code: str, kind: str, reason) -> bool:
+    """orders.move_card, in its transaction: a move to «Отмена» / «На ОТХ» with a reason sets the mark by that reason; the order back in
+    work (an open stage other than «На ОТХ» / the return) loses it. True if the order holds the mark after the move."""
+    if code in ("cancel", "oth") and reason:
+        set_no_status(conn, order_id, is_no_status(reason))
+    elif code not in NO_STATUS_STAGES and kind == "open":
+        set_no_status(conn, order_id, False)
+    return conn.execute("SELECT 1 FROM app_state WHERE key = ?", (NO_STATUS_KEY % int(order_id),)).fetchone() is not None
 
 
 def no_status(conn) -> set:
     """The orders cancelled with «точка не передала статус» (the owner 2026-11-27, orders.NO_STATUS: the tyres came, the point did not
     pass the status, the client cancelled after waiting): their arrival pays nothing — not «к начислению», not in the sums, nor a return of
-    their tyres to the supplier later. The office's choice in «Отменить заказ» and the point's «ОТКАЗ» (in the reason, any spelling). The
-    order back on its way (the reason cleared, another stage) pays as before. An arrival already settled («Рассчитан») stays as it was."""
-    from . import orders
-    found = set()
-    for order_id, reason in conn.execute(
-            "SELECT c.id, c.cancel_reason FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE c.cancel_reason != '' "
-            "AND s.code IN (%s)" % ",".join("?" * len(NO_STATUS_STAGES)), NO_STATUS_STAGES):
-        if orders.NO_STATUS in str(reason or "").casefold().replace("ё", "е"):
-            found.add(int(order_id))
+    their tyres to the supplier later (a sale of those tyres to another client is that sale's, paid as usual). The mark is set by the
+    reason of the move (no_status_move) and holds while the order stands on NO_STATUS_STAGES. An arrival already settled («Рассчитан»)
+    stays as it was."""
+    marked = set()
+    for (key,) in conn.execute("SELECT key FROM app_state WHERE key LIKE ?", (NO_STATUS_KEY.replace("%d", "%"),)):
+        digits = key.rsplit(":", 1)[1]
+        if digits.isdigit():
+            marked.add(int(digits))
+    if not marked:
+        return set()
+    found = {r[0] for r in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s)"
+                                        % ",".join("?" * len(NO_STATUS_STAGES)), NO_STATUS_STAGES) if r[0] in marked}
     if found:
         settled = {r[0] for r in conn.execute("SELECT item FROM point_paid WHERE cancelled_at IS NULL AND item LIKE 'order:%'")}
         found = {o for o in found if "order:%d" % o not in settled}
