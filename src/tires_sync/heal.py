@@ -46,6 +46,9 @@ def plan(feed: Dict[str, ET.Element], report_items: List[dict], cabinet: List[di
     """{"bind": [{orphan, feed_id, code, title}], "renew": [code], "repeat": [code], "over_limit": [code], "recent": [code], "alive": [code]}.
     `recent`: the codes taken off the feed and published again lately; they are never renewed here. `alive`: the codes of which another ad (the single
     ad next to a set of four, for example) is alive in the cabinet: a renewal is per code and would give that live ad a new Id too."""
+    # Rim identifiers inhabit a separate namespace and must never be healed
+    # or rebound using tire names and tire supplier codes.
+    feed = {ad_id: ad for ad_id, ad in feed.items() if not str(ad_id).startswith("wheel_")}
     code_of = lambda ad_id: inverse.get(ad_id) or mirror_feed.supplier_code(ad_id)
     live_codes = {code_of(str(i["ad_id"])) for i in cabinet if i.get("status") == "active" and i.get("ad_id")}
     binds = reconcile.plan(feed, cabinet, foreign_ids)

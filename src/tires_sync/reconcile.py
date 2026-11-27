@@ -37,6 +37,10 @@ PACK = re.compile(r"-x\d+(_|$)")
 def plan(feed: Dict[str, ET.Element], cabinet: List[dict], foreign_ids=()) -> List[dict]:
     """[{orphan, feed_id, title}]: a live ad of the cabinet whose Id our feed does not have, and the one ad of the feed that is the same tire under
     another Id which is not itself live in the cabinet. `cabinet` is [{ad_id, status, title}]. A tire with two candidates is left alone."""
+    # Wheel advertisements share the account but must never be considered
+    # tire candidates or orphan tires, even if their title resembles a tire.
+    feed = {ad_id: ad for ad_id, ad in feed.items() if not str(ad_id).startswith("wheel_")}
+    cabinet = [item for item in cabinet if not str(item.get("ad_id") or "").startswith("wheel_")]
     live = {c["ad_id"] for c in cabinet if c.get("status") == "active" and c.get("ad_id")}
     foreign = set(foreign_ids)
     by_key: Dict[Tuple, List[str]] = {}

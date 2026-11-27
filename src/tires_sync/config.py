@@ -59,6 +59,9 @@ def settings_from_dict(raw: dict, enforce_pct_limit: bool = True) -> Settings:
         excluded_sizes=_excluded_sizes(raw.get("excluded_sizes")),
         price_overrides=price_overrides(raw.get("price_overrides")),
     )
+    from .wheel_pricing import validate_rules, validate_accounts
+    validate_accounts(raw.get("wheel_accounts", {}))
+    validate_rules(raw.get("wheel_pricing", {}), settings.pct_limit if enforce_pct_limit else None)
     _validate(settings, enforce_pct_limit)
     return settings
 
