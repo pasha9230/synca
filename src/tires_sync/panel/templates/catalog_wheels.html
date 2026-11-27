@@ -1,14 +1,36 @@
 {% extends "base.html" %}
+{% from "_ui.html" import icon %}
 {% block title %}Диски · Каталог{% endblock %}
 {% block page_class %} page--wide{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office_catalog.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='wheel_catalog.css') }}">{% endblock %}
 {% block content %}
-<header class="page-head"><div><h1>Каталог</h1><p class="sub">Диски поставщика МИМ</p></div></header>
+<header class="page-head"><div><h1>Каталог</h1></div></header>
 <nav class="tabs">{% for t in supplier_tabs %}<a href="{{ t.url }}"{% if t.on %} class="is-active" aria-current="page"{% endif %}>{{ t.label }}</a>{% endfor %}</nav>
-<section class="card"><div class="card-body">
-<form method="get" action="/catalog" class="row"><input type="hidden" name="category" value="wheels"><input class="input" name="q" value="{{ q }}" placeholder="Бренд, модель, артикул"><button class="btn btn--primary">Найти</button></form>
+<form method="get" action="/catalog" class="oc-filters wheel-filters" data-wheel-filters>
+<input type="hidden" name="category" value="wheels"><input type="hidden" name="more" value="{{ '1' if more else '0' }}" data-wheel-more>
+<div class="oc-search"><input class="input" name="q" value="{{ filters.q }}" placeholder="Размер, название, бренд, артикул" aria-label="Поиск по каталогу дисков"><button class="btn btn--primary" type="submit" aria-label="Найти">{{ icon('search') }}</button></div>
+<section class="card oc-panel">
+<div class="wheel-parameters">
+{% for key, label, symbol in [('width', 'Ширина', ''), ('diameter', 'Диаметр', 'R'), ('holes', 'Кол. отв.', 'PCD'), ('pcd', 'Расст.', '×'), ('offset', 'Вылет', 'ET'), ('bore', 'Ступица', 'DIA')] %}
+<label class="wheel-parameter">{% if symbol %}<span class="wheel-symbol">{{ symbol }}</span>{% endif %}<span class="sr-only">{{ label }}</span><select class="select" name="{{ key }}" aria-label="{{ label }}"><option value="">{{ label }}</option>{% for value in options[key] %}<option value="{{ value }}"{% if filters[key] == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+{% endfor %}
+</div>
+<div class="wheel-secondary">
+<p class="muted small wheel-exact">Указанные параметры совпадают точно</p>
+<label class="oc-outlined"><span>Тип</span><select class="select" name="type"><option value="">Все типы</option>{% for value in options.type %}<option value="{{ value }}"{% if filters.type == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+<label class="oc-outlined"><span>Производитель</span><select class="select" name="brand"><option value="">Все бренды</option>{% for value in options.brand %}<option value="{{ value }}"{% if filters.brand == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+<div class="wheel-origin" aria-label="Происхождение"><span class="muted small">Происхождение</span><div class="seg" title="МИМ не передаёт страну происхождения дисков"><label><input type="radio" checked disabled>Все</label><label><input type="radio" disabled>Импортные</label><label><input type="radio" disabled>Отечественные</label></div></div>
+<label class="oc-outlined wheel-stock"><span>В наличии от</span><input class="input" name="sn" type="number" min="0" max="1000000" step="1" value="{{ filters.sn }}" aria-label="В наличии от, штук"></label>
+</div>
+<details class="wheel-more" data-wheel-details{% if more %} open{% endif %}><summary><span class="wheel-show">⌄&nbsp; Все фильтры</span><span class="wheel-hide">⌃&nbsp; Скрыть</span></summary><div class="wheel-extra"><label class="oc-outlined"><span>Цена от, ₽</span><input class="input" name="pf" type="number" min="0" step="1" value="{{ filters.pf }}"></label><label class="oc-outlined"><span>Цена до, ₽</span><input class="input" name="pt" type="number" min="0" step="1" value="{{ filters.pt }}"></label><span class="muted small">Фильтр по нашей цене</span></div></details>
+<div class="wheel-footer"><noscript><button type="submit" class="btn btn--secondary">Показать</button></noscript><a class="wheel-reset{% if not filters_active %} is-disabled{% endif %}" href="{% if filters_active %}/catalog?category=wheels{% else %}#{% endif %}"{% if not filters_active %} aria-disabled="true" tabindex="-1"{% endif %}>⊖&nbsp; Сбросить фильтры</a></div>
+<p class="muted small wheel-note">Происхождение недоступно: МИМ не передаёт страну для дисков.</p>
+</section>
+</form>
 {% if not available %}<p class="muted">Выгрузка дисков ещё не загружена.</p>{% else %}
-<p class="muted">Найдено {{ wheels|length }} позиций · {% if fetched_at %}обновлено {{ fetched_at }}{% else %}время обновления неизвестно{% endif %}</p>
-<div class="table-wrap"><table class="table"><thead><tr><th>Бренд</th><th>Название</th><th>Артикул</th><th>Диаметр</th><th>Ширина</th><th>Разболтовка</th><th>Вылет</th><th>DIA</th><th>Цвет</th><th>Остаток</th><th>Цена поставщика</th><th>Наша цена</th></tr></thead><tbody>
-{% for row in wheels %}{% set w = row.wheel %}<tr><td>{{ w.brand }}</td><td>{{ w.name }}</td><td>{{ w.code }}</td><td>{{ w.diameter }}</td><td>{{ w.width }}</td><td>{{ w.holes }} × {{ w.pcd }}</td><td>{{ w.offset }}</td><td>{{ w.center_bore }}</td><td>{{ w.color }}</td><td>{{ w.stock }}</td><td>{{ w.price }}</td><td>{{ row.price if row.price is not none else "—" }}</td></tr>{% endfor %}
-</tbody></table></div>{% endif %}</div></section>
+<section class="card wheel-results"><div class="card-body"><p class="muted">Найдено {{ wheels|length }} позиций · {% if fetched_at %}обновлено {{ fetched_at }}{% else %}время обновления неизвестно{% endif %}</p>
+<div class="table-wrap"><table class="table"><thead><tr><th>Бренд</th><th>Название</th><th>Артикул</th><th>Диаметр</th><th>Ширина</th><th>Разболтовка</th><th>Вылет</th><th>DIA</th><th>Цвет</th><th>Остаток</th>{% if has_right('money') %}<th>Цена поставщика</th>{% endif %}<th>Наша цена</th></tr></thead><tbody>
+{% for row in wheels %}{% set w = row.wheel %}<tr><td>{{ w.brand }}</td><td>{{ w.name }}</td><td>{{ w.code }}</td><td>{{ w.diameter }}</td><td>{{ w.width }}</td><td>{{ w.holes }} × {{ w.pcd }}</td><td>{{ w.offset }}</td><td>{{ w.center_bore }}</td><td>{{ w.color }}</td><td>{{ w.stock }}</td>{% if has_right('money') %}<td>{{ w.price|money }}</td>{% endif %}<td>{{ row.price|money if row.price is not none else "—" }}</td></tr>{% else %}<tr><td colspan="12" class="muted">По выбранным условиям диски не найдены.</td></tr>{% endfor %}
+</tbody></table></div></div></section>{% endif %}
+<script src="{{ url_for('static', filename='wheel_catalog.js') }}" defer></script>
 {% endblock %}

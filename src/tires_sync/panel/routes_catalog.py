@@ -25,7 +25,7 @@ from ..webmim import ParseResult
 from ..settings_store import active_settings
 from .routes_main import context
 from .routes_orders import local_iso
-from . import client_catalog, routes_market, service
+from . import client_catalog, routes_market, service, wheel_catalog
 
 
 def _num(args, name):
@@ -613,24 +613,32 @@ def register(app) -> None:
                 snapshot = parse_wheels(path.read_bytes(), territory)
             except (OSError, ET.ParseError):
                 snapshot = None
-            query = request.args.get("q", "").strip()[:120]
             wheels = sorted(snapshot.offers.values(), key=lambda w: (w.brand.casefold(), w.name.casefold())) if snapshot else []
-            if query:
-                words = query.casefold().split()
-                wheels = [w for w in wheels if all(word in " ".join((w.name, w.brand, w.model, w.code)).casefold() for word in words)]
+            rules = get_active(conn)[1].get("wheel_pricing", {})
+            rows, filters, filters_active = wheel_catalog.filtered(wheels, request.args, lambda w: wheel_price(w, rules))
+            options = {key: wheel_catalog.choices(wheels, attr) for key, (attr, _) in wheel_catalog.PARAMETERS.items()}
+            options['type'] = wheel_catalog.choices(wheels, 'wheel_type')
+            options['brand'] = wheel_catalog.choices(wheels, 'brand')
+            # Present the supplier's spelling after normalizing decimal commas.
+            for key in wheel_catalog.PARAMETERS:
+                if filters[key]:
+                    filters[key] = next((value for value in options[key] if wheel_catalog.number(value) == wheel_catalog.number(filters[key])), filters[key])
+            for key in (*wheel_catalog.PARAMETERS, 'type', 'brand'):
+                if filters[key] and filters[key] not in options[key]:
+                    options[key].append(filters[key])
             suppliers = connections.list_suppliers(conn)
             tabs = [{"label": "Все", "url": "/catalog", "on": False}] + [
                 {"label": sp["name"], "url": "/catalog?sup=" + str(sp["id"]), "on": False} for sp in suppliers]
             index = next((i for i, tab in enumerate(tabs) if "4точки" in "".join(tab["label"].casefold().split())), len(tabs))
             tabs.insert(index, {"label": "Диски", "url": "/catalog?category=wheels", "on": True})
-            rules = get_active(conn)[1].get("wheel_pricing", {})
-            rows = [{"wheel": wheel, "price": wheel_price(wheel, rules)} for wheel in wheels]
             try:
                 metadata = json.loads(path.with_name(path.name + ".meta.json").read_text(encoding="utf-8"))
                 fetched_at = str(metadata.get("fetched_at") or "")[:40]
             except (OSError, ValueError, AttributeError):
                 fetched_at = ""
-            return render_template("catalog_wheels.html", wheels=rows, supplier_tabs=tabs, q=query, available=snapshot is not None, fetched_at=fetched_at)
+            return render_template("catalog_wheels.html", wheels=rows, supplier_tabs=tabs, filters=filters, options=options,
+                                   filters_active=filters_active, more=(request.args.get("more") == "1" if "more" in request.args else bool(filters['pf'] or filters['pt'])),
+                                   available=snapshot is not None, fetched_at=fetched_at)
         args = request.args                                                    # «Недавние» of the person (the owner 2026-11-09): the sizes searched
         client_catalog.remember_sizes(get_conn(), current_user()["login"], client_catalog.searched_sizes(
             _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), _view_filters(args)["sizes"]), now_iso())
