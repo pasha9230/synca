@@ -724,7 +724,9 @@ def test_the_publication_of_the_panel_tells_a_mirror_without_a_plan_too(tmp_path
     conn.commit()
     folder = tmp_path / "tok"
     folder.mkdir()
-    (folder / "avito_feed.xml").write_bytes(b"the file alone")
+    (folder / "avito_feed.xml").write_bytes(b"<Ads><Ad><Id>1</Id></Ad></Ads>")
+    (folder / "next").mkdir()
+    (folder / "next" / "avito_feed.xml").write_bytes(b"<Ads><Ad><Id>1</Id></Ad></Ads>")
     monkeypatch.setattr(connections, "list_feed_accounts", lambda c: [{"id": 1, "live": True, "feed_token": "tok", "feed_mode": "mirror"}])
     monkeypatch.setattr(publishing, "promote_feed", lambda *a, **k: {"new": 1, "old": 1})
     monkeypatch.setattr(publishing, "active_settings", lambda c: None)
