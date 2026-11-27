@@ -202,12 +202,13 @@ def test_no_message_form_when_the_account_may_not_send_or_for_analogs_or_without
     assert "Есть аналоги" in page and "Отправить клиенту в чат Авито" not in page                              # analogs are for the manager only, and there is no chat
 
 
-def test_an_analog_leaves_no_message_form_for_the_client_even_with_a_chat_that_may_send(tmp_path):
+def test_an_analog_has_the_message_form_for_the_client_with_a_chat_that_may_send(tmp_path):
+    """The owner 2026-11-27: «появился аналог» is offered too; the switch off, the manager sends it from the form of the task."""
     client, conn, card_id, chat = chat_with_order(
         tmp_path, want={**WANT, "any_brand": True},
         offer=make_offer(brand_key="KUMHO", width=205, height=55, diameter=16, season=Season.WINTER, studded=False, stock=8, code="K1"))
     page = text(client, "/orders/%d" % card_id)
-    assert "Есть аналоги" in page and "Отправить клиенту в чат Авито" not in page and "появились в наличии" not in page
+    assert "Есть аналоги" in page and "Отправить клиенту в чат Авито" in page
 
 
 def test_the_send_mark_of_the_message_to_the_client_is_the_same_on_every_visit_so_a_second_press_sends_nothing(tmp_path):
@@ -227,9 +228,9 @@ def test_the_form_of_the_found_tire_has_the_words_and_the_price_of_the_message_b
     open(app_unload, "wb").write(catalog_xml(commodity_xml(NREST="8")))
     page = text(client, "/orders/%d" % card_id)
     words = re.search(r'<textarea class="textarea" name="text"[^>]*>([^<]*)</textarea>', page).group(1)
-    assert words.startswith("Здравствуйте. «Ikon 205/55/16 T 94 Test Model» появилось в наличии у нас на складе, стоимость: ")
-    assert re.search(r"стоимость: [\d  ]+ ₽ за штуку\. Желаете оформить заказ\?$", words)
-    assert message_texts.body(conn, message_texts.WAIT_FOUND).startswith("Здравствуйте. «{name}»")
+    assert words.startswith("Добрый день. Ранее вас добавляли в лист ожидания, «Ikon 205/55/16 T 94 Test Model» появилось в наличии у нас на складе. Цена: ")
+    assert re.search(r"Цена: [\d  ]+ ₽ за штуку\. Актуально ещё\? Это авто-сообщение\.", words)
+    assert message_texts.body(conn, message_texts.WAIT_FOUND).startswith("Добрый день. Ранее вас добавляли в лист ожидания, «{name}»")
 
 
 def test_the_form_keeps_the_words_of_the_lines_when_the_unload_cannot_be_read(tmp_path):

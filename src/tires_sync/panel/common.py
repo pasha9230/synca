@@ -293,6 +293,7 @@ for _section, _endpoints in {
               "orders_rule_add", "orders_stage_delete", "orders_stage_shift", "orders_stage_update", "orders_stage_add",
               "orders_templates_page", "orders_template_delete", "orders_template_samples", "orders_template_save",
               "orders_text_save", "orders_text_reset",    # «Шаблоны сообщений»: the texts that go by themselves (message_texts)
+              "orders_wait_autosend",                     # «Автоотправка предложений из листа ожидания»: the route lets the owner only
               "orders_bot_answer_delete", "orders_bot_answer_toggle", "orders_bot_answer_add", "orders_report_rates"),
     "users": ("users_page", "users_invite", "users_role", "users_active", "users_invite_revoke",
               "users_login_reset", "users_login_reset_revoke",     # «Сбросить вход»: the owner only (EDIT of «Пользователи»)

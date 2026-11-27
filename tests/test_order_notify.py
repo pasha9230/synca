@@ -142,7 +142,7 @@ def test_a_new_task_asks_for_one_alert_and_the_next_cycle_does_not_repeat_it(tmp
     calls = []
     order_wait.check(conn, offers, NOW, notify=lambda cid, title, body: calls.append((cid, title, body)))
     order_wait.check(conn, offers, "2026-10-15T13:00:00", notify=lambda cid, title, body: calls.append("again"))
-    assert len(calls) == 1 and calls[0][0] == card_id and "предложите клиенту" in calls[0][1] and "Заказ №%d" % card_id in calls[0][2]
+    assert len(calls) == 1 and calls[0][0] == card_id and calls[0][1] == order_wait.TITLE_CALL and "Заказ №%d" % card_id in calls[0][2]
 
 
 def test_a_failing_alert_never_stops_the_check(tmp_path):

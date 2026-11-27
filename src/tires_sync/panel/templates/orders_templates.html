@@ -3,6 +3,12 @@
 {% block title %}Шаблоны сообщений · Настройка · Tires Sync{% endblock %}
 {% block content %}
 {% set tab = "templates" %}{% include "_orders_settings_head.html" %}
+<section class="card" style="margin-bottom:var(--s-4)" id="wait-auto"><div class="card-head"><h3>Лист ожидания: предложения клиентам</h3></div><div class="card-body stack">
+<p class="sub" style="margin:0">Когда для заказа на «Ожидает наличие» появляется нужная шина или аналог, панель готовит сообщение клиенту по шаблонам ниже. Сейчас: {{ "уходит в чат Авито само" if wait_auto else "не уходит само — менеджеру ставится задача с готовым текстом и кнопкой «Отправить»" }}. Ответ клиента «Да» — задача менеджеру, «Нет» — заказ в «Отмена» с причиной «клиент отказался от ожидания». Нет чата — задача позвонить.</p>
+{% if wait_auto_switch %}<form method="post" action="/orders/templates/wait-auto" class="row" style="gap:var(--s-3);align-items:center" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label><input type="checkbox" name="on" value="1"{% if wait_auto %} checked{% endif %}> Автоотправка предложений из листа ожидания</label>
+<button class="btn btn--primary btn--sm">Сохранить</button></form>{% else %}<p class="small muted" style="margin:0">Включает и выключает владелец.</p>{% endif %}
+</div></section>
 <section class="card" style="margin-bottom:var(--s-4)"><div class="card-head"><h3>Сообщения, которые уходят сами</h3></div>
 {% for t in texts %}{% if can_post("orders_text_save") %}<form method="post" action="/orders/templates/text" class="card-body stack" id="t-{{ t.key }}" style="border-bottom:1px solid var(--gray-200)">{% else %}<fieldset disabled class="ro-form card-body stack" id="t-{{ t.key }}" style="border:0;border-bottom:1px solid var(--gray-200);margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ t.key }}">
 <div class="row" style="gap:var(--s-2);flex-wrap:wrap;align-items:center">{% set shown = t.name.split(": ", 1)[1] if t.name.startswith(("Клиенту: ", "Менеджеру: ")) else t.name %}<strong>{{ shown[:1]|upper }}{{ shown[1:] }}</strong><span class="badge badge--brand" data-to="{{ t.to }}">Кому: {{ t.to_name }}</span>{% if t.changed %}<span class="badge badge--warn">Изменён</span>{% endif %}{% if t.off %}<span class="badge badge--err">Не отправляется: шаблона нет — нажмите «Сохранить»</span>{% endif %}</div>

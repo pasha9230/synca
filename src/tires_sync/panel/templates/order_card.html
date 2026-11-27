@@ -56,9 +56,9 @@
 {% if tasks %}{% call entity_ui.section("Что ждёт действия", id="tasks") %}<div class="card-body stack">
 {% for t in tasks %}<div class="stack" style="border-bottom:1px solid var(--gray-200);padding-bottom:var(--s-3)"><div class="strong">{{ t.title }} {% if t.status == "error" %}<span class="badge badge--err">Ошибка</span>{% endif %}</div>
 {% if t.body %}<textarea class="textarea" id="task-{{ t.id }}" rows="3" readonly aria-label="Текст задачи">{{ t.body }}</textarea><div><button type="button" class="btn btn--secondary btn--xs" data-copy="task-{{ t.id }}">Скопировать</button></div>{% endif %}
-{% if t.title == exact_title and t.status == "pending" and send_chats and can_post("chat_send") %}
+{% if t.title in form_titles and t.status == "pending" and send_chats and can_post("chat_send") %}
 <form method="post" action="/chats/{{ send_chats[0].id }}/send" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="reply_token" value="o{{ c.id }}t{{ t.id }}">
-<label class="field"><span class="label">Сообщение клиенту (можно поправить): уйдёт в чат Ч-{{ send_chats[0].id }}</span><textarea class="textarea" name="text" rows="4" maxlength="1000">{{ client_text }}</textarea></label>
+<label class="field"><span class="label">Сообщение клиенту (можно поправить): уйдёт в чат Ч-{{ send_chats[0].id }}</span><textarea class="textarea" name="text" rows="4" maxlength="1000">{{ client_texts.get(t.title, "") }}</textarea></label>
 <div><button class="btn btn--primary btn--sm">Отправить клиенту в чат Авито</button></div></form>{% endif %}
 {% if t.result %}<p class="small text-err">{{ t.result }}</p>{% endif %}
 {% if t.status == "running" %}<p class="small muted">Выполняется. Если зависло, через 10 минут задача вернётся в список.</p>{% endif %}

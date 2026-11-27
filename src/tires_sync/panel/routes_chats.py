@@ -540,6 +540,10 @@ def register(app) -> None:
             flash("Ничего не отправлено: текст ответа длиннее %d знаков." % chats.MAX_REPLY)
             keep_text()
             return sent_back(chat)
+        if order_wait.PRICE_GAP in plain:                                    # the form «поставьте цену» of the wait list (the owner 2026-11-27)
+            flash("Ничего не отправлено: впишите цену вместо «%s»." % order_wait.PRICE_GAP)
+            keep_text()
+            return sent_back(chat)
         try:
             writer = _writer(conn, chat)
             if data:

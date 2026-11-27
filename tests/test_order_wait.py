@@ -156,7 +156,7 @@ def test_the_exact_find_tags_the_card_and_leaves_one_task_for_the_responsible_ma
     card = orders.get_card(conn, card_id)
     assert "Появилось" in card["tags"] and "Есть аналоги" not in card["tags"]
     tasks = conn.execute("SELECT status, title, body FROM order_task WHERE order_id = ?", (card_id,)).fetchall()
-    assert len(tasks) == 1 and tasks[0][0] == "pending" and "pavel" in tasks[0][2] and "предложите клиенту" in tasks[0][1].lower()
+    assert len(tasks) == 1 and tasks[0][0] == "pending" and "pavel" in tasks[0][2] and tasks[0][1] == order_wait.TITLE_CALL     # no Avito chat: call (2026-11-27)
 
 
 def test_the_analog_find_says_so_to_the_manager_with_its_own_tag_and_task(tmp_path):

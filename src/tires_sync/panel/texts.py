@@ -210,6 +210,8 @@ def audit_text(entry: dict) -> str:
         return "Вкладка «Другие точки» в «Сводках» точек: %s" % ("показывается" if d.get("on") else "скрыта")
     if action == "point_income_shown":
         return "Страница «Доход» у точек: %s" % ("показывается" if d.get("on") else "скрыта")
+    if action == "wait_autosend":
+        return "Автоотправка предложений из листа ожидания: %s" % ("включена" if d.get("on") else "выключена")
     if action == "inquiry":
         from ..inquiry import STATUSES
         return "Обращение клиента №%s: %s → %s%s" % (d.get("client", "?"), STATUSES.get(d.get("from"), d.get("from") or "—"),

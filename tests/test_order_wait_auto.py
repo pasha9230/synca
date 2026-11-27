@@ -16,6 +16,8 @@ NOW = "2026-11-04T12:00:00"
 NEXT = "2026-11-04T13:40:00"
 WANT = dict(brand="Ikon Tyres", model="Test Model", width=205, profile=55, radius=16, season="winter", studded="no", qty=4)
 PRICE = {"TS1": 8500, "TS2": 6000.5}
+WORDS = ("Добрый день. Ранее вас добавляли в лист ожидания, «%s» появилось в наличии у нас на складе. Цена: %s за штуку. Актуально ещё? "
+         "Это авто-сообщение. Можете ответить: Да — тогда позову менеджера. Нет — тогда закрою это ожидание и не будем вас беспокоить.")
 
 
 def tire(**changes):
@@ -32,6 +34,7 @@ def env(tmp_path):
     conn, account = db(tmp_path)
     orders.ensure_pipeline(conn, NOW)
     conn.execute("UPDATE account SET chats_enabled = 1, chats_send = 1 WHERE id = ?", (account,))
+    store.set_state(conn, order_wait.AUTO_KEY, "1")              # «Автоотправка предложений из листа ожидания» on: the sends of these tests
     conn.commit()
     chats.sync_account(conn, FakeClient([[chat("c1", text="Здравствуйте")]], {"c1": [msg("m1", "Здравствуйте", read=1)]}), account, NOW)
     return conn, chats.list_chats(conn)[0]["id"]
@@ -59,7 +62,8 @@ def run(conn, sender, offers, now=NOW, notify=None, price=price_of):
 
 
 def tasks(conn, card):
-    return [t for t in engine.list_tasks(conn, card) if t["title"] in (order_wait.TITLE_EXACT, order_wait.TITLE_CHECK, order_wait.TITLE_ANALOG)]
+    return [t for t in engine.list_tasks(conn, card) if t["title"] in (order_wait.TITLE_EXACT, order_wait.TITLE_CHECK, order_wait.TITLE_ANALOG,
+                                                                     order_wait.TITLE_PRICE, order_wait.TITLE_CALL, order_wait.TITLE_CALL_ANALOG)]
 
 
 def events(conn, card, level=None):
@@ -70,7 +74,7 @@ def test_all_here_in_full_the_client_hears_the_owners_words_and_no_task_is_made(
     conn, chat_row = env
     card, sender, told = waiting(env), Sender(), []
     assert run(conn, sender, [tire()], notify=lambda *a: told.append(a))["exact"] == [card]
-    assert sender.sent == ["Здравствуйте. «Ikon Autograph 205/55 R16» появилось в наличии у нас на складе, стоимость: 8 500 ₽ за штуку. Желаете оформить заказ?"]
+    assert sender.sent == [WORDS % ("Ikon Autograph 205/55 R16", "8 500 ₽")]
     assert tasks(conn, card) == [] and told == []
     assert order_wait.TAG_EXACT in orders.get_card(conn, card)["tags"]
     assert [t for t in events(conn, card, "green") if sender.sent[0] in t]                      # the order's history has it, word for word
@@ -139,7 +143,7 @@ def test_no_chat_gives_the_task_with_the_reason_and_the_alert(env):
     run(conn, sender, [tire()], notify=lambda card_id, title, body: told.append(body))
     assert sender.sent == []
     [task] = tasks(conn, card)
-    assert task["title"] == order_wait.TITLE_EXACT and "у заказа нет чата Авито" in task["body"] and task["body"] == told[0]
+    assert task["title"] == order_wait.TITLE_CALL and "у заказа нет чата Авито" in task["body"] and task["body"] == told[0]
     run(conn, sender, [tire()], NEXT, notify=lambda card_id, title, body: told.append(body))
     assert len(tasks(conn, card)) == 1 and len(told) == 1
 
@@ -217,8 +221,7 @@ def test_two_positions_all_here_are_named_with_both_prices_in_one_message(env):
     other = dict(WANT, width=215, qty=2)
     card, sender = waiting(env, WANT, other), Sender()
     run(conn, sender, [tire(), tire(width=215, code="TS2", goods_id="200", name_orig="Ikon 215/55 R16", stock=2)])
-    assert sender.sent == ["Здравствуйте. «Ikon Autograph 205/55 R16, Ikon 215/55 R16» появилось в наличии у нас на складе, стоимость: 8 500 ₽ и 6 000.50 ₽ за штуку. "
-                           "Желаете оформить заказ?"] and tasks(conn, card) == []
+    assert sender.sent == [WORDS % ("Ikon Autograph 205/55 R16, Ikon 215/55 R16", "8 500 ₽ и 6 000.50 ₽")] and tasks(conn, card) == []
 
 
 def test_a_part_of_the_positions_writes_nothing(env):
@@ -328,6 +331,7 @@ def test_the_cycle_hook_prices_by_the_ad_of_the_chats_account(tmp_path, monkeypa
     offer = next(iter(parsed.offers.values()))
     conn.execute("UPDATE published_state SET price = 12345 WHERE account_id = 1 AND goods_id = ?", (offer.goods_id,))
     conn.execute("UPDATE account SET chats_enabled = 1, chats_send = 1 WHERE id = 1")
+    store.set_state(conn, order_wait.AUTO_KEY, "1")
     orders.ensure_pipeline(conn, NOW)
     card = orders.create_card(conn, {"client_name": "Иван"}, NOW, "worker2")
     order_wait.add_want(conn, card, {"code": offer.code, "qty": 1}, NOW, "worker2")
@@ -338,7 +342,7 @@ def test_the_cycle_hook_prices_by_the_ad_of_the_chats_account(tmp_path, monkeypa
     monkeypatch.setattr(cli, "_chat_deliver", lambda conn_, box_, now: lambda row, text, token: sent.append((text, token)))
     monkeypatch.setattr(cli, "moscow_now", lambda: __import__("datetime").datetime(2026, 11, 4, 12, 0))
     cli._check_waiting(conn, SimpleNamespace(offers=parsed.offers, issues=parsed.issues), box, REF)
-    assert len(sent) == 1 and "стоимость: 12 345 ₽ за штуку." in sent[0][0] and sent[0][1].startswith("wait-%d-" % card)
+    assert len(sent) == 1 and "Цена: 12 345 ₽ за штуку." in sent[0][0] and sent[0][1].startswith("wait-%d-" % card)
     assert order_offers.account_for(conn, card_id=card) == 1
     sent.clear()
     card2 = orders.create_card(conn, {"client_name": "Пётр"}, NOW, "worker2")
@@ -448,7 +452,7 @@ def test_three_positions_at_two_prices_keep_the_order_of_the_prices(env):
     waiting(env, WANT, dict(WANT, width=215), dict(WANT, width=225))
     prices = {205: 5000, 215: 6000, 225: 5000}
     run(conn, sender, [tire(), tire(width=215, code="TS2", goods_id="200", name_orig="B"), tire(width=225, code="TS3", goods_id="300", name_orig="C")], price=lambda o, row: prices[o.width])
-    assert "«Ikon Autograph 205/55 R16, B, C»" in sender.sent[0] and "стоимость: 5 000 ₽, 6 000 ₽ и 5 000 ₽ за штуку." in sender.sent[0]
+    assert "«Ikon Autograph 205/55 R16, B, C»" in sender.sent[0] and "Цена: 5 000 ₽, 6 000 ₽ и 5 000 ₽ за штуку." in sender.sent[0]
 
 
 def test_at_night_a_missing_price_waits_for_the_morning_it_wakes_nobody(env):
@@ -840,6 +844,7 @@ def test_the_count_command_counts_on_a_copy_and_changes_nothing(tmp_path, capsys
     conn, _key, _box = published_ten(tmp_path)
     offer = next(iter(parse_unload(goods(10), cli.active_settings(conn).territory_rn).offers.values()))
     conn.execute("UPDATE account SET chats_enabled = 1, chats_send = 1 WHERE id = 1")
+    store.set_state(conn, order_wait.AUTO_KEY, "1")
     orders.ensure_pipeline(conn, NOW)
     card = orders.create_card(conn, {"client_name": "Иван"}, NOW, "worker2")
     order_wait.add_want(conn, card, {"code": offer.code, "qty": 1}, NOW, "worker2")
@@ -899,10 +904,10 @@ def test_the_settings_warn_when_the_template_lacks_the_name_or_the_price():
 
 # --- the client's reply (the owner 2026-11-05) -------------------------------------------------------------------------------------------------
 
-def said(conn, chat_row, mid, at):
-    from datetime import datetime
+def said(conn, chat_row, mid, at, text="А доставка есть?"):
+    from datetime import datetime                                  # not a bare «Да»/«Нет»: the manager's task (test_order_wait_answers has those)
     chats._store_message(conn, chat_row, {"id": mid, "created": int(datetime.fromisoformat(at + "+03:00").timestamp()), "direction": "in", "type": "text",
-                                          "content": {"text": "да"}, "isRead": False})
+                                          "content": {"text": text}, "isRead": False})
     conn.commit()
 
 
@@ -1239,7 +1244,7 @@ def test_webmim_with_no_price_and_two_other_prices_stays_a_task(env):
 
 # --- the owner 2026-11-05: the form of the task has the words of the message by itself -----------------------------------------------------------
 
-AUTO_WORDS = "Здравствуйте. «Ikon Autograph 205/55 R16» появилось в наличии у нас на складе, стоимость: 8 500 ₽ за штуку. Желаете оформить заказ?"
+AUTO_WORDS = WORDS % ("Ikon Autograph 205/55 R16", "8 500 ₽")
 
 
 def unread(conn, chat_row):
@@ -1272,11 +1277,8 @@ def test_the_form_quotes_the_higher_of_two_webmim_prices(env):
 
 
 @pytest.mark.parametrize("offers, price, want", (
-    ([tire()], lambda o, row: None, WANT),                                                      # no price
-    ([tire()], lambda o, row: 1 / 0, WANT),                                                     # the price fails
     ([tire()], None, WANT),                                                                     # no unload or reference: no price at all
     ([tire()], price_of, dict(WANT, model="", season="")),                                      # the line does not name one tire
-    ([s2(), s2(goods_id="s3-300", code="TS1")], price_of, WANT),                                # two other suppliers at two prices
     ([tire(stock=2)], price_of, WANT),                                                          # not in full
 ))
 def test_without_a_tire_or_a_price_the_form_has_the_words_of_the_lines_with_one_dot(env, offers, price, want):
@@ -1285,6 +1287,18 @@ def test_without_a_tire_or_a_price_the_form_has_the_words_of_the_lines_with_one_
     words = order_wait.form_text(conn, orders.get_card(conn, card), offers, price, chat_row)
     assert words == order_wait.client_text(orders.get_card(conn, card))
     assert "4 шт. Подскажите" in words and ".." not in words
+
+
+@pytest.mark.parametrize("offers, price, name", (
+    ([tire()], lambda o, row: None, "Ikon Autograph 205/55 R16"),                               # no price
+    ([tire()], lambda o, row: 1 / 0, "Ikon Autograph 205/55 R16"),                              # the price fails
+    ([s2(), s2(goods_id="s3-300", code="TS1")], price_of, "S2 Ikon 205/55 R16"),                # two other suppliers at two prices
+))
+def test_without_a_price_the_form_has_the_words_with_the_gap_for_the_price(env, offers, price, name):
+    conn, chat_row = env                                       # the task «поставьте цену» (the owner 2026-11-27): the manager types it
+    card = waiting(env)
+    words = order_wait.form_text(conn, orders.get_card(conn, card), offers, price, chat_row)
+    assert words == WORDS % (name, order_wait.PRICE_GAP)
 
 
 def test_the_words_of_the_lines_have_no_double_dot():

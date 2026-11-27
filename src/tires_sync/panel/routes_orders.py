@@ -1528,10 +1528,9 @@ def register(app) -> None:
             tasks=tasks, chat_links=links, order_chat=order_chat, chat_bind=bind, origin=origin, chat_sends=order_autosend.office_sends(chats_store.pending_sends(conn, [ch["id"] for ch in links], local_iso()), own_point() is not None),
             chat_ref=chat_ref, responsible_options=_responsible_options(app, conn, card["responsible"]),
             want_seasons=order_wait.SEASON_NAMES, want_studs=order_wait.STUD_NAMES, want_text=order_wait.describe, match_url=match_url(card),
-            client_text=wait_form_text(conn, card, sendable) if card["wants"] and any(
-                t["title"] == order_wait.TITLE_EXACT for t in engine.list_tasks(conn, card_id, ("pending",))) else "",
+            client_texts=wait_form_texts(conn, card, sendable, {t["title"] for t in engine.list_tasks(conn, card_id, ("pending",))}),
             send_chats=sendable,
-            exact_title=order_wait.TITLE_EXACT, silent_title=order_wait.TITLE_SILENT, webmim=webmim_match.card_block(conn, card, with_hints=own_point() is None),
+            form_titles=order_wait.FORM_TITLES, silent_title=order_wait.TITLE_SILENT, webmim=webmim_match.card_block(conn, card, with_hints=own_point() is None),
             webmim_cost=order_report.order_webmim(conn, card_id) if has_right("money") else None,                # the purchase is money
             webmim_create=webmim_create.button(conn, card, webmim_match.current_server(conn), local_iso()) if can_post("order_webmim_create") else None,
             supplier=supplier_view(conn, card) if can_post("order_webmim_create") and own_point() is None else None,
@@ -1558,20 +1557,26 @@ def register(app) -> None:
                 "sig": chats_store.signature(conn, chat["id"]), "reply_token": secrets.token_hex(12), "image_token": secrets.token_hex(12),
                 "draft": session.get("draft_%d" % chat["id"], "")}
 
-    def wait_form_text(conn, card, sendable):
-        """The words of the form «Позиция появилась»: those the message by itself has, priced as order_wait.check prices them (by the order
-        form, for the account of the chat the form sends to: cli._wait_price_of); the words of the lines when the unload cannot be read."""
+    def wait_form_texts(conn, card, sendable, titles) -> dict:
+        """{title: words} of the forms «Позиция появилась» / «Есть аналоги» / «поставьте цену» of the pending tasks `titles`: those the message by
+        itself has, priced as order_wait.check prices them (by the order form, for the account of the chat the form sends to: cli._wait_price_of);
+        the words of the lines when the unload cannot be read."""
+        wanted = [t for t in order_wait.FORM_TITLES if t in titles]
+        if not card["wants"] or not wanted:
+            return {}
         try:
             _conn, settings, parsed, ref = context(app)
         except Exception:
             log.exception("the unload for the form of order %s", card["id"])
-            return order_wait.client_text(card)
+            return {t: order_wait.client_text(card) for t in wanted}
         day = local_now().date().isoformat()
 
         def price_of(offer, chat_row):
             account = order_offers.account_for(conn, chat_row=chat_row)
             return order_offers.item_args(conn, settings, parsed, ref, offer.goods_id, day, account)["sale_unit"]
-        return order_wait.form_text(conn, card, list(parsed.offers.values()), price_of, sendable[0]["id"] if sendable else None)
+        offers = list(parsed.offers.values())
+        return {t: order_wait.form_text(conn, card, offers, price_of, sendable[0]["id"] if sendable else None,
+                                        "analog" if t == order_wait.TITLE_ANALOG else "exact") for t in wanted}
 
     def back(card_id, part=""):
         return redirect("/orders/%d%s" % (card_id, "#" + part if part else ""))
@@ -2729,7 +2734,8 @@ def register(app) -> None:
         own templates of the rules."""
         conn = get_conn()
         known = {(t["name"], t["audience"]) for t in message_texts.TEXTS}
-        return render_template("orders_templates.html", texts=message_texts.listing(conn),
+        return render_template("orders_templates.html", texts=message_texts.listing(conn), wait_auto=order_wait.auto_on(conn),
+                               wait_auto_switch=current_user()["role"] == "owner",
                                templates=[t for t in templates.list_templates(conn) if (t["name"], t["audience"]) not in known],
                                audiences=templates.AUDIENCES, variables=templates.VARIABLES)
 
@@ -2756,6 +2762,17 @@ def register(app) -> None:
         except orders.OrderError as err:
             flash(str(err), "error")
         return redirect("/orders/templates#t-%s" % re.sub(r"[^\w-]", "", str(key or ""))[:80])
+
+    @app.route("/orders/templates/wait-auto", methods=["POST"])
+    @login_required
+    def orders_wait_autosend():
+        """«Автоотправка предложений из листа ожидания» (the owner 2026-11-27): messages to clients, the owner's own switch."""
+        if current_user()["role"] != "owner":
+            abort(403)
+        on = request.form.get("on") == "1"
+        changed = order_wait.set_auto(get_conn(), on, now_iso(), author())
+        flash(("Автоотправка предложений из листа ожидания %s." % ("включена" if on else "выключена")) if changed else "Настройка не менялась.", "ok")
+        return redirect("/orders/templates#wait-auto")
 
     @app.route("/orders/templates/save", methods=["POST"])
     @login_required
