@@ -38,7 +38,10 @@ OLD_NAMES_2026_11_03 = {"moving": "Перемещение на точку", "at_
                         "return": "Возврат"}
 RENAMED_KEY = "stage_names_2026_11_03"          # app_state: the renaming was done (an owner's later name equal to an old one is never touched)
 # «Отмена» and «Отказ/невыкуп» are one stage with the reason (the owner 2026-10-29); the reason is a text of cancel_reason
-CANCEL_KINDS = ("отменил клиент", "не выкупил", "отказ клиента", "другое")     # «отказ клиента»: the tyres went to «На ОТХ» (oth_storage, 2026-11-10)
+# «точка не передала статус» (the owner 2026-11-27): the tyres came, the point did not pass the status, the client cancelled after waiting —
+# the point is not paid for the arrival (point_arrival.no_status), the client gets no mark of a refusal
+NO_STATUS = "точка не передала статус"
+CANCEL_KINDS = ("отменил клиент", "не выкупил", "отказ клиента", NO_STATUS, "другое")     # «отказ клиента»: the tyres went to «На ОТХ» (oth_storage, 2026-11-10)
 NOT_BOUGHT = "не выкупил"
 OLD_CANCEL_NAME = "Отмена"                      # the name of «cancel» before the merge: renamed only while the owner kept it
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -244,7 +247,7 @@ def cancel_reason_of(kind, text) -> str:
     «другое: …» (the text is needed). OrderError for a choice not of CANCEL_KINDS or «другое» without a text."""
     kind, text = str(kind or "").strip(), " ".join(str(text or "").split())
     if kind not in CANCEL_KINDS:
-        raise OrderError("Причина отмены: отменил клиент, не выкупил, отказ клиента или другое.")
+        raise OrderError("Причина отмены: отменил клиент, не выкупил, отказ клиента, точка не передала статус или другое.")
     if kind == "другое" and not text:
         raise OrderError("Причина отмены «другое»: напишите, что случилось.")
     return (kind + (": " + text if text else ""))[:300]
@@ -1195,7 +1198,13 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     requested_stage = stage["code"]
     reason = (changes or {}).get("cancel_reason") or card.get("cancel_reason") or ""
     refusal_kind = str(reason).partition(":")[0].strip().casefold()
-    if requested_stage in ("cancel", "oth") and refusal_kind in ("отменил клиент", "отказ клиента", "отказ клиента на точке"):
+    from . import point_arrival
+    # «точка не передала статус» (the owner 2026-11-27): a mark of its own, set by the reason given with this move (never found in an old
+    # text), kept while the tyres wait (cancel, «На ОТХ», the return), taken off when the order is back in work (the review 2026-11-27)
+    no_status = point_arrival.no_status_move(conn, card_id, card["stage"].get("code"), stage["code"], stage["kind"],
+                                             (changes or {}).get("cancel_reason"))
+    if requested_stage in ("cancel", "oth") and refusal_kind in ("отменил клиент", "отказ клиента", "отказ клиента на точке") \
+            and not no_status:                                              # the point's fault, not the client's
         from . import clients
         clients.mark_order_refusal(conn, card_id, now, author)
     stored = None                                                           # the record of storage this move makes (the owner 2026-11-10)

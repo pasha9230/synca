@@ -35,7 +35,8 @@ BUILTIN = dict([(w, (ARRIVE_FROM, "at_point")) for w in ("приехал", "пр
 #  2026-10-19 and of the owner 2026-10-25 (the audit of «Входящие»): they work without being set up in «Команды»
 # «ОТКАЗ» of the point (the owner 2026-11-05, instead of «Клиент не пришёл»): «отказ <номер> <причина>»; the order goes to «На ОТХ»
 REFUSE = "отказ"
-REFUSE_REASONS = ("Старый год производства", "Ошиблись размером")      # and «Другой»: the point types it
+REFUSE_REASONS = ("Старый год производства", "Ошиблись размером", "Точка не передала статус")      # and «Другой»: the point types it;
+# the third (the owner 2026-11-27, orders.NO_STATUS): the point is not paid for the arrival, the client gets no mark of a refusal
 REFUSE_REASON = "Отказ клиента на точке: %s"                          # the order's «Причина отмены»
 REFUSE_MAX = 200
 REFUSE_TEXT = re.compile(r"^\W*отказ(?![^\W\d_])[\s,.:;!-]*(?:по\s+)?(?:" + ORDER_MARK + r")?[\s№#:.-]*(\d{1,9})?(?!\d)[\s,.:;!-]*(.*)$", re.I | re.S)

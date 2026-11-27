@@ -192,11 +192,64 @@ def state(conn, order_id: int) -> Dict[str, object]:
     return {"arrived": _active(row), "none": bool(row and row["none_at"]), "at": (row["arrived_at"] if row else "") or ""}
 
 
+NO_STATUS_STAGES = ("cancel", "oth", "return_agree", "return_given", "return")   # where an order cancelled by that reason stands
+NO_STATUS_KEY = "order_no_status:%d"                                             # app_state: the mark of «точка не передала статус»
+
+
+def is_no_status(reason) -> bool:
+    """The reason given is «точка не передала статус»: the choice of «Отменить заказ» (orders.cancel_reason_of, a text after it allowed)
+    or of the point's «ОТКАЗ» (order_manager.REFUSE_REASON). Not «другое: …» that only names it."""
+    from . import orders, order_manager
+    text = " ".join(str(reason or "").split()).casefold().replace("ё", "е")
+    refused = (order_manager.REFUSE_REASON % orders.NO_STATUS).casefold()
+    return text == orders.NO_STATUS or text.startswith(orders.NO_STATUS + ":") or text == refused
+
+
+def set_no_status(conn, order_id: int, on: bool) -> None:
+    """The mark of «точка не передала статус» on or off (no commit)."""
+    if on:
+        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, '1')", (NO_STATUS_KEY % int(order_id),))
+    else:
+        conn.execute("DELETE FROM app_state WHERE key = ?", (NO_STATUS_KEY % int(order_id),))
+
+
+def no_status_move(conn, order_id: int, was_code: str, code: str, kind: str, reason) -> bool:
+    """orders.move_card, in its transaction: a move to «Отмена» / «На ОТХ» with a reason sets the mark by that reason; the order back in
+    work (an open stage other than «На ОТХ» / the return) loses it. True if the order holds the mark after the move."""
+    if code in ("cancel", "oth") and reason:
+        set_no_status(conn, order_id, is_no_status(reason))
+    elif code not in NO_STATUS_STAGES and kind == "open":
+        set_no_status(conn, order_id, False)
+    return conn.execute("SELECT 1 FROM app_state WHERE key = ?", (NO_STATUS_KEY % int(order_id),)).fetchone() is not None
+
+
+def no_status(conn) -> set:
+    """The orders cancelled with «точка не передала статус» (the owner 2026-11-27, orders.NO_STATUS: the tyres came, the point did not
+    pass the status, the client cancelled after waiting): their arrival pays nothing — not «к начислению», not in the sums, nor a return of
+    their tyres to the supplier later (a sale of those tyres to another client is that sale's, paid as usual). The mark is set by the
+    reason of the move (no_status_move) and holds while the order stands on NO_STATUS_STAGES. An arrival already settled («Рассчитан»)
+    stays as it was."""
+    marked = set()
+    for (key,) in conn.execute("SELECT key FROM app_state WHERE key LIKE ?", (NO_STATUS_KEY.replace("%d", "%"),)):
+        digits = key.rsplit(":", 1)[1]
+        if digits.isdigit():
+            marked.add(int(digits))
+    if not marked:
+        return set()
+    found = {r[0] for r in conn.execute("SELECT c.id FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code IN (%s)"
+                                        % ",".join("?" * len(NO_STATUS_STAGES)), NO_STATUS_STAGES) if r[0] in marked}
+    if found:
+        settled = {r[0] for r in conn.execute("SELECT item FROM point_paid WHERE cancelled_at IS NULL AND item LIKE 'order:%'")}
+        found = {o for o in found if "order:%d" % o not in settled}
+    return found
+
+
 def _paid(conn) -> Dict[int, dict]:
     """Order → {point_id, day, pieces} of every arrival that pays now, whatever its day: came from ARRIVAL_FROM, not undone, not «не
-    приезжали», with tyres of its own, the order not a record of storage."""
+    приезжали», with tyres of its own, the order not a record of storage, not cancelled with «точка не передала статус» (no_status)."""
     from . import oth_storage
     records = oth_storage.record_ids(conn)
+    unpaid = no_status(conn)
     # the sources of a merge not undone: their tyres are the merged order's (its own arrival, recount), never paid twice (the review 2026-11-26)
     records |= {r[0] for r in conn.execute("SELECT s.order_id FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id "
                                            "WHERE m.undone_at = '' AND s.ref = 0")}
@@ -204,11 +257,11 @@ def _paid(conn) -> Dict[int, dict]:
     for order_id, point_id, arrived_at, left_at, pieces in conn.execute(
             "SELECT order_id, point_id, arrived_at, left_at, pieces FROM order_arrival WHERE arrived_at != '' AND undone_at IS NULL "
             "AND none_at IS NULL AND substr(arrived_at, 1, 10) >= ? AND point_id IS NOT NULL AND pieces > 0", (ARRIVAL_FROM,)):
-        if order_id not in records:
+        if order_id not in records and order_id not in unpaid:
             out[order_id] = {"point_id": point_id, "day": str(left_at or arrived_at)[:10], "pieces": int(pieces), "left": bool(left_at),
                              "arrived": str(arrived_at)[:10]}
     written = {r[0] for r in conn.execute("SELECT order_id FROM order_arrival")}
-    for order_id, found in _journal_arrivals(conn, written | records).items():
+    for order_id, found in _journal_arrivals(conn, written | records | unpaid).items():
         out.setdefault(order_id, found)
     return out
 
