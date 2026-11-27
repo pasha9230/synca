@@ -318,3 +318,28 @@ def test_wheel_checks_fail_closed_on_unknown_stock_address_and_id():
     assert 'address' in validate_ads(ads, **dict(facts, allowed_addresses={'3'}))[0][1]
     assert 'stock' in validate_ads(ads, **dict(facts, stock_by_id={}))[0][1]
     assert 'id' in validate_ads(ads, **dict(facts, foreign_ids={aid}))[0][1]
+
+
+def test_wheel_photo_is_separate_cached_and_only_for_primary_account(tmp_path):
+    from test_account_photo import JPEG
+    from test_catalog_filters import setup
+    from tires_sync import connections
+    from tires_sync.fetcher import wheel_snapshot_path
+    from tires_sync.settings_store import active_settings
+    calls = []
+    app, client, _, conn = setup(tmp_path)
+    app.config['PHOTO_FETCH'] = lambda url: (calls.append(url) or (JPEG, 'jpg'))
+    first = connections.create_account(conn, 'Основной', '2026-11-27', 'owner')
+    second = connections.create_account(conn, 'Другой', '2026-11-27', 'owner')
+    conn.commit()
+    territory = connections.supplier_territory(conn, 1, active_settings(conn))
+    wheel_snapshot_path(app.config['UNLOAD_PATH']).write_bytes(('<CATALOG>' + wheel(territory=territory) + '</CATALOG>').encode())
+    token = connections.get_account(conn, first)['feed_token']
+    other = connections.get_account(conn, second)['feed_token']
+    url = '/img/%s/w-42.jpg' % token
+    assert client.get(url).data == JPEG
+    assert client.get(url).data == JPEG and len(calls) == 1
+    wheel_snapshot_path(app.config['UNLOAD_PATH']).unlink()
+    assert client.get(url).data == JPEG
+    assert client.get('/img/%s/w-42.jpg' % other).status_code == 404
+    assert client.get('/img/%s/w-999.jpg' % token).status_code == 404

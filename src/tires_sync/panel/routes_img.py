@@ -9,6 +9,7 @@ import hmac
 import os
 import re
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from flask import abort, send_file
@@ -16,6 +17,8 @@ from flask import abort, send_file
 from .. import connections, photo_cache, share_photos, store
 from ..settings_store import active_settings
 from ..suppliers import supplier_of_id
+from ..fetcher import wheel_snapshot_path
+from ..webmim_wheels import parse_unload as parse_wheels
 from .common import get_conn
 from .data import load_merged, stale_unload
 
@@ -79,6 +82,9 @@ def register(app) -> None:
         if account is None:
             abort(404)
         code = found.group(1)
+        wheel_code = code.startswith("w-")
+        if wheel_code and (account["id"] != connections.PRIMARY_ACCOUNT or not re.fullmatch(r"w-[0-9]{1,40}", code)):
+            abort(404)
         folder = cache_dir(app)
         style = connections.get_photo_style(conn, account["id"])
         if style:                                                   # the account has its own look: its processed copy is served (made once per style)
@@ -90,8 +96,15 @@ def register(app) -> None:
             if path.is_file():
                 return send_file(str(path), mimetype=mimetype, max_age=86400)
         settings = active_settings(conn)
-        parsed = load_merged(conn, settings, app.config["UNLOAD_PATH"])
-        offer = parsed.offers.get(code) or _held_offer(conn, settings, app.config["UNLOAD_PATH"], parsed, account["id"], code)
+        if wheel_code:
+            territory = connections.supplier_territory(conn, 1, settings)
+            try:
+                offer = parse_wheels(wheel_snapshot_path(Path(app.config["UNLOAD_PATH"])).read_bytes(), territory).offers.get(code[2:])
+            except (OSError, ET.ParseError):
+                abort(404)
+        else:
+            parsed = load_merged(conn, settings, app.config["UNLOAD_PATH"])
+            offer = parsed.offers.get(code) or _held_offer(conn, settings, app.config["UNLOAD_PATH"], parsed, account["id"], code)
         if offer is None or not offer.image:
             abort(404)
         fetch = app.config.get("PHOTO_FETCH") or share_photos.fetch
