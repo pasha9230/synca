@@ -218,7 +218,8 @@ def _bonus_rows(conn, point_id: int, f: dict, by_order: Dict[int, dict], rates: 
 def _kpi(report: dict, conn, point_id: int, month: str, today: str) -> dict:
     """The month's KPI of the point from the screen's count: the closed orders and tyres of its handed clients, the cycles, the next one."""
     first, last = _month_bounds(month)
-    rates = order_report.point_rates_now(conn, point_id, first)
+    # the owner 2026-11-27: the texts show the premium of the office's settings, never «+0 ₽» of a month before KPI_FROM (no premium then)
+    rates = order_report.point_rates_now(conn, point_id, max(first, order_report.KPI_FROM))
     count = {"orders": 0, "tyres": 0, "cycles": 0, "need_orders": int(rates["kpi_orders"]), "need_tyres": int(rates["kpi_tyres"]),
              "bonus": rates["kpi_bonus"], "fee": 0.0}
     key = ("id", int(point_id))
@@ -227,12 +228,28 @@ def _kpi(report: dict, conn, point_id: int, month: str, today: str) -> dict:
     paid = point_payouts.paid_items(conn, [point_id])
     for p in premiums:
         p["paid"] = paid.get((point_id, p["item"]))
+    if not count.get("bonus") and first < order_report.KPI_FROM:
+        count = dict(count, bonus=rates["kpi_bonus"])
     in_orders = count["orders"] - count["cycles"] * count["need_orders"]
     in_tyres = count["tyres"] - count["cycles"] * count["need_tyres"]
     return dict(count, month=month, premiums=premiums,
                 cycle_orders=min(in_orders, count["need_orders"]), cycle_tyres=min(in_tyres, count["need_tyres"]),
                 pct_orders=min(100, int(in_orders * 100 / max(count["need_orders"], 1))),
                 pct_tyres=min(100, int(in_tyres * 100 / max(count["need_tyres"], 1))),
-                sets=round(count["need_tyres"] / 4), standard=(count["need_orders"], count["need_tyres"], count["bonus"]) == (
-                    order_report.KPI_ORDERS, order_report.KPI_TYRES, order_report.KPI_BONUS),
-                started=last >= order_report.KPI_FROM or count["bonus"] > 0, this_month=month == today[:7])
+                sets=round(count["need_tyres"] / 4),
+                steps=[{"orders": count["need_orders"] * n, "tyres": count["need_tyres"] * n, "fee": round(count["bonus"] * n, 2)}
+                       for n in (1, 2, 3)],
+                example=_kpi_example(rates, count), kpi_from=order_report.KPI_FROM,
+                started=last >= order_report.KPI_FROM, this_month=month == today[:7])
+
+
+def _kpi_example(rates: Dict[str, float], count: dict) -> dict:
+    """The example of «KPI» by the office's settings (the owner 2026-11-27: no number of the texts is fixed): one cycle — need_orders
+    handed clients bought need_tyres tyres and got them at the point: the fee of the issue, the bonus of the handed clients, the premium."""
+    tyres = count["need_tyres"]
+    issue = round(rates["point_fee"] * tyres, 2)
+    handoff = round(rates["handoff_fee"] * tyres, 2)
+    total = round(issue + handoff + count["bonus"], 2)
+    return {"orders": count["need_orders"], "tyres": tyres, "sets": round(tyres / 4), "issue": issue, "handoff": handoff,
+            "kpi": count["bonus"], "total": total, "set_fee": round(rates["point_fee"] * 4, 2), "set_handoff": round(rates["handoff_fee"] * 4, 2),
+            "twice": issue > 0 and total >= issue * 2}

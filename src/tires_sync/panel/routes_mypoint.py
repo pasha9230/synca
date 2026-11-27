@@ -42,7 +42,7 @@ ACTIONS = {"arrived": mgr.ARRIVED, "issued": "выдал", "refuse": mgr.REFUSE,
            "oth_buyer": "есть покупатель (ОТХ)",                        # «Есть покупатель» of «Согласование возврата»: a task to the office (E2, 2026-11-12)
            "shipped": mgr.SHIP}                                         # «Передал курьеру ТК»: an order to another city (order_intercity, 2026-11-02)
 PICKUP = ("issued", "reserve_issued", "reserve_here", "refuse")    # what a client's pickup means: never for an order to another city
-REFUSE_CHOICES = {"year": mgr.REFUSE_REASONS[0], "size": mgr.REFUSE_REASONS[1], "other": ""}    # «Другой»: the text typed
+REFUSE_CHOICES = {"year": mgr.REFUSE_REASONS[0], "size": mgr.REFUSE_REASONS[1], "status": mgr.REFUSE_REASONS[2], "other": ""}    # «Другой»: the text typed
 UNDO = "undo"                                      # /my-point/<order>/undo: «Отменить» a press (point_log.undo, the owner 2026-11-02)
 BUILTIN = {"arrived": (mgr.ARRIVE_FROM, "at_point"), "issued": (mgr.ISSUE_FROM, "done")}
 

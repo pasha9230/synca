@@ -216,7 +216,7 @@ def test_switched_on_the_point_sees_its_own_sums_only(tmp_path, view):
     bonus = mine.get("/my-point/income?tab=bonus").get_data(as_text=True)
     assert sorted(map(int, re.findall(r'data-bonus-order="(\d+)"', bonus))) == [2, 3, 4]
     kpi = mine.get("/my-point/income?tab=kpi").get_data(as_text=True)
-    assert "KPI: премия за активность" in kpi and "6 250 ₽" in kpi and not re.search(r"(?<!\d)50 ₽", kpi.replace("\xa0", " "))   # no «50 ₽» (ТЗ 95)
+    assert "KPI: премия за активность" in kpi and "6 250 ₽" in kpi.replace(" ", " ") and not re.search(r"(?<!\d)50 ₽", kpi.replace("\xa0", " "))   # no «50 ₽» (ТЗ 95)
     for secret in ("Закупка", "Прибыль", "20 000", "4 000"):                       # no purchase, no profit, no prices
         for shown in (page, bonus, kpi):
             assert secret not in shown, secret
@@ -227,10 +227,13 @@ def test_switched_on_the_point_sees_its_own_sums_only(tmp_path, view):
     november = mine.get("/my-point/income?m=2026-11").get_data(as_text=True)
     assert "За период выплат нет." in november
     assert mine.get("/my-point/income?m=junk").status_code == 200
-    assert "Продажа с ОТХ: +50 ₽ за шину" in bonus.replace("\xa0", " ")
+    shown = bonus.replace("\xa0", " ")                                     # the owner 2026-11-27: a set, not a tyre; no «(50 ₽ за шину)»
+    assert "Продавайте шины, которые числятся на ОТХ: бонус +200 ₽ / комплект" in shown and "Бонус +200 ₽ за комплект" in shown
+    assert "(50 ₽ за шину)" not in shown and "Начисляется после выдачи" not in shown and "ожидаемый бонус" not in shown
+    assert "«Передать клиента»" in shown and "Звонки, Чаты и Рабочее место" in shown
     october = mine.get("/my-point/income?tab=bonus&m=2026-10").get_data(as_text=True).replace("\xa0", " ")
     # before the bonuses start (BONUS_FROM, the owner 2026-11-25): the hint says the rates of that day and the day, never «+0 ₽»
-    assert "Продажа с ОТХ: +50" in october and "за заказы с 01.12" in october and "+0 ₽" not in october
+    assert "бонус +200 ₽ / комплект" in october and "+0 ₽" not in october
 
 
 def test_the_handed_page_shows_the_bonus_of_each_client(tmp_path):

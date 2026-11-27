@@ -493,7 +493,10 @@ def test_the_income_page_folds_the_filters_and_tells_the_rule(tmp_path):
     mine = manager(app, conn, a)
     page = mine.get("/my-point/income").get_data(as_text=True).replace("\xa0", " ")
     assert "data-income-filters" in page and "data-filters-toggle" in page and "data-income-more open" not in page
-    assert "data-income-about" in page and "показать полностью" in page and "физически не приезжали" in page
+    assert "data-income-about" in page and "показать полностью" in page and "Отмены по вине точки не начисляются на баланс точки." in page
+    assert "причина отмены «Точка не передала статус»" in page and "не были в статусе «На точке»" in page
+    # the owner 2026-11-27: the phrases nobody understood are gone
+    assert "Заказ отменили, а шины на ОТХ не оставались" not in page and "Дата в списке" not in page
     assert "отменённые заказы не входят" not in page and "300 ₽ за комплект (4 шт.)" in page and "за итог: шины выданы клиенту или ушли поставщику возвратом" in page
     assert "27.11" not in page and "мы платим" not in page and "ваша точка" not in page      # the owner 2026-11-26: one team, no date of the rate
     opened = mine.get("/my-point/income?pay=all").get_data(as_text=True)
@@ -836,3 +839,81 @@ def test_a_new_client_of_the_office_on_oth_is_one_issue_without_the_bonus(tmp_pa
     go(conn, cid, "done", when="2026-12-13T10:00:00")
     orders.record_sales(conn, cid, "2026-12-13", NOW, "owner", "2026-12-13")
     assert _income(conn, a, START, END) == {cid: (300, 0)}                      # one issue for the chain, no bonus of «На ОТХ»
+
+
+# ---- the owner 2026-11-27: «Точка не передала статус», the texts of «Доход» by the office's settings ---------------------------------------
+
+def _no_status(conn, cid, when=DAY):
+    assert orders.move_card(conn, cid, stage(conn, "cancel"), when, "o", {"cancel_reason": orders.cancel_reason_of(orders.NO_STATUS, "")},
+                            oth_split=False)
+
+
+def test_a_cancel_the_point_did_not_pass_the_status_of_pays_nothing(tmp_path):
+    from tires_sync import clients
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    late = card(conn, a, phone="+7 900 000 00 01")
+    go(conn, late, "placed", "moving", "at_point")
+    _no_status(conn, late)
+    usual = card(conn, a, phone="+7 900 000 00 02")
+    go(conn, usual, "placed", "moving", "at_point", "cancel")             # «отменил клиент»: paid as before
+    conn.commit()
+    assert issue_of(conn, a) == {usual: (300, True)}
+    assert late not in [w["order"] for w in order_report.waiting(conn, "2026-12-15", a)]
+    assert late in point_arrival.no_status(conn) and orders.get_card(conn, late)["cancel_reason"] == orders.NO_STATUS
+    client = clients.client_of_order(conn, late)
+    assert client is None or clients.REFUSED_ORDER_TAG not in clients.tags_of(conn, client["id"])     # no «Неблагонадёжный»
+    stuck = card(conn, a, qty=2, phone="+7 900 000 00 03")                 # on «На ОТХ» by the point's «ОТКАЗ», then given back: no fee
+    go(conn, stuck, "placed", "moving", "at_point")
+    assert orders.move_card(conn, stuck, stage(conn, "oth"), DAY, "o", {"cancel_reason": "Отказ клиента на точке: Точка не передала статус"},
+                            oth_split=False)
+    _give_back(conn, stuck, "2026-12-14T10:00:00")
+    conn.commit()
+    assert stuck not in issue_of(conn, a)
+
+
+def test_a_settled_arrival_stays_when_the_reason_comes_later(tmp_path):
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    cid = card(conn, a)
+    go(conn, cid, "placed", "moving", "at_point", "cancel")
+    conn.commit()
+    point_payouts.settle(conn, [(a, "order:%d" % cid)], START, END, NOW, "owner", today="2026-12-15")
+    orders.update_card(conn, cid, {"cancel_reason": orders.NO_STATUS}, NOW, "o")
+    assert issue_of(conn, a) == {cid: (300, True)}                         # «Рассчитан» is never recounted
+    assert cid not in point_arrival.no_status(conn)
+
+
+def test_the_new_reason_is_in_both_windows(tmp_path):
+    app, owner, tok, conn, a, b = panel(tmp_path)
+    orders.ensure_pipeline(conn, DAY)
+    cid = card(conn, a)
+    go(conn, cid, "placed", "moving", "at_point")
+    conn.commit()
+    page = owner.get("/orders/%d" % cid).get_data(as_text=True)
+    assert 'name="cancel_kind" value="точка не передала статус"' in page
+    post(owner, "/orders/%d/move" % cid, tok, stage_id=str(stage(conn, "cancel")), cancel_kind="точка не передала статус", oth_answer="no")
+    assert orders.get_card(conn, cid)["stage"]["code"] == "cancel" and cid in point_arrival.no_status(conn)
+    assert cid not in [u["order"] for u in point_arrival.unsold(conn, START, END)]       # the fixture's sales hold numbers 1–6: the arrival only
+    from tires_sync.panel import routes_mypoint
+    assert routes_mypoint.REFUSE_CHOICES["status"] == "Точка не передала статус"
+    for name in ("mypoint.html", "point2/mypoint.html"):
+        text = open("src/tires_sync/panel/templates/" + name, encoding="utf-8").read()
+        assert 'name="reason" value="status"> Точка не передала статус' in text, name
+
+
+def test_the_kpi_text_shows_the_premium_of_the_settings_and_follows_a_change(tmp_path):
+    app, owner, tok, conn, a, b = panel(tmp_path)
+    switch(owner, tok, True)
+    mine = manager(app, conn, a)
+    url = "/my-point/income?tab=kpi&km=2026-11"
+    page = mine.get(url).get_data(as_text=True).replace("\xa0", " ")
+    assert "+0 ₽" not in page and "+1 500 ₽</b> сверх выдачи и бонусов" in page
+    assert "20 заказов (от 76 шин) — +3 000 ₽" in page and "30 заказов (от 114 шин) — +4 500 ₽" in page
+    assert "KPI считаются с 01 декабря 2026 года" in page and page.index("data-kpi-text") < page.index("data-income-tabs")
+    order_report.set_rates(conn, "2026-11-27", "2026-11-27", NOW, "owner", kpi_tyres=36, kpi_bonus=2000, handoff_fee=60)
+    page = mine.get(url).get_data(as_text=True).replace("\xa0", " ")
+    assert "10 заказов</b> (от 36 шин, ~9 комплектов)" in page and "+2 000 ₽</b>" in page
+    assert "30 заказов (от 108 шин) — +6 000 ₽" in page and "+ 2 160 ₽" in page          # the example: 36 tyres × 60 ₽
+    bonus = mine.get("/my-point/income?tab=bonus").get_data(as_text=True).replace("\xa0", " ")
+    assert "Бонус +240 ₽ за комплект" in bonus and bonus.index("data-bonus-banner") < bonus.index("data-income-tabs")

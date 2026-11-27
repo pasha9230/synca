@@ -12,17 +12,34 @@
 <div class="tile"><span class="tile-label">К выплате на {{ v.debt_day|short_dt }}</span><span class="tile-value" data-debt="total" style="font-size:var(--fs-2xl, 1.75rem)">{{ v.debt.total|money }}</span><span class="tile-sub">не рассчитано: за выдачу {{ v.debt.issue|money }} · бонусы {{ v.debt.bonus|money }}{% if v.debt.kpi %} · KPI {{ v.debt.kpi|money }}{% endif %}{% if v.debt.adj %} · корректировки {{ v.debt.adj|money }}{% endif %}{% if v.debt.extra %} · доплаты {{ v.debt.extra|money }}{% endif %}</span>
 {% if v.debt.over %}<span class="tile-sub" data-debt="over">переплата / к удержанию: {{ v.debt.over|money }} (уже учтена в сумме)</span>{% endif %}</div>
 </div>
-{% if f.tab == "income" and v.rates %}{# the owner 2026-11-25: one field under the sum, as the text of «KPI»; two lines, then «показать полностью» #}
-<section class="inc-about" data-income-about><input type="checkbox" id="inc-about-more" class="inc-more-box" hidden>
+{# the owner 2026-11-25 / 2026-11-27: the text of each tab in one place, under the sum; short, of the point's own work; two lines, then
+   «показать полностью». Every number is of the office's settings (v.rates, v.kpi: the rates of order_report), never written here. #}
+{% if v.rates %}{% set r = v.rates %}
+{% if f.tab == "income" %}<section class="inc-about" data-income-about><input type="checkbox" id="inc-about-more" class="inc-more-box" hidden>
 <div class="inc-clamp"><h3>💰 С чего складывается доход</h3>
-<p data-income-rate><b style="font-size:var(--fs-xl, 1.375rem)">{{ (v.rates.point_fee * 4)|money }} за комплект (4 шт.)</b><br><b>{{ v.rates.point_fee|money }} за шину</b> — за итог: шины выданы клиенту или ушли поставщику возвратом.</p>
-<p>🔗 <b>Считается итог, а не нажатие, и один раз:</b> шины приехали на точку → итог: <b>продали</b> («Выполнено», в том числе с ОТХ новому клиенту — точка или офис) или <b>вернули поставщику</b>. Заказ отменили, а шины на ОТХ не оставались, — тоже итог.</p>
-<p>⏳ <b>Пока итога нет</b> (шины ждут клиента, лежат на ОТХ) — сумма в списке «К начислению» ниже и в «Всего» не входит.</p>
-<p>🎁 <b>Бонусы (с {{ v.bonus_from|short_dt }}):</b> шины с ОТХ продала сама точка — сверху бонус за каждую шину; продал офис — только выплата за итог. Бонусы не складываются: своему переданному клиенту со своей ОТХ — только бонус за ОТХ.</p>
-<p>⛔ <b>Не считается:</b> шины физически не приезжали или «На точке» нажали по ошибке и отменили.</p>
-<p>📅 <b>Дата в списке</b> — день итога: продажи, возврата поставщику или отмены. Рассчитанные офисом скрыты: фильтр «Выплата» → «Рассчитан» или «Все».</p></div>
+<p data-income-rate><b style="font-size:var(--fs-xl, 1.375rem)">{{ (r.point_fee * 4)|money }} за комплект (4 шт.)</b><br><b>{{ r.point_fee|money }} за шину</b> — за итог: шины выданы клиенту или ушли поставщику возвратом.</p>
+<p data-income-no-status><b style="font-size:var(--fs-lg, 1.125rem)">Отмены по вине точки не начисляются на баланс точки.</b><br><span class="small">Когда шины приехали, а точка не передала корректный статус, вследствие чего клиент отменил заказ из-за долгого ожидания.</span></p>
+<p>🔗 <b>Считается итог сделки, а не нажатие на кнопки:</b> шины приехали на точку → итог: <b>продали</b> этому клиенту или другому («Выполнено», в том числе с ОТХ новому клиенту — точка или офис) или <b>вернули поставщику</b>.</p>
+<p>⏳ <b>Пока итога нет</b> (не продано или лежат на ОТХ — ждут продажи или возврата) — сумма в списке «К начислению», в «Всего» не входит.</p>
+<p>🎁 <b>Бонусы (с {{ v.bonus_from|short_dt }}):</b> шины с ОТХ продала сама точка — бонус сверху за каждую шину; продал офис — только выплата за выдачу. Бонусы не складываются: своему «переданному клиенту» со своей ОТХ засчитывается только бонус за ОТХ, так как точка может реализовать без передачи клиента.</p>
+<p data-income-not>⛔ <b>Не считается:</b> шины не приезжали; не были в статусе «На точке»; нажали по ошибке и отменили; причина отмены «Точка не передала статус».</p></div>
 <label for="inc-about-more" class="btn btn--link btn--sm inc-more-btn"><span class="inc-more-show">показать полностью</span><span class="inc-more-hide">скрыть</span></label></section>
-{% endif %}
+{% elif f.tab == "bonus" %}<section class="inc-about" data-bonus-banner><input type="checkbox" id="inc-about-more" class="inc-more-box" hidden>
+<div class="inc-clamp"><p data-bonus-handoff><b>🔥 Бонус +{{ (r.handoff_fee * 4)|money }} за комплект</b> — за клиента, переданного в команду на покупку шин.</p>
+<p data-bonus-button>Передавайте клиентов через кнопку «Передать клиента» (тех, кому не можете продать с наличия). Кнопка есть в разделах: Звонки, Чаты и Рабочее место.</p>
+{% if r.oth_sale_fee %}<p data-bonus-oth><b>🛞 Продавайте шины, которые числятся на ОТХ: бонус +{{ (r.oth_sale_fee * 4)|money }} / комплект</b> помимо выдачи.</p>
+<p>Нельзя «Передать клиента» и ему же продать со своего ОТХ одномоментно.</p>{% endif %}</div>
+<label for="inc-about-more" class="btn btn--link btn--sm inc-more-btn"><span class="inc-more-show">показать полностью</span><span class="inc-more-hide">скрыть</span></label></section>
+{% elif v.kpi %}{% set k = v.kpi %}{% set ex = k.example %}<section class="inc-about" data-kpi-text><input type="checkbox" id="inc-about-more" class="inc-more-box" hidden>
+<div class="inc-clamp"><h3>🚀 KPI: премия за активность</h3>
+<p data-kpi-rule><b>Закрыли за календарный месяц {{ k.need_orders }} {{ plural(k.need_orders, "заказ", "заказа", "заказов") }}</b> (от {{ k.need_tyres }} шин, ~{{ k.sets }} {{ plural(k.sets, "комплект", "комплекта", "комплектов") }}) по переданным клиентам — <b data-kpi-bonus>+{{ k.bonus|money }}</b> сверх выдачи и бонусов.</p>
+<p data-kpi-from>KPI считаются с 01 декабря 2026 года; в расчёт берём количество заказов и шин за 1 календарный месяц: премия засчитывается, когда набраны оба числа.</p>
+<p data-kpi-steps><b>Премий в месяц — сколько угодно:</b> {% for st in k.steps %}{{ st.orders }} {{ plural(st.orders, "заказ", "заказа", "заказов") }} (от {{ st.tyres }} шин) — +{{ st.fee|money }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+{% if ex.kpi %}<p data-kpi-example><b>💰 Пример: {{ ex.total|money }} с {{ ex.orders }} клиентов</b> — за месяц по рекомендации точки купили ~{{ ex.sets }} комплектов ({{ ex.tyres }} шин) с выдачей у нас:</p>
+<ol><li>Выдача ({{ ex.set_fee|money }} за комплект): {{ ex.issue|money }}</li><li>Бонус за переданных клиентов ({{ ex.set_handoff|money }} за комплект): + {{ ex.handoff|money }}</li><li>Премия KPI ({{ ex.orders }} закрытых заказов): + {{ ex.kpi|money }}</li></ol>
+<p><b>🎯 Итого {{ ex.total|money }} вместо {{ ex.issue|money }}{% if ex.twice %} — больше чем в 2 раза{% endif %}.</b></p>{% endif %}</div>
+<label for="inc-about-more" class="btn btn--link btn--sm inc-more-btn"><span class="inc-more-show">показать полностью</span><span class="inc-more-hide">скрыть</span></label></section>
+{% endif %}{% endif %}
 {% if v.adjust %}<p class="mp-hint" data-adjust>{% for a in v.adjust %}Корректировка {{ a.day|short_dt }}: {{ "+" if a.adj > 0 else "" }}{{ a.adj|money }} — {{ a.reason }} ({{ a.status_name }}){% if not loop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
 {% if v.request and v.request.open %}<p class="mp-hint" data-request-open>Запрос «Вычли с кассы и получили бонусы» на {{ v.request.amount|money }} отправлен {{ v.request.at|short_dt }}: офис проверяет кассу. Сумма уйдёт из «К выплате», когда офис отметит «Рассчитан».</p>
 {% elif can_request and v.debt.total > 0 %}<form method="post" action="/my-point/income/request" class="inline" data-once data-confirm-title="Вычли с кассы и получили бонусы?" data-confirm="В офис уйдёт запрос на {{ v.debt.total|money }}. Офис проверит кассу и отметит «Рассчитан»; до этого сумма остаётся в «К выплате»." data-confirm-ok="Отправить запрос"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary" data-request>Вычли с кассы и получили бонусы</button></form>{% endif %}
@@ -60,7 +77,6 @@
 {% for w in v.waiting %}<tr data-waiting="{{ w.order }}"><td>№ {{ w.card.label }}</td><td>{{ w.arrived|short_dt }}</td><td>{{ w.card.client or "—" }}</td><td>{% if w.record %}на ОТХ{% else %}{{ w.card.stage }}{% endif %}</td><td>{{ w.pieces }}</td><td>{{ w.expected|money }}</td><td><span class="badge badge--neutral" data-paid="waiting">к начислению</span></td></tr>{% endfor %}
 </tbody></table></div>{% endif %}
 {% elif f.tab == "bonus" %}
-<div class="mp-hint" style="padding:var(--s-3);border:1px solid var(--gray-200);border-radius:var(--r-lg)" data-bonus-banner><b>🔥 Бонус +{{ (v.rates.handoff_fee * 4)|money }} за комплект</b> ({{ v.rates.handoff_fee|money }} за шину) — за клиента, переданного в команду на покупку шин.{% if v.rates.oth_sale_fee %}<br><b>🛞 Продажа с ОТХ: +{{ v.rates.oth_sale_fee|money }} за шину.</b>{% endif %}{% if v.rates.oth_sale_fee %} Если продала сама точка; своему переданному клиенту со своей ОТХ — только этот бонус.{% endif %}<br>Начисляется после выдачи (этап «Выполнено»), сверху к оплате за итог, за заказы с {{ v.bonus_from|short_dt }}. У сделки в работе показан ожидаемый бонус.</div>
 {% if v.rows %}<div style="overflow-x:auto"><table class="table" data-bonus-orders><thead><tr><th>Клиент</th><th>Позиции</th><th>Бонус</th><th>Сделка</th><th>Расчёт</th></tr></thead><tbody>
 {% for r in v.rows %}<tr data-bonus-order="{{ r.order }}"><td><details><summary><b>{{ r.card.client or "клиент" }}</b>{% if r.card.phone %}<br>{{ r.card.phone|phone }}{% endif %}<br><span class="small muted">№ {{ r.card.label }}{% if r.day %} · {{ r.day|short_dt }}{% endif %}{% if r.kinds %} · {{ r.kinds }}{% endif %}</span></summary>
 <div class="small" data-bonus-detail><b>Состав заказа:</b> {% for i in r.card["items"] %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}позиций ещё нет{% endfor %}
@@ -84,15 +100,7 @@
 <p>шины {{ k.cycle_tyres }} из {{ k.need_tyres }}</p>
 <progress max="{{ k.need_tyres }}" value="{{ k.cycle_tyres }}" style="width:100%;height:1.25rem" data-kpi-bar="tyres" aria-label="Шины цикла">{{ k.pct_tyres }}%</progress>
 {% if k.premiums %}<p class="small">{% for p in k.premiums %}Цикл {{ p.cycle }} закрыт {{ p.day|short_dt }}: +{{ p.fee|money }} — {{ "Рассчитан" if p.paid else "Не рассчитан" }}{% if not loop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
-{% if not k.started %}<p class="mp-hint">Премия KPI начисляется с {{ "01.12.2026" }}.</p>{% endif %}
-</section>
-<section class="mp-hint" style="padding:var(--s-3);border:1px solid var(--gray-200);border-radius:var(--r-lg)" data-kpi-text>
-<h3>🚀 KPI: премия за активность</h3>
-<p><b>Закрыли за календарный месяц {{ k.need_orders }} заказов</b> (от {{ k.need_tyres }} шин, ~{{ k.sets }} комплектов) по переданным клиентам — <b>+{{ k.bonus|money }}</b> сверх выдачи и бонусов.</p>
-<p><b>Премий в месяц — сколько угодно:</b> {{ k.need_orders * 2 }} заказов — {{ (k.bonus * 2)|money }}, {{ k.need_orders * 3 }} — {{ (k.bonus * 3)|money }}.</p>
-{% if k.standard %}<p><b>💰 Пример: 6 250 ₽ с 10 клиентов</b> — за месяц по рекомендации точки купили ~10 комплектов (38 шин) с выдачей у нас:</p>
-<ol><li>Выдача (~300 ₽ за комплект): 2 850 ₽</li><li>Бонус за переданных клиентов (~200 ₽ за комплект): + 1 900 ₽</li><li>Премия KPI (10 закрытых заказов): + 1 500 ₽</li></ol>
-<p><b>🎯 Итого 6 250 ₽ вместо 2 850 ₽ — больше чем в 2 раза.</b></p>{% endif %}
+{% if not k.started %}<p class="mp-hint">Премия KPI начисляется с {{ k.kpi_from|short_dt }}.</p>{% endif %}
 </section>
 {% endif %}
 {% endif %}
