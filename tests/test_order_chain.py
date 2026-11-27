@@ -139,7 +139,7 @@ def test_the_card_shows_the_chain_and_its_buttons_and_the_routes_work(tmp_path):
     page = client.get("/orders/%d" % a).get_data(as_text=True)
     assert "Другие заказы клиента" in page and "Этот заказ ни с чем не связан" in page and "data-chain-unlink" not in page
     assert page.index("<summary>Дополнительно") < page.index('<details class="owin-extra" data-chain')
-    assert '<details class="owin-extra" data-chain aria-labelledby="chain-h">' in page
+    assert '<details class="owin-extra" data-chain data-remember="order-chain" aria-labelledby="chain-h">' in page
     assert 'form="ow-chain" name="other"' in page
     assert page.index('id="ow-main"') < page.index('form="ow-chain" name="other"') < page.index('id="ow-chain"')
     post(client, "/orders/%d/chain" % a, tok, other="5367654")

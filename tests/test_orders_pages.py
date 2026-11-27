@@ -397,7 +397,7 @@ def test_special_terms_and_the_receipt_show_on_the_collapsed_extra_fields(tmp_pa
 
     def summary():
         page = client.get("/orders/%d" % cid).get_data(as_text=True)
-        return page[page.index('<details class="owin-extra">'):page.index("</summary>", page.index('<details class="owin-extra">'))]
+        return page[page.index('<details class="owin-extra" data-remember="order-extra">'):page.index("</summary>", page.index('<details class="owin-extra" data-remember="order-extra">'))]
     assert "Особые условия" not in summary() and "товарный чек" not in summary()
     post(client, "/orders/%d/save" % cid, tok, special_terms="перевод на карту", special_amount="5000", receipt_needed=["1", ""])
     shown = summary()                                                                            # seen without opening «Дополнительно»
