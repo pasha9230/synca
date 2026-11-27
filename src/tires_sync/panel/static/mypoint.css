@@ -137,3 +137,10 @@ body.mp{min-width:0;max-width:560px;margin:0 auto;padding:var(--s-4) var(--s-4) 
 .inc-banner h2,.inc-banner h3{margin:0 0 var(--s-1)}
 .inc-banner p{margin:0 0 var(--s-1)}
 .mp-act-links .mp-act-meta{flex:0 0 100%}
+
+/* «Доход / Бонусы / KPI» (the owner 2026-11-27): big tabs that look like buttons; three equal ones, never a scroll of the page */
+.mp-tabs.mp-tabs--income{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;overflow:visible;border:0;margin:var(--s-3) 0 var(--s-4)}
+.mp-tabs--income .mp-tab{justify-content:center;min-height:48px;padding:8px 6px;font-size:17px;font-weight:600;border:2px solid var(--gray-300);border-radius:12px;background:var(--gray-0);color:var(--gray-700);cursor:pointer;min-width:0;white-space:nowrap}
+.mp-tabs--income .mp-tab:hover{border-color:var(--primary-600);color:var(--primary-700)}
+.mp-tabs--income .mp-tab.is-active{border-color:var(--primary-600);background:var(--primary-600);color:var(--gray-0);font-weight:700}
+.inc-changes{font-size:16px}
