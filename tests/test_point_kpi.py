@@ -83,7 +83,12 @@ def test_kpi_progress_toward_the_next_premium(tmp_path):
     clients(conn, a, 1, pieces=45)
     report = order_report.build(conn, "2026-12-01", "2026-12-31")
     k = income_view._kpi(report, conn, a, "2026-12", "2026-12-15")
-    assert (k["cycles"], k["cycle_tyres"], k["tyres_left"], k["cycle_orders"], k["orders_left"]) == (1, 9, 27, 0, 10)
+    assert (k["cycles"], k["cycle_tyres"], k["tyres_left"], k["cycle_orders"], k["orders_left"]) == (1, 9, 27, 0, 19)
+    b = point(conn, "Бета")
+    clients(conn, b, 10, first=100, pieces=2)                                # 10 orders, 20 tyres: 1 premium by the orders
+    report = order_report.build(conn, "2026-12-01", "2026-12-31")
+    k = income_view._kpi(report, conn, b, "2026-12", "2026-12-15")
+    assert (k["cycles"], k["orders_left"], k["cycle_orders"], k["tyres_left"], k["cycle_tyres"]) == (1, 10, 0, 52, 0)
 
 
 def test_kpi_cycles_are_not_limited(tmp_path):
@@ -181,11 +186,13 @@ def test_the_tabs_say_the_day_of_a_change_up_to_the_day_after_it(tmp_path):
     from tires_sync.panel import income_view
     conn = db(tmp_path)
     a = point(conn, "Альфа")
-    for tab in ("income", "bonus", "kpi"):                                    # the start of the bonuses and KPI, for all three
+    assert income_view.changes_day(conn, a, "income", "2026-11-28") == ""   # the start of the bonuses: not on «Доход» (review #96)
+    for tab in ("bonus", "kpi"):                                              # the start of the bonuses and KPI
         assert income_view.changes_day(conn, a, tab, "2026-11-28") == "01.12.2026"
         assert income_view.changes_day(conn, a, tab, "2026-12-02") == "01.12.2026"
         assert income_view.changes_day(conn, a, tab, "2026-12-03") == ""
-    order_report.set_rates(conn, "2027-01-10", "2026-12-15", NOW, "owner", kpi_tyres=40)
+    order_report.set_rates(conn, "2027-01-10", "2026-12-15", NOW, "owner", kpi_tyres=40, point_fee=80)
+    assert income_view.changes_day(conn, a, "income", "2026-12-15") == "10.01.2027"
     assert income_view.changes_day(conn, a, "kpi", "2026-12-15") == "10.01.2027"
     assert income_view.changes_day(conn, a, "bonus", "2026-12-15") == ""
     order_report.set_point_rates(conn, a, "2027-02-01", "2026-12-15", NOW, "owner", {"handoff_fee": 60})

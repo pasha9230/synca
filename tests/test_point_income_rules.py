@@ -910,7 +910,7 @@ def test_the_kpi_text_shows_the_premium_of_the_settings_and_follows_a_change(tmp
     url = "/my-point/income?tab=kpi&km=2026-11"
     page = mine.get(url).get_data(as_text=True).replace("\xa0", " ")
     assert "+0 ₽" not in page and "+1 500 ₽</b> сверх выдачи и бонусов" in page
-    assert "20 заказов или 72 шин — +3 000 ₽" in page and "30 заказов или 108 шин — +4 500 ₽" in page
+    assert "20 заказов или 72 шины — +3 000 ₽" in page and "30 заказов или 108 шин — +4 500 ₽" in page
     assert "KPI считаются с 01 декабря 2026 года" in page and page.index("data-kpi-text") < page.index("data-income-tabs")
     order_report.set_rates(conn, "2026-11-27", "2026-11-27", NOW, "owner", kpi_tyres=40, kpi_bonus=2000, handoff_fee=60)
     page = mine.get(url).get_data(as_text=True).replace("\xa0", " ")
