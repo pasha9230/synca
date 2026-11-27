@@ -343,3 +343,24 @@ def test_wheel_photo_is_separate_cached_and_only_for_primary_account(tmp_path):
     assert client.get(url).data == JPEG
     assert client.get('/img/%s/w-42.jpg' % other).status_code == 404
     assert client.get('/img/%s/w-999.jpg' % token).status_code == 404
+
+
+def test_mixed_gate_checks_wheel_without_tire_rules():
+    from pathlib import Path
+    import xml.etree.ElementTree as ET
+    from tires_sync import feed_check
+    from tires_sync.wheel_feed import build_ads
+    item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
+    rules = {'BRAND': {'pct_small': 10, 'pct_large': 10, 'enabled': True}}
+    ads, _ = build_ads([item], rules, {'BRAND'}, account_id=1, address_id='2', phone='123', category='parts',
+                        product_type='wheels', rim_types={'': 'type'}, photo_for=lambda w: 'https://example.test/a.jpg',
+                        photo_prefix='https://example.test/')
+    tags = frozenset(x.tag for x in ET.parse(str(Path(__file__).parents[1] / 'src/tires_sync/data/avito-templates/diski-2026-11-26.xml')).getroot()[0])
+    aid = ads[0].findtext('Id')
+    ctx = feed_check.Context(mode='generated', template_tags=frozenset(), phone='123', wheel_stocks={aid: 4},
+                             wheel_template_tags=tags, wheel_addresses=frozenset({'2'}), wheel_photo_prefix='https://example.test/')
+    assert feed_check.check_feed(ads, ctx) == []
+    ctx.wheel_addresses = frozenset({'3'})
+    assert any(f.level == 'critical' for f in feed_check.check_feed(ads, ctx))
+    ctx.wheel_stocks = {}
+    assert any(f.level == 'critical' for f in feed_check.check_feed(ads, ctx))

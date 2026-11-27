@@ -44,6 +44,10 @@ class Context:
     mode: str                                          # "generated" or "mirror"
     template_tags: FrozenSet[str]
     reference: Dict[str, FrozenSet[str]] = field(default_factory=dict)
+    wheel_stocks: Dict[str, int] = field(default_factory=dict)  # trusted wheel ad ID -> supplier stock
+    wheel_template_tags: FrozenSet[str] = frozenset()
+    wheel_addresses: FrozenSet[str] = frozenset()
+    wheel_photo_prefix: str = ""
     stocks: Dict[str, int] = field(default_factory=dict)        # supplier code -> stock
     min_stock: int = 4
     phone: str = ""                                    # the cabinet's phone as +7..., "" when it is not to be checked
@@ -128,6 +132,15 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
     twins: Dict[str, str] = {}
     for ad in ads:
         ad_id = ad.findtext("Id") or ""
+        if ad_id in ctx.wheel_stocks:
+            from .wheel_feed import validate_ads as validate_wheel_ads
+            checks = validate_wheel_ads([ad], template_tags=ctx.wheel_template_tags,
+                                        expected_ids=frozenset(ctx.wheel_stocks), stock_by_id=ctx.wheel_stocks,
+                                        allowed_addresses=ctx.wheel_addresses, expected_phone=ctx.phone,
+                                        allowed_photo_prefix=ctx.wheel_photo_prefix, foreign_ids=ctx.other_ids)
+            for _wheel_id, errors in checks:
+                add("required_fields", ad_id, "диск: " + ", ".join(errors))
+            continue
         in_truck = truck.is_truck_ad(ad)
         tags = [c.tag for c in ad]
         extra = sorted({t for t in tags if t not in (ctx.truck_template_tags if in_truck else ctx.template_tags)})
