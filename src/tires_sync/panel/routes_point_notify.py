@@ -113,6 +113,18 @@ def register(app) -> None:
             flash(str(err), "error")
         return redirect(_back("/my-point"))
 
+    @app.route("/my-point/notify/tasks", methods=["POST"])
+    @login_required
+    def mypoint_notify_tasks():
+        """The point's own switch of the sound of the office's tasks (task_sound, the owner 2026-11-28): at most 3 rings a working day."""
+        point_id = own_point()
+        if point_id is None or not _real_point():
+            abort(403)
+        from .. import task_sound
+        on = task_sound.point_put(get_conn(), point_id, request.form.get("on") == "1")
+        flash("Звук задач от офиса включён: не чаще 3 раз в день, в рабочее время." if on else "Звук задач от офиса выключен. Задачи видны в «Сводках».", "info")
+        return redirect(_back("/my-point"))
+
     @app.route("/my-point/notify/ask", methods=["POST"])
     @login_required
     def mypoint_notify_ask():
