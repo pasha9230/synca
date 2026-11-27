@@ -214,6 +214,107 @@ def test_the_answer_to_an_analog_is_read_the_same_way(env):
     assert order_wait.replies(conn, "2026-11-04T12:31:00") == 1 and orders.get_card(conn, card)["stage"]["code"] == "cancel"
 
 
+def wrote(conn, chat_row, mid, at, text="Доставка нужна?"):
+    from datetime import datetime                                  # a message of ours in the chat (a manager, the Avito app)
+    chats._store_message(conn, chat_row, {"id": mid, "created": int(datetime.fromisoformat(at + "+03:00").timestamp()), "direction": "out", "type": "text",
+                                          "content": {"text": text}, "isRead": True})
+    conn.commit()
+
+
+def reply_titles(conn, card):
+    return [t["title"] for t in engine.list_tasks(conn, card) if t["rule_id"] == order_wait.TASK_REPLY]
+
+
+def test_a_no_after_a_question_of_the_manager_is_not_read_as_the_answer_to_the_offer(env):
+    conn, chat_row, card = told(env)
+    wrote(conn, chat_row, "o1", "2026-11-04T12:20:00")
+    said(conn, chat_row, "r1", "2026-11-04T12:30:00", "Нет")
+    assert order_wait.replies(conn, "2026-11-04T12:31:00") == 1
+    assert reply_titles(conn, card) == [order_wait.TITLE_REPLY] and orders.get_card(conn, card)["stage"]["code"] == "wait"
+
+
+def test_a_no_after_another_send_of_the_panel_is_the_managers_too(env):
+    conn, chat_row, card = told(env)
+    chats.send_reply(conn, Sender(), chat_row, "Уточните, пожалуйста, радиус", "b" * 24, "2026-11-04T12:20:00", "worker2")
+    conn.execute("DELETE FROM avito_message WHERE direction = 'out' AND text LIKE 'Уточните%'")   # not synced yet: only the send log has it
+    conn.commit()
+    said(conn, chat_row, "r1", "2026-11-04T12:30:00", "Нет")
+    order_wait.replies(conn, "2026-11-04T12:31:00")
+    assert reply_titles(conn, card) == [order_wait.TITLE_REPLY] and orders.get_card(conn, card)["stage"]["code"] == "wait"
+
+
+def test_a_no_in_a_chat_no_longer_the_orders_is_the_managers(env):
+    conn, chat_row, card = told(env)
+    said(conn, chat_row, "r1", "2026-11-04T12:30:00", "Нет")
+    conn.execute("UPDATE avito_chat SET order_id = NULL WHERE id = ?", (chat_row,))
+    conn.commit()
+    order_wait.replies(conn, "2026-11-04T12:31:00")
+    assert reply_titles(conn, card) == [order_wait.TITLE_REPLY] and orders.get_card(conn, card)["stage"]["code"] == "wait"
+
+
+def two_for_one_analog(env):
+    conn, chat_row = env
+    a = waiting(env, dict(WANT, any_brand="1"))
+    b = orders.create_card(conn, {"client_name": "Пётр"}, NOW, "worker2")
+    order_wait.add_want(conn, b, dict(WANT, any_brand="1"), NOW, "worker2")
+    orders.move_card(conn, b, stage(conn, "wait"), "2026-11-04T11:00:00", "worker2")
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id, last_at) SELECT account_id, 'c2', ?, last_at FROM avito_chat WHERE id = ?", (b, chat_row))
+    conn.execute("UPDATE order_card SET entered_at = '2026-11-01T10:00:00' WHERE id = ?", (a,))
+    conn.commit()
+    return a, b
+
+
+def test_one_analog_set_is_offered_to_one_client_and_held_for_him(env):
+    conn, _row = env
+    a, b = two_for_one_analog(env)
+    sender = Sender()
+    run(conn, sender, [kumho()], price=price_k)
+    assert len(sender.sent) == 1 and [e for e in events(conn, a) if e.startswith(order_wait.TOLD_ANALOG)]
+    assert titles(conn, b) == [order_wait.TITLE_ANALOG] and "не хватает" in tasks(conn, b)[0]["body"]
+    run(conn, sender, [kumho()], NEXT, price=price_k)
+    assert len(sender.sent) == 1 and not [e for e in events(conn, b) if e.startswith(order_wait.TOLD_ANALOG)]
+
+
+def test_the_held_analog_is_not_offered_to_a_younger_order_that_wants_it_exactly(env):
+    conn, chat_row = env
+    a = waiting(env, dict(WANT, any_brand="1"))
+    conn.execute("UPDATE order_card SET entered_at = '2026-11-01T10:00:00' WHERE id = ?", (a,))
+    conn.commit()
+    sender = Sender()
+    run(conn, sender, [kumho()], price=price_k)
+    b = orders.create_card(conn, {"client_name": "Пётр"}, NOW, "worker2")
+    order_wait.add_want(conn, b, dict(brand="Kumho", model="WinterCraft", width=205, profile=55, radius=16, season="winter", studded="no", qty=4), NOW, "worker2")
+    orders.move_card(conn, b, stage(conn, "wait"), "2026-11-04T12:30:00", "worker2")
+    conn.execute("INSERT INTO avito_chat (account_id, chat_id, order_id, last_at) SELECT account_id, 'c2', ?, last_at FROM avito_chat WHERE id = ?", (b, chat_row))
+    conn.commit()
+    run(conn, sender, [kumho()], NEXT, price=price_k)
+    assert len(sender.sent) == 1 and any("первым написали заказу №%d" % a in e for e in events(conn, b))
+
+
+def test_the_analog_a_manager_sent_from_the_form_is_the_offer_of_the_stay(off):
+    conn, chat_row = off
+    card = waiting(off, dict(WANT, any_brand="1"))
+    run(conn, Sender(), [kumho()], price=price_k)
+    [task] = tasks(conn, card)
+    chats.send_reply(conn, Sender(), chat_row, ANALOG % ("Kumho WinterCraft 205/55 R16", "7 000 ₽"), "o%dt%d" % (card, task["id"]), "2026-11-04T12:10:00", "worker2")
+    store.set_state(conn, order_wait.AUTO_KEY, "1")
+    sender = Sender()
+    run(conn, sender, [kumho(), tire()], NEXT, price=price_k)
+    assert sender.sent == [] and [e for e in events(conn, card) if e.startswith(order_wait.TOLD_ANALOG)]
+    assert order_wait.TITLE_EXACT in titles(conn, card)
+    assert "уже ушло предложение аналога" in next(t for t in tasks(conn, card) if t["title"] == order_wait.TITLE_EXACT)["body"]
+
+
+def test_an_account_that_does_not_send_is_not_called_no_chat(env):
+    conn, _row = env
+    card = waiting(env)
+    conn.execute("UPDATE account SET chats_send = 0")
+    conn.commit()
+    run(conn, Sender(), [tire()])
+    [task] = tasks(conn, card)
+    assert task["title"] == order_wait.TITLE_CALL and "Написать в чат Авито из панели нельзя" in task["body"] and "Чата Авито нет" not in task["body"]
+
+
 # --- the positions of an order with no lines (the owner's orders 620, 513, 427, 475) -------------------------------------------------------------
 
 def waiting_by_items(env, code="TS1"):
@@ -228,7 +329,7 @@ def waiting_by_items(env, code="TS1"):
     return card
 
 
-def test_an_order_waiting_by_its_positions_gets_its_lines_with_the_code_and_is_offered(env):
+def test_an_order_waiting_by_its_positions_gets_its_lines_with_the_code_but_only_a_task_until_a_manager_confirms(env):
     conn, _row = env
     card, sender = waiting_by_items(env), Sender()
     assert order_wait.list_wants(conn, card) == []
@@ -236,10 +337,20 @@ def test_an_order_waiting_by_its_positions_gets_its_lines_with_the_code_and_is_o
     [line] = order_wait.list_wants(conn, card)
     assert line["code"] == "TS1" and line["qty"] == 4 and (line["width"], line["profile"], line["radius"]) == (205, 55, 16)
     assert sender.sent == [] and events(conn, card).count(order_wait.FROM_ITEMS) == 1
-    run(conn, sender, [tire()], NEXT)
-    assert sender.sent == [WORDS % ("Ikon Autograph 205/55 R16", "8 500 ₽")]
+    run(conn, sender, [tire()], NEXT)                                                          # the switch on, the lines nobody saw: the task only
+    assert sender.sent == [] and titles(conn, card) == [order_wait.TITLE_EXACT] and order_wait.UNCONFIRMED_NOTE in tasks(conn, card)[0]["body"]
     run(conn, sender, [tire()], "2026-11-04T14:40:00")
-    assert len(sender.sent) == 1 and events(conn, card).count(order_wait.FROM_ITEMS) == 1 and len(order_wait.list_wants(conn, card)) == 1
+    assert sender.sent == [] and len(tasks(conn, card)) == 1 and events(conn, card).count(order_wait.FROM_ITEMS) == 1 and len(order_wait.list_wants(conn, card)) == 1
+
+
+def test_the_lines_from_the_positions_a_manager_saved_are_offered_by_themselves(env):
+    conn, _row = env
+    card, sender = waiting_by_items(env), Sender()
+    run(conn, sender, [tire(stock=0)])
+    [line] = order_wait.list_wants(conn, card)
+    order_wait.update_want(conn, line["id"], {}, NOW, "worker2")                              # «Сохранить строку» of a person
+    run(conn, sender, [tire()], NEXT)
+    assert sender.sent == [WORDS % ("Ikon Autograph 205/55 R16", "8 500 ₽")] and tasks(conn, card) == []
 
 
 def test_a_position_without_a_code_is_left_to_the_manager(env):
