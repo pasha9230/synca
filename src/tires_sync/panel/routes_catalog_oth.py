@@ -190,8 +190,12 @@ def register(app) -> None:
         titles = {cid: order_sheet.mim_title(conn, orders.get_card(conn, cid)) for cid, code in codes.items() if code == "oth"}   # 2026-11-06
         actable = {cid for cid in codes if oth_point_return.can_act(conn, orders.get_card(conn, cid))}     # one act for several orders (E3)
         boxed = set()
+        from .. import oth_expiry
+        from .routes_orders import local_iso
+        ending = oth_expiry.ends_tomorrow(conn, local_iso())                   # «Срок хранения истекает завтра» (the owner 2026-11-27)
         for row in data["stock"]:
             row["oth_title"] = titles.get(row["order_id"], "")
+            row["ends_tomorrow"] = row["order_id"] in ending
             when = dates.get(row["order_id"], {})
             on_oth = codes.get(row["order_id"]) == "oth"
             row.update(oth_since=when.get("oth_since") or row["since"],                      # no reserve columns (П19, 2026-11-08)

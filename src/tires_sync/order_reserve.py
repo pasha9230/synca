@@ -873,6 +873,13 @@ def check(conn, now: str, notify: Optional[Notify], deliver: Optional[order_mana
     except Exception:
         conn.rollback()
         logging.getLogger("tires_sync.orders").exception("the seventh day on OTH failed")
+    from . import arrival_remind, oth_expiry
+    for step in (arrival_remind.late_tasks, oth_expiry.tick):     # the office's tasks (the owner 2026-11-27): late orders, OTH ends tomorrow
+        try:
+            step(conn, now)
+        except Exception:
+            conn.rollback()
+            logging.getLogger("tires_sync.orders").exception("%s failed", step.__name__)
     moment = datetime.fromisoformat(now)
     if moment.hour < FIRST_HOUR:
         return 0
