@@ -1103,7 +1103,7 @@ def _cmd_feed_publish(args) -> int:
     return 0
 
 
-def _cmd_avito_publish(args) -> int:
+def _cmd_avito_publish(args, *, feed_already_locked=False) -> int:
     conn, account, client = _avito_client(args, write=args.confirm)
     folder = Path(args.feed_root) / account["feed_token"]
     candidate = folder / "next" / "avito_feed.xml"
@@ -1124,7 +1124,8 @@ def _cmd_avito_publish(args) -> int:
     if not args.confirm:
         print("Ничего не изменено. Чтобы указать ссылку и запустить загрузку, добавьте --confirm.")
         return 0
-    with feed_lock(args.feed_root):
+    from contextlib import nullcontext
+    with nullcontext() if feed_already_locked else feed_lock(args.feed_root):
         result = promote_checked_feed(conn, account, folder, args.feed_root, promoter=promote_feed, allow_shrink=args.allow_shrink)
         _record_state(conn, account, folder)
     print("фид опубликован у нас на сервере: было %d, стало %d объявлений" % (result["old"], result["new"]))
@@ -1171,7 +1172,7 @@ def _cmd_mirror_go_live(args) -> int:
         conn.commit()
         args.allow_shrink = False
         try:
-            code = _cmd_avito_publish(args)
+            code = _cmd_avito_publish(args, feed_already_locked=True)
         except BaseException:
             code = None
             raise
