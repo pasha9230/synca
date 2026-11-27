@@ -261,3 +261,9 @@
 }
 /* «Сегодня есть возвраты» (2026-11-21): «Перейти к возвратам» and «Подписал акт и отдал» wrap on a phone */
 .mp-today-acts{display:flex;flex-wrap:wrap;gap:8px;min-width:0;max-width:100%}.mp-today-acts>*{flex:1 1 160px;min-width:0}.mp-today-acts .mp-handover summary{width:100%}
+
+/* «Доход / Бонусы / KPI» (the owner 2026-11-27): big tabs like buttons, in both widths (over the .pt rules above) */
+.pt .mp-tabs.mp-tabs--income{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;overflow:visible;border:0;flex-wrap:nowrap}
+.pt .mp-tabs--income .mp-tab{justify-content:center;height:auto;min-height:48px;padding:8px 6px;font-size:17px;font-weight:600;border:2px solid var(--pt-border);border-radius:12px;background:var(--pt-bg);color:var(--pt-text-2);min-width:0}
+.pt .mp-tabs--income .mp-tab:hover{border-color:var(--pt-primary);color:var(--pt-primary)}
+.pt .mp-tabs--income .mp-tab.is-active{border-color:var(--pt-primary);background:var(--pt-primary);color:var(--gray-0);font-weight:700}

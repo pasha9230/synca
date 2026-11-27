@@ -216,7 +216,7 @@ def test_switched_on_the_point_sees_its_own_sums_only(tmp_path, view):
     bonus = mine.get("/my-point/income?tab=bonus").get_data(as_text=True)
     assert sorted(map(int, re.findall(r'data-bonus-order="(\d+)"', bonus))) == [2, 3, 4]
     kpi = mine.get("/my-point/income?tab=kpi").get_data(as_text=True)
-    assert "KPI: премия за активность" in kpi and "6 250 ₽" in kpi.replace(" ", " ") and not re.search(r"(?<!\d)50 ₽", kpi.replace("\xa0", " "))   # no «50 ₽» (ТЗ 95)
+    assert "KPI: премия за активность" in kpi and "6 000 ₽" in kpi.replace(" ", " ") and not re.search(r"(?<!\d)50 ₽", kpi.replace("\xa0", " "))   # no «50 ₽» (ТЗ 95)
     for secret in ("Закупка", "Прибыль", "20 000", "4 000"):                       # no purchase, no profit, no prices
         for shown in (page, bonus, kpi):
             assert secret not in shown, secret

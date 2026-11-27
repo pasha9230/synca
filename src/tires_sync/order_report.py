@@ -35,10 +35,11 @@ HANDOFF_PER_TYRE_FROM = BONUS_FROM
 # 300 ₽), always; the points are settled up to 2026-10-22, so the count by the rule (and the ledger, point_payouts.LEDGER_FROM) starts the
 # next day. The days before keep the old count (once an order): settled, never recounted
 POINT_FEE_PER_TYRE_FROM = "2026-10-23"
-# KPI (ТЗ 95): in a calendar month, for every full cycle of kpi_orders closed orders AND kpi_tyres tyres of the clients the point handed
-# over, the premium kpi_bonus; the cycles are not limited: min(orders // kpi_orders, tyres // kpi_tyres) premiums (20 / 76 → 2). The rates
-# of a month are those in force on its first day. The premium is the point's on the day of the order that closes the cycle.
-KPI_ORDERS, KPI_TYRES, KPI_BONUS = 10, 38, 1500.0
+# KPI (ТЗ 95; the owner 2026-11-27: «ИЛИ», by the tyres): in a calendar month, the closed orders of the clients the point handed over
+# give a premium kpi_bonus for every full kpi_orders orders OR every full kpi_tyres tyres, whichever gives more; the premiums are not
+# limited: max(orders // kpi_orders, tyres // kpi_tyres) (one order of 45 tyres → 1, 9 toward the next; 72 tyres → 2). The rates of a
+# month are those in force on its first day. The premium is the point's on the day of the order that closes it.
+KPI_ORDERS, KPI_TYRES, KPI_BONUS = 10, 36, 1500.0
 KPI_FROM = BONUS_FROM                # the first whole month: no premium of a month before, whatever rate is saved
 DEFAULTS = {"point_fee": POINT_FEE, "owner_share": OWNER_SHARE, "handoff_fee": HANDOFF_FEE, "oth_sale_fee": OTH_SALE_FEE,
             "kpi_orders": KPI_ORDERS, "kpi_tyres": KPI_TYRES, "kpi_bonus": KPI_BONUS}
@@ -593,6 +594,11 @@ def kpi_item(month: str, cycle: int) -> str:
     return "kpi:%s:%d" % (month, cycle)
 
 
+def kpi_cycles(orders: int, tyres: int, need_orders: int, need_tyres: int) -> int:
+    """The premiums of a month (the owner 2026-11-27): one for every full need_orders orders OR every full need_tyres tyres — the more."""
+    return max(int(orders) // max(int(need_orders), 1), int(tyres) // max(int(need_tyres), 1))
+
+
 def _kpi(conn, handed: dict, rates: List[dict], by_point: Dict[int, List[dict]], start: str, end: str) -> tuple:
     """The KPI of the handing points (ТЗ 95): ({point key: [{month, cycle, day, fee, item}]} — the premiums whose cycle closed within
     start..end; {point key: {month: {orders, tyres, cycles, need_orders, need_tyres, bonus, fee}}} — the count of each month from the month
@@ -625,7 +631,7 @@ def _kpi(conn, handed: dict, rates: List[dict], by_point: Dict[int, List[dict]],
             for entry in sorted(entries, key=lambda e: (e["day"], e["order"] or 0)):
                 count["orders"] += 1
                 count["tyres"] += entry["tyres"]
-                cycles = min(count["orders"] // max(need_orders, 1), count["tyres"] // max(need_tyres, 1))
+                cycles = kpi_cycles(count["orders"], count["tyres"], need_orders, need_tyres)
                 while count["cycles"] < cycles:
                     count["cycles"] += 1
                     if bonus and (not start or entry["day"] >= start):

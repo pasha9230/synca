@@ -65,7 +65,25 @@ def _filters(args, today: str) -> dict:
 
 def empty(args, today: str) -> dict:
     return {"f": _filters(args, today), "tabs": TABS, "pay_names": PAY, "deals": DEALS, "sorts": SORTS, "today": today, "rows": [],
-            "income": {"orders": []}}
+            "income": {"orders": []}, "changes": ""}
+
+
+# the owner 2026-11-27: «Изменения с ДД.ММ.ГГГГ» on each tab when its rates change on a day to come (the office's «Действует с» of
+# «Настройки заказов → Расчёты», general or the point's own) or, on «Бонусы» and «KPI», on the start of the bonuses and KPI (BONUS_FROM);
+# shown up to the end of the day after it, then gone. The count by the dates is order_report.rate_on / rate_for (the old rates before it)
+TAB_RATES = {"income": ("point_fee",), "bonus": ("handoff_fee", "oth_sale_fee"), "kpi": ("kpi_orders", "kpi_tyres", "kpi_bonus")}
+
+
+def changes_day(conn, point_id: int, tab: str, today: str) -> str:
+    """The nearest day of a change of the rates of `tab` still to be said («ДД.ММ.ГГГГ»), else «»."""
+    names = TAB_RATES.get(tab, ())
+    days = {r["valid_from"] for r in order_report.list_rates(conn) if r["name"] in names}
+    days |= {r["valid_from"] for r in order_report.list_point_rates(conn, point_id) if r["name"] in names}
+    if tab in ("bonus", "kpi"):                                              # the start of the bonuses and KPI (the review of #96)
+        days.add(order_report.BONUS_FROM)
+    since = (date.fromisoformat(today[:10]) - timedelta(days=1)).isoformat()
+    later = sorted(d for d in days if d >= since)
+    return "%s.%s.%s" % (later[0][8:10], later[0][5:7], later[0][:4]) if later else ""
 
 
 def _cards(conn, ids) -> Dict[int, dict]:
@@ -147,6 +165,7 @@ def build(conn, point_id: int, args, today: str) -> dict:
         later = order_report.point_rates_now(conn, point_id, order_report.BONUS_FROM)
         rates.update({k: later[k] for k in ("handoff_fee", "oth_sale_fee", "kpi_orders", "kpi_tyres", "kpi_bonus")})
     view["rates"] = rates
+    view["changes"] = changes_day(conn, point_id, f["tab"], today)
     view["bonus_from"] = order_report.BONUS_FROM
     view["issue_per_tyre_from"] = order_report.POINT_FEE_PER_TYRE_FROM
     view["filtered"] = sum(1 for on in (f["q"], f["from"] != point_payouts.LEDGER_FROM, f["to"] != today, f["pay"] != "active",
@@ -239,10 +258,16 @@ def _kpi(report: dict, conn, point_id: int, month: str, today: str) -> dict:
         p["paid"] = paid.get((point_id, p["item"]))
     if not count.get("bonus") and first < order_report.KPI_FROM:
         count = dict(count, bonus=rates["kpi_bonus"])
-    in_orders = count["orders"] - count["cycles"] * count["need_orders"]
-    in_tyres = count["tyres"] - count["cycles"] * count["need_tyres"]
+    # the owner 2026-11-27 («ИЛИ»): toward the next premium — the orders and the tyres over those of the premiums got (one order of 45 tyres
+    # → 9 of 36, 27 to go); either one reaching its threshold gives it
+    # the next premium comes at (cycles + 1) × the threshold of either: 45 tyres in 1 order, 1 premium → 27 tyres or 19 orders to go;
+    # the bars show the way to it (threshold − left), never below 0
+    orders_left = max((count["cycles"] + 1) * count["need_orders"] - count["orders"], 1)
+    tyres_left = max((count["cycles"] + 1) * count["need_tyres"] - count["tyres"], 1)
+    in_orders = max(count["need_orders"] - orders_left, 0)
+    in_tyres = max(count["need_tyres"] - tyres_left, 0)
     return dict(count, month=month, premiums=premiums,
-                cycle_orders=min(in_orders, count["need_orders"]), cycle_tyres=min(in_tyres, count["need_tyres"]),
+                cycle_orders=in_orders, cycle_tyres=in_tyres, orders_left=orders_left, tyres_left=tyres_left,
                 pct_orders=min(100, int(in_orders * 100 / max(count["need_orders"], 1))),
                 pct_tyres=min(100, int(in_tyres * 100 / max(count["need_tyres"], 1))),
                 sets=round(count["need_tyres"] / 4),
