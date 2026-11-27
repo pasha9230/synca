@@ -3,3 +3,5 @@
 .wheel-hide,.wheel-more[open] .wheel-show{display:none}.wheel-more[open] .wheel-hide{display:inline}
 
 .wheel-more,.wheel-footer{grid-column:1;grid-row:3}.wheel-footer{border:0;padding-top:16px;align-self:start;justify-content:flex-end;pointer-events:none}.wheel-footer a,.wheel-footer button{pointer-events:auto}.wheel-more summary{list-style:none}.wheel-more summary::-webkit-details-marker{display:none}
+
+.wheel-items .t-namecol{max-width:none;min-width:220px}.wheel-items td{vertical-align:middle}.wheel-preview{display:inline;position:relative}.wheel-preview summary{display:inline;cursor:pointer;color:var(--primary-600)}.wheel-preview-body{padding:8px;margin-top:4px;border:1px solid var(--gray-200);background:var(--gray-0);border-radius:6px;white-space:normal}

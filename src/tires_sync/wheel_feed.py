@@ -23,7 +23,7 @@ def ad_id(goods_id: str, account_id: int, address_id: str) -> str:
 
 
 def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, category, product_type, rim_types,
-              photo_for=None, photo_prefix="", address_text=""):
+              photo_for=None, photo_prefix="", address_text="", overrides=None):
     """Build only ads with approved account photo URLs; supplier URLs are not published."""
     if account_id != PRIMARY_ACCOUNT or not str(address_id).strip():
         raise ValueError('Укажите аккаунт и адрес для дисков.')
@@ -49,7 +49,7 @@ def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, c
         if w.goods_id in duplicates:
             rejected[w.goods_id] = ['duplicate']
             continue
-        price = price_for(w, rules)
+        price = price_for(w, rules, overrides)
         image_url = photo_for(w) if photo_for else ""
         parts = urlsplit(image_url or "")
         safe_photo = bool(photo_prefix and image_url.startswith(photo_prefix) and parts.scheme == "https"

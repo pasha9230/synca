@@ -1468,21 +1468,88 @@ def draft_rev(changes: dict) -> str:
 def pending_line(review: dict) -> str:
     """One line of what «Применить» changes in the feed, from the same review as the page /draft/N: «войдёт 12, выйдет 3, цены изменятся у 40»."""
     preview = review["preview"]
-    return "В фиде: войдёт %d, выйдет %d, цены изменятся у %d." % (
+    result = "В фиде: войдёт %d, выйдет %d, цены изменятся у %d." % (
         len(preview.appear), len(preview.disappear), len(preview.price_changes))
+    if review.get('wheel_price_changes'):
+        result = result.replace("В фиде:", "В фиде шин:", 1)
+        result += " Цены дисков: %d правок." % review['wheel_price_changes']
+    return result
 
 
-def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dict:
+
+def _wheel_own_review(conn, raw, changes, current_offers=None, published_prices=None):
+    """Review the last known wheel purchase alongside the same draft as tires."""
+    from .. import wheel_archive, wheel_pricing
+    if 'price_overrides' not in changes:
+        return [], []
+    before, after = raw.get('price_overrides') or {}, changes.get('price_overrides') or {}
+    wheels = {**wheel_archive.load(conn), **(current_offers or {})}
+    published_prices = published_prices or {}
+    lines, risky = [], []
+    for key in sorted(set(before) | set(after)):
+        if not key.startswith('1:w-') or before.get(key) == after.get(key):
+            continue
+        wheel = wheels.get(key[4:])
+        if wheel is None:
+            # Never silently apply an unreviewable sale price.
+            raise ValueError('Не найдены сведения о диске для проверки цены: обновите каталог.')
+        was = published_prices.get(wheel.goods_id)
+        if was is None:
+            was = wheel_pricing.price_for(wheel, raw.get('wheel_pricing') or {}, before)
+        current = wheel_pricing.price_for(wheel, raw.get('wheel_pricing') or {}, after)
+        text = 'Своя цена · диск %s (%s): %s → %s' % (wheel.name, wheel.code or wheel.goods_id, _rub(was), _rub(current))
+        if after.get(key) and current is not None:
+            why = []
+            if wheel.price > 0 and current < wheel.price:
+                why.append('ниже закупки')
+            if was and abs(current / was - 1) > OWN_JUMP:
+                why.append('отличается от прежней цены на %+d %%' % round((current / was - 1) * 100))
+            if why:
+                risky.append(text + ', закупка ' + _rub(wheel.price) + ' — ' + ', '.join(why))
+        lines.append(text + ' (' + own_price_text(after.get(key)) + ')')
+    return lines, risky
+
+
+def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None, wheel_path=None, feed_root=None) -> dict:
     draft = get_draft(conn, draft_id)
     active_id, raw = get_active(conn)
     merged = {**raw, **draft["changes"]}
     old = settings_from_dict(raw, enforce_pct_limit=False)
     new = settings_from_dict(merged, enforce_pct_limit=False)
     preview = account_preview(conn, parsed, ref, old, new, today, now)
-    own_offers, own_gone = _own_offers(conn, raw, draft["changes"], parsed.offers)
-    own_risky = own_price_risky(conn, raw, draft["changes"], own_offers, old)
-    own_table = own_price_table(conn, raw, draft["changes"], own_offers, old, new, own_gone)
-    own_lines = own_price_lines(conn, raw, draft["changes"], own_offers, old, new, own_gone) if own_table is None else []
+    wheel_offers, wheel_published = {}, {}
+    if wheel_path:
+        from ..wheel_runtime import _snapshot
+        territory = connections.supplier_territory(conn, 1, old)
+        snapshot = _snapshot(wheel_path, territory)
+        wheel_offers = snapshot.offers if snapshot else {}
+    if feed_root:
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+        from .. import wheel_manifest
+        account = connections.get_account(conn, connections.PRIMARY_ACCOUNT)
+        if account:
+            try:
+                data = (Path(feed_root) / account['feed_token'] / 'avito_feed.xml').read_bytes()
+                info = wheel_manifest.load_info(conn, account['id'], data)
+                if info:
+                    for ad in ET.fromstring(data).findall('Ad'):
+                        code = info['codes'].get(ad.findtext('Id'), '')
+                        price = (ad.findtext('Price') or '').strip()
+                        if code.startswith('wheel:') and price.isascii() and price.isdigit():
+                            wheel_published[code[6:]] = int(price)
+            except (OSError, ET.ParseError, ValueError):
+                pass
+    wheel_lines, wheel_risky = _wheel_own_review(conn, raw, draft["changes"], wheel_offers, wheel_published)
+    # Wheel IDs are namespaced and never interpreted as tire positions.
+    tire_raw = {**raw, "price_overrides": {k: v for k, v in (raw.get("price_overrides") or {}).items() if not k.startswith("1:w-")}}
+    tire_changes = dict(draft["changes"])
+    if "price_overrides" in tire_changes:
+        tire_changes["price_overrides"] = {k: v for k, v in tire_changes["price_overrides"].items() if not k.startswith("1:w-")}
+    own_offers, own_gone = _own_offers(conn, tire_raw, tire_changes, parsed.offers)
+    own_risky = own_price_risky(conn, tire_raw, tire_changes, own_offers, old) + wheel_risky
+    own_table = own_price_table(conn, tire_raw, tire_changes, own_offers, old, new, own_gone)
+    own_lines = own_price_lines(conn, tire_raw, tire_changes, own_offers, old, new, own_gone) if own_table is None else []
     old_enabled = {tuple(item) for item in raw["enabled"]}
     new_enabled = {tuple(item) for item in merged["enabled"]}
     names = {gid: offer.name_orig or offer.name for gid, offer in parsed.offers.items()}
@@ -1508,9 +1575,9 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
                   ["Своя цена: %d %s × %d %s — сводка и таблица «Своя цена» ниже" % (
                       own_table["summary"]["positions"], plural(own_table["summary"]["positions"], "позиция", "позиции", "позиций"),
                       len(own_table["summary"]["accounts"]), plural(len(own_table["summary"]["accounts"]), "аккаунт", "аккаунта", "аккаунтов"))])
-                 + describe_changes(raw, draft["changes"], parsed.offers, new.min_stock),
+                 + wheel_lines + describe_changes(raw, draft["changes"], parsed.offers, new.min_stock),
         "own_table": own_table,
-        "own_audit": own_audit_lines(own_lines, own_table),
+        "own_audit": own_audit_lines(own_lines, own_table) + wheel_lines,
         "funnel": pair_funnel(parsed, ref, store.load_confirmed_mappings(conn), store.load_brand_map(conn), new,
                               sorted(new_enabled - old_enabled)),
         "price_rows": price_rows[:20],
@@ -1518,6 +1585,7 @@ def draft_review(conn, draft_id: int, parsed, ref, today: date, now=None) -> dic
         "diff": {key: {"old": raw.get(key), "new": value} for key, value in draft["changes"].items()},
         "preview": preview,
         "own_risky": own_risky,
+        "wheel_price_changes": len(wheel_lines),
         "pct_strong": needs_strong_confirmation(raw, draft["changes"]),
         "needs_strong": needs_strong_confirmation(raw, draft["changes"]) or bool(own_risky),
         "stale": draft["base_version"] != active_id,

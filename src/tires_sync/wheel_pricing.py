@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 from .models import PricingRule
-from .pricing import FEED_STEP, final_price
+from .pricing import FEED_STEP, final_price, own_price
 from .webmim import brand_key
 
 
@@ -23,7 +23,11 @@ def validate_rules(rules, limit=None):
                 raise ValueError('wheel_pricing: процент превышает допустимый предел')
 
 
-def price_for(wheel, rules):
+def price_for(wheel, rules, overrides=None):
+    own = (overrides or {}).get('1:w-' + wheel.goods_id)
+    if own:
+        from .config import own_price_value
+        return own_price(wheel.price, own_price_value(own))
     rule = rules.get(brand_key(wheel.brand))
     if not rule or wheel.price <= 0:
         return None

@@ -398,7 +398,7 @@ def register(app) -> None:
     def draft(draft_id):
         conn, settings, parsed, ref = context(app)
         try:
-            review = service.draft_review(conn, draft_id, parsed, ref, now().date(), now() + timedelta(hours=3))
+            review = service.draft_review(conn, draft_id, parsed, ref, now().date(), now() + timedelta(hours=3), wheel_path=wheel_snapshot_path(Path(app.config["UNLOAD_PATH"])), feed_root=app.config.get("FEED_ROOT"))
         except ValueError:
             abort(404)
         back_url = return_page("/catalog", keep=True)
@@ -416,7 +416,7 @@ def register(app) -> None:
         stay = safe_path(request.form.get("next", ""))
         conn, settings, parsed, ref = context(app)
         try:
-            review = service.draft_review(conn, draft_id, parsed, ref, now().date(), now() + timedelta(hours=3))
+            review = service.draft_review(conn, draft_id, parsed, ref, now().date(), now() + timedelta(hours=3), wheel_path=wheel_snapshot_path(Path(app.config["UNLOAD_PATH"])), feed_root=app.config.get("FEED_ROOT"))
         except ValueError:
             abort(404)
 
@@ -471,7 +471,7 @@ def register(app) -> None:
         if staged["draft_id"] is None or staged["stale"]:
             return jsonify(open=False, count=0)
         _, settings, parsed, ref = context(app)
-        review = service.draft_review(conn, staged["draft_id"], parsed, ref, now().date(), now() + timedelta(hours=3))
+        review = service.draft_review(conn, staged["draft_id"], parsed, ref, now().date(), now() + timedelta(hours=3), wheel_path=wheel_snapshot_path(Path(app.config["UNLOAD_PATH"])), feed_root=app.config.get("FEED_ROOT"))
         return jsonify(open=True, draft=staged["draft_id"], rev=review["rev"], line=service.pending_line(review),
                        count=staging.count_of(get_active(conn)[1], review["draft"]["changes"]),
                        guard={"over": review["guard"]["over"], "gone": review["guard"]["gone"], "limit": review["guard"]["limit"]},
