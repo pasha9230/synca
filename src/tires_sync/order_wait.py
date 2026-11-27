@@ -3,7 +3,10 @@ A line is one wanted tire (size, season, studs, quantity, optional brand, model,
 A card is found exactly when every line is in stock under its own terms; it is found with analogs when every line is covered but some
 only by an analog (another brand and/or a neighbour size). A partial find marks nothing: a part of the set is no sale (owner, 2026-10-15).
 Found exactly, the client is written to by itself in the order's Avito chat, in the working hours, once per stay in the stage (the owner
-2026-11-04, `_tell_client`); when it cannot go the responsible manager gets the task instead. Found with analogs: only the task."""
+2026-11-04, `_tell_client`); when it cannot go the responsible manager gets the task instead. Found with analogs: «появился аналог» the
+same way (2026-11-27). Both go by themselves only with the owner's switch «Автоотправка предложений из листа ожидания» (auto_on, off by
+default): off, the manager's task has the words and the button. No Avito chat: the task to call the client. The bare answers «Да» / «Нет»
+are read (replies)."""
 from __future__ import annotations
 
 import json
@@ -38,6 +41,24 @@ NOTES = "wait_notes:%s"                              # app_state, per send mark:
 TAG_OFF = "wait_tag_off:%s"                          # app_state, per send mark: the check took the tag of the find off (_tag_now): it comes back
 TITLE_EXACT, TITLE_ANALOG = "Позиция появилась: предложите клиенту", "Есть аналоги: можно предложить клиенту"
 TITLE_CHECK = "Позиция появилась: проверьте чат клиента"    # the message may have gone: the same task, without the card's form «отправить клиенту»
+TITLE_PRICE = "Позиция появилась: поставьте цену и отправьте клиенту"     # no price: the form has the words with PRICE_GAP (the owner 2026-11-27)
+TITLE_CALL, TITLE_CALL_ANALOG = "Позиция появилась: позвоните клиенту", "Есть аналог: позвоните клиенту"     # no Avito chat (the owner 2026-11-27)
+FORM_TITLES = (TITLE_EXACT, TITLE_ANALOG, TITLE_PRICE)    # the tasks whose card has the form «Отправить клиенту в чат Авито»
+TITLE_YES = "Клиент ответил «Да»: позовите менеджера"
+TITLE_NO = "Клиент ответил «Нет»: ожидание закрыто"
+TAG_YES = "Клиент ответил: Да"
+TOLD_ANALOG = "Предложение аналога отправлено: "      # the record of the journal after the offer of an analog went (not TOLD: it holds no tires)
+KIND = "wait_kind:%s"                                # app_state, per send mark: "analog" when the send of the stay offered an analog
+AUTO_KEY = "wait_autosend"                           # app_state «1»: «Автоотправка предложений из листа ожидания» on (the owner's switch, off by default)
+PRICE_GAP = "[укажите цену]"                         # the price the form of TITLE_PRICE leaves to the manager; a text with it never goes (routes_chats)
+AUTO_OFF = ("Автоотправка предложений из листа ожидания выключена (Настройка → Шаблоны сообщений): проверьте текст и нажмите "
+            "«Отправить клиенту в чат Авито».")
+NO_REASON = "другое: клиент отказался от ожидания (ответил «Нет» на предложение из листа ожидания)"     # «другое»: not «Неблагонадёжный»
+FROM_ITEMS = ("Строки «Что нужно клиенту» взяты из позиций заказа (с артикулами): лист ожидания проверяет их сам. Пока менеджер не сохранит "
+              "или не поправит строку, клиенту само ничего не уходит — только задача.")
+UNCONFIRMED = "wait_from_items:%s"                   # app_state, per order: its lines came from its positions, no person saw them: no send by itself
+UNCONFIRMED_NOTE = ("Строки «Что нужно клиенту» взяты из позиций заказа и ещё не подтверждены менеджером: проверьте строки и текст и нажмите "
+                    "«Отправить клиенту в чат Авито».")
 AUTHOR = "лист ожидания"
 TOLD = "Сообщение о наличии отправлено: "             # the record of the journal after the send: the mark of the stay
 QUEUED_TOLD = "Сообщение о наличии не отправлено: первым написали заказу №%d"
@@ -56,6 +77,42 @@ def _row(row) -> dict:
 
 def list_wants(conn, card_id) -> List[dict]:
     return [_row(r) for r in conn.execute("SELECT %s FROM order_want WHERE order_id = ? ORDER BY id" % COLUMNS, (card_id,))]
+
+
+def lines_from_items(conn, card_id, offers: Iterable, now: str) -> List[dict]:
+    """An order in «Ожидает наличие» with positions but no line «Что нужно клиенту» (the wishes in words only, 2026-11-26) was never looked at:
+    the check had nothing to compare (the owner's orders of 2026-11-25, the codes «не подтягиваются»). Its positions become its lines, once:
+    the position of the unload by its id or code (its size, season, studs and code), else the code and the size of the name. A position with
+    no code is left to the manager. Returns the lines of the order."""
+    items = conn.execute("SELECT goods_id, code, name, qty FROM order_item WHERE order_id = ? AND qty >= 1 ORDER BY id", (card_id,)).fetchall()
+    if not items:
+        return []
+    offers = list(offers)
+    by_id = {str(o.goods_id): o for o in offers}
+    by_code = {_norm(o.code): o for o in offers if o.code}
+    made = 0
+    for goods_id, code, name, qty in items:
+        offer = by_id.get(str(goods_id)) or (by_code.get(_norm(code)) if code else None)
+        if offer is not None and offer.width and offer.height and offer.diameter:
+            line = dict(line_from_offer(offer), code=str(offer.code or code or "").strip(), qty=qty)
+        elif not str(code or "").strip():                          # a name alone would fit any tire of its size: the manager's
+            continue
+        else:
+            line = {"code": str(code or "").strip(), "qty": qty}
+            size = SIZE_IN_TITLE.search(name or "")
+            if size:
+                line.update(width=size.group(1), profile=size.group(2), radius=size.group(3))
+        try:
+            _clean(line)
+        except orders.OrderError:
+            continue
+        add_want(conn, card_id, line, now, AUTHOR, commit=False)
+        made += 1
+    if made:
+        orders.add_event(conn, card_id, now, AUTHOR, "want", FROM_ITEMS)
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, '1')", (UNCONFIRMED % card_id,))
+    conn.commit()
+    return list_wants(conn, card_id)
 
 
 def _number(value, label: str, low: int, high: int) -> int:
@@ -136,6 +193,7 @@ def add_want(conn, card_id, fields: dict, now: str, author: str, commit: bool = 
     cur = conn.execute("INSERT INTO order_want (order_id, %s, created_at) VALUES (?, %s, ?)" % (", ".join(keys), ", ".join("?" for _ in keys)),
                        [card_id] + [clean[k] for k in keys] + [now])
     orders.add_event(conn, card_id, now, author, "want", "Что нужно клиенту: %s" % describe(dict(clean, id=cur.lastrowid)))
+    _confirmed(conn, card_id, author)
     if commit:
         conn.commit()
     return cur.lastrowid
@@ -153,6 +211,7 @@ def update_want(conn, want_id, fields: dict, now: str, author: str) -> None:
     clean = _clean({**line, **fields, "any_brand": fields.get("any_brand", line["any_brand"]), "any_size": fields.get("any_size", line["any_size"])})
     conn.execute("UPDATE order_want SET %s WHERE id = ?" % ", ".join("%s = ?" % k for k in sorted(clean)), [clean[k] for k in sorted(clean)] + [want_id])
     orders.add_event(conn, line["order_id"], now, author, "want", "Строка изменена: %s" % describe(dict(clean, id=want_id)))
+    _confirmed(conn, line["order_id"], author)
     conn.commit()
 
 
@@ -163,7 +222,14 @@ def remove_want(conn, want_id, now: str, author: str) -> None:
         raise orders.OrderError("Это последняя строка: заказ на этапе «%s» без неё нельзя. Перенесите заказ на другой этап." % card["stage"]["name"])
     conn.execute("DELETE FROM order_want WHERE id = ?", (want_id,))
     orders.add_event(conn, line["order_id"], now, author, "want", "Строка убрана: %s" % describe(line))
+    _confirmed(conn, line["order_id"], author)
     conn.commit()
+
+
+def _confirmed(conn, card_id, author: str) -> None:
+    """A person saved, changed or removed a line: the lines taken from the positions are theirs now (UNCONFIRMED off). No commit."""
+    if author != AUTHOR:
+        conn.execute("DELETE FROM app_state WHERE key = ?", (UNCONFIRMED % card_id,))
 
 
 def _norm(text) -> str:
@@ -256,9 +322,27 @@ def _tag_now(conn, card_id, stay: str, kind: Optional[str], now: str) -> None:
             conn.commit()
 
 
+def auto_on(conn) -> bool:
+    """«Автоотправка предложений из листа ожидания» (the owner 2026-11-27): off, the offer is the manager's task with its words and the button."""
+    return store.get_state(conn, AUTO_KEY) == "1"
+
+
+def set_auto(conn, on: bool, now: str, author: str) -> bool:
+    """The owner's switch; audited. True if it changed."""
+    if auto_on(conn) == bool(on):
+        return False
+    if on:
+        conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, '1')", (AUTO_KEY,))
+    else:
+        conn.execute("DELETE FROM app_state WHERE key = ?", (AUTO_KEY,))
+    store.write_audit(conn, now, author, "wait_autosend", {"on": bool(on)})
+    conn.commit()
+    return True
+
+
 def _mark(conn, card_id, kind: str, found: List, now: str, notify=None, note: str = "", title: str = "") -> None:
     card = orders.get_card(conn, card_id)
-    rule, title = (TASK_EXACT, title or TITLE_EXACT) if kind == "exact" else (TASK_ANALOG, TITLE_ANALOG)
+    rule, title = (TASK_EXACT, title or TITLE_EXACT) if kind == "exact" else (TASK_ANALOG, title or TITLE_ANALOG)
     wanted = "; ".join(describe(w) for w in card["wants"])
     shown = "; ".join("%s (%d шт.)" % (o.name, o.stock) for o in found[:3]) or "см. чат заказа"
     body = "Заказ №%d, клиент %s. Ответственный: %s. Нужно: %s. В наличии: %s." % (
@@ -342,11 +426,30 @@ def _is_mim(offer) -> bool:
     return supplier_of_id(str(offer.goods_id)) == 1
 
 
-def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf, left: Dict[str, int]) -> Tuple[object, float, str]:
+def _offers(line: dict, stock: List, kind: str = "exact") -> List:
+    """The offers of a line as it was found: exact (_matches), or its analogs (no exact one is in stock then: _line_result)."""
+    return _matches(line, stock) if kind == "exact" else [o for o in stock if _analog(line, o)]
+
+
+def _tire_key(o) -> tuple:
+    return (_brand(o), _norm(o.model_raw), o.season.value, bool(o.studded), o.width, o.height, o.diameter, _norm(o.speed), _norm(o.load), bool(o.runflat), bool(o.xl))
+
+
+def _one_analog(line: dict, stock: List) -> str:
+    """Why the analogs of a line do not name one tire to offer without a person (the owner 2026-11-27: «появился аналог»), "" when they do."""
+    found = _offers(line, stock, "analog")
+    if len({_tire_key(o) for o in found}) != 1:
+        return "подходит несколько аналогов: выберите сами."
+    if not _norm(found[0].model_raw):
+        return "у аналога %s не указана модель." % (found[0].code or found[0].goods_id)
+    return ""
+
+
+def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf, left: Dict[str, int], kind: str = "exact") -> Tuple[object, float, str]:
     """(the offer to name, its price, "") or (None, 0, why): the price of WebMIM (the owner 2026-11-05: «приоритет у МИМ»); the others' only when
     WebMIM has no price or its stock went to an earlier order, and only when they agree and have what earlier orders left. Two prices in the
     group that decides: a person chooses."""
-    found = [o for o in _matches(line, stock) if o is pick or left.get(o.goods_id, o.stock) >= line["qty"]]
+    found = [o for o in _offers(line, stock, kind) if o is pick or left.get(o.goods_id, o.stock) >= line["qty"]]
     groups = ([[o for o in found if _is_mim(o)]] if _is_mim(pick) else []) + [[o for o in found if not _is_mim(o)]]
     for group in groups:
         priced: Dict[float, object] = {}
@@ -370,38 +473,46 @@ def _line_price(conn, line: dict, pick, stock: List, chat, price_of: PriceOf, le
     return None, 0, "у позиции %s нет цены продажи." % (pick.code or pick.goods_id)
 
 
-def _ad_price(conn, line: dict, offer, stock: List, chat) -> Optional[float]:
+def _ad_price(conn, line: dict, offer, stock: List, chat, kind: str = "exact") -> Optional[float]:
     """The price of one tyre of the line in the ad of the account of the chat (order_offers.ad_prices, what the feed published; the files of the
     feed are only read). The message names a WebMIM position: the ad of that position only (the owner 2026-11-06: «работаем по МИМ, бери только
     их цену»). Else the highest of the positions of this tire in stock, whichever of them the client saw and whatever other orders hold of them.
     None when no ad of the account has it."""
     from . import order_offers
-    found = [offer] if _is_mim(offer) else _matches(line, stock)
+    found = [offer] if _is_mim(offer) else _offers(line, stock, kind)
     prices = order_offers.ad_prices(conn, order_offers.account_for(conn, chat_row=chat), [o.goods_id for o in found]) if found else {}
     return float(max(prices.values())) if prices else None
 
 
 def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_of: PriceOf, left: Dict[str, int],
-                notes: Optional[List[str]] = None) -> Tuple[str, str, list]:
+                notes: Optional[List[str]] = None, kinds: Optional[List[str]] = None, gaps: Optional[List[str]] = None) -> Tuple[str, str, list]:
     """The words for the client, "" and the positions they name [[position, pieces]]; or "", why they cannot go and []: nothing goes with an
     empty name or price or a placeholder left, nor with a price nobody can tell (_line_price). The price of a piece is never below the price of
     the ad of the account of the chat (the owner 2026-11-05: «можем продавать дороже», never cheaper than the ad): below it, the ad's; the ad
-    not known, the price as it is and a line in `notes` for the order's journal."""
-    body = message_texts.body(conn, message_texts.WAIT_FOUND)
+    not known, the price as it is and a line in `notes` for the order's journal. `kinds` (per line, "exact" or "analog"): an analog in it is
+    the text «появился аналог» (WAIT_ANALOG). `gaps` given: a price nobody can tell is PRICE_GAP in the words and its why is added there
+    (the form of TITLE_PRICE: the manager types the price; such words never go by themselves)."""
+    key = message_texts.WAIT_ANALOG if kinds and "analog" in kinds else message_texts.WAIT_FOUND
+    body = message_texts.body(conn, key)
     if set(templates.PLACEHOLDER.findall(body)) != {"name", "price"}:
-        return "", "в шаблоне «%s» нужны {name} и {price}, других подстановок быть не может." % message_texts.entry(message_texts.WAIT_FOUND)["name"], []
+        return "", "в шаблоне «%s» нужны {name} и {price}, других подстановок быть не может." % message_texts.entry(key)["name"], []
     items: List[tuple] = []
     held: Dict[str, int] = {}
-    for line, pick in zip(lines, picks):
-        offer, price, why = _line_price(conn, line, pick, stock, chat, price_of, left)
-        if why:
+    for index, (line, pick) in enumerate(zip(lines, picks)):
+        kind = kinds[index] if kinds else "exact"
+        offer, price, why = _line_price(conn, line, pick, stock, chat, price_of, left, kind)
+        if why and gaps is None:
             return "", why, []
-        floor = _ad_price(conn, line, offer, stock, chat)
-        if floor is None and notes is not None:
-            notes.append("Цена объявления позиции %s не определена: в сообщении о наличии расчётная цена %s ₽." % (
-                offer.code or offer.goods_id, templates.money(price)))
-        elif floor is not None and price < floor:
-            price = floor
+        if why:
+            gaps.append(why)
+            offer, price = pick, None
+        else:
+            floor = _ad_price(conn, line, offer, stock, chat, kind)
+            if floor is None and notes is not None:
+                notes.append("Цена объявления позиции %s не определена: в сообщении о наличии расчётная цена %s ₽." % (
+                    offer.code or offer.goods_id, templates.money(price)))
+            elif floor is not None and price < floor:
+                price = floor
         name = " ".join(str(offer.name_orig or offer.name or "").split())
         if not name:
             return "", "у позиции %s нет наименования." % (offer.code or offer.goods_id), []
@@ -411,7 +522,7 @@ def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_o
             return "", "остатка позиции %s не хватает на все строки заказа." % (offer.code or offer.goods_id), []
         if (name, price) not in items:                             # two lines of one position: it is named once
             items.append((name, price))
-    shown = [templates.money(p) + " ₽" for _n, p in items]
+    shown = [PRICE_GAP if p is None else templates.money(p) + " ₽" for _n, p in items]
     if len(set(shown)) == 1:
         price_text = shown[0]
     else:                                                          # in the order of the names: a price is not left out because another has it
@@ -423,22 +534,32 @@ def _found_text(conn, lines: List[dict], picks: List, stock: List, chat, price_o
     return text, "", [[g, q] for g, q in held.items()]
 
 
-def form_text(conn, card: dict, offers: Iterable, price_of: Optional[PriceOf], chat_row=None) -> str:
+def form_text(conn, card: dict, offers: Iterable, price_of: Optional[PriceOf], chat_row=None, kind: str = "exact") -> str:
     """The words of the form of the task «Позиция появилась: предложите клиенту» (the owner 2026-11-05): those the message by itself would have,
-    the name and the price of a piece (_found_text), priced for the chat `chat_row` the form sends to; the words of the lines (client_text) when
-    the tire or its price cannot be told now. A person may change them; nothing goes without the press."""
+    the name and the price of a piece (_found_text), priced for the chat `chat_row` the form sends to; PRICE_GAP for a price nobody can tell
+    (TITLE_PRICE, the owner 2026-11-27); the words of the lines (client_text) when the tire cannot be told now. `kind` "analog": the task
+    «Есть аналоги», the words «появился аналог». A person may change them; nothing goes without the press."""
     fallback = client_text(card)
     if price_of is None or not card["wants"]:
         return fallback
     try:
         stock = [o for o in offers if o.stock >= 1]
         lines = card["wants"]
-        if any(_one_tire(conn, card, line, stock) for line in lines):
-            return fallback
-        picks, _holder = _take(lines, stock, {}, {})
-        if picks is None:
-            return fallback
-        text, _why, _held = _found_text(conn, lines, picks, stock, chat_row, price_of, {})
+        kinds = None
+        if kind == "analog":
+            results = [_line_result(line, stock) for line in lines]
+            if any(r is None for r in results):
+                return fallback
+            kinds, picks = [r[0] for r in results], [r[1] for r in results]
+            if any(_one_tire(conn, card, line, stock) if k == "exact" else _one_analog(line, stock) for line, k in zip(lines, kinds)):
+                return fallback
+        else:
+            if any(_one_tire(conn, card, line, stock) for line in lines):
+                return fallback
+            picks, _holder = _take(lines, stock, {}, {})
+            if picks is None:
+                return fallback
+        text, _why, _held = _found_text(conn, lines, picks, stock, chat_row, price_of, {}, kinds=kinds, gaps=[])
         return text or fallback
     except Exception:                                              # a form is never broken by its words
         conn.rollback()
@@ -494,7 +615,7 @@ def _queued(conn, card_id, holder: tuple, now: str) -> None:
 
 
 def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now: str, deliver, price_of: Optional[PriceOf], may_send: bool = True,
-                 left: Optional[Dict[str, int]] = None) -> Optional[Tuple[str, str]]:
+                 left: Optional[Dict[str, int]] = None, kinds: Optional[List[str]] = None) -> Optional[Tuple[str, str]]:
     """Everything the client waits for is here: «появилось в наличии» in the order's chat, by chats.send_reply, the send mark being the order
     and the moment it entered the stage. None: no task is due (it went and the journal has it; it went earlier in this stay; outside the
     working hours, or past the limit of a cycle (not `may_send`), the next cycle looks again). Else the task is due: (the words for its body, its title): why the client was not written to
@@ -503,19 +624,22 @@ def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now
     from . import chats, order_manager
     card = orders.get_card(conn, card_id)
     stay = card["entered_at"] or ""
+    analog = bool(kinds) and "analog" in kinds
     if card["stage"]["code"] != "wait":                            # moved while the check was sending to the others
         return None
-    if conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, TASK_EXACT, stay)).fetchone():
+    if conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, TASK_ANALOG if analog else TASK_EXACT, stay)).fetchone():
         return "", ""
-    if conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text LIKE ? AND at >= ? LIMIT 1", (card_id, TOLD + "%", stay)).fetchone():
+    if _told(conn, card_id, stay, TOLD) or (analog and _told(conn, card_id, stay, TOLD_ANALOG)):
         return None
-    for line in lines:
-        why = _one_tire(conn, card, line, stock)
+    chat, why = order_manager._client_chat(conn, card_id)
+    if chat is None:                                               # no Avito chat: a person calls (the owner 2026-11-27), whatever the lines are
+        return _call_note(conn, card, lines, picks, stock, price_of, kinds, why), TITLE_CALL_ANALOG if analog else TITLE_CALL
+    for index, line in enumerate(lines):
+        why = _one_tire(conn, card, line, stock) if not kinds or kinds[index] == "exact" else _one_analog(line, stock)
         if why:
             return NOT_SENT % why, ""
-    chat, why = order_manager._client_chat(conn, card_id)
-    if chat is None:
-        return NOT_SENT % (why + "."), ""
+    if not analog and _told(conn, card_id, stay, TOLD_ANALOG):    # the mark of the stay went with the analog: the exact tire is the manager's
+        return NOT_SENT % "в этом ожидании клиенту уже ушло предложение аналога, предложите эту позицию сами.", ""
     if deliver is None or price_of is None:
         return NOT_SENT % "ключи Авито недоступны.", ""
     hours = order_manager.duty_settings(conn)["hours"]
@@ -524,34 +648,109 @@ def _tell_client(conn, card_id, lines: List[dict], picks: List, stock: List, now
     if chats._unread(conn, chat):                                  # our message would count as the answer and wipe «Клиент написал»
         return NOT_SENT % "клиент написал в чат и ждёт ответа.", ""
     notes: List[str] = []
-    text, why, held = _found_text(conn, lines, picks, stock, chat, price_of, left or {}, notes)
+    gaps: List[str] = []
+    text, why, held = _found_text(conn, lines, picks, stock, chat, price_of, left or {}, notes, kinds, gaps)
     if why:
         return NOT_SENT % why, ""
+    if gaps:                                                       # no price: the manager types it in the form and sends (the owner 2026-11-27)
+        return NOT_SENT % gaps[0] + " Впишите цену в текст сообщения вместо «%s» и нажмите «Отправить клиенту в чат Авито»." % PRICE_GAP, (
+            TITLE_ANALOG if analog else TITLE_PRICE)
+    if not auto_on(conn):                                          # the owner's switch off (by default): the manager sends it with one press
+        return AUTO_OFF, ""
+    if store.get_state(conn, UNCONFIRMED % card_id):               # lines no person saw (lines_from_items): the manager sends it
+        return UNCONFIRMED_NOTE, ""
     token = _token(card_id, stay)
     key = SENT_TEXT % token                                        # the words that go: the history has these, the price may change before it is written
     store.set_state(conn, key, text)
-    store.set_state(conn, HELD % token, json.dumps(held))
+    if analog:                                                     # `delivered` knows the offer of an analog by this
+        store.set_state(conn, KIND % token, "analog")
+    store.set_state(conn, HELD % token, json.dumps(held))         # the tires the client is offered are held, an analog's too (the review 2026-11-27)
     if notes:                                                      # an unknown outcome delivered later (`delivered`) writes them then
         store.set_state(conn, NOTES % token, json.dumps(list(dict.fromkeys(notes))))
     status, why, _copy = order_manager.send_to_client(conn, card, text, token, deliver, now)
+    what = "предложение аналога" if analog else "«появилось в наличии»"
     if status == "sent":
-        orders.add_event(conn, card_id, now, AUTHOR, "chat", TOLD + text, level="green")
+        orders.add_event(conn, card_id, now, AUTHOR, "chat", (TOLD_ANALOG if analog else TOLD) + text, level="green")
         _notes(conn, card_id, token, stay, now)
         conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
         conn.commit()
-        _tag(conn, card_id, card, "exact", now)
+        _tag(conn, card_id, card, "analog" if analog else "exact", now)
         return None
     if status == "failed":
-        conn.execute("DELETE FROM app_state WHERE key IN (?, ?, ?)", (key, HELD % token, NOTES % token))
-        orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение клиенту «появилось в наличии» не отправлено: %s" % why, level="red")
+        conn.execute("DELETE FROM app_state WHERE key IN (?, ?, ?, ?)", (key, HELD % token, NOTES % token, KIND % token))
+        orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение клиенту %s не отправлено: %s" % (what, why), level="red")
         conn.commit()
         return NOT_SENT % why, ""
     mark = conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (token,)).fetchone()
     mark = mark[0] if mark else ""
     said = why if mark in ("retry", "lost") else "%s. Проверьте чат Авито заказа: если сообщения там нет, напишите клиенту, повторно не отправляйте." % why
-    orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение клиенту «появилось в наличии»: %s" % said, level="yellow" if mark == "retry" else "red")
+    orders.add_event(conn, card_id, now, AUTHOR, "chat", "Сообщение клиенту %s: %s" % (what, said), level="yellow" if mark == "retry" else "red")
     conn.commit()
-    return "Сообщение клиенту «появилось в наличии»: %s" % said, TITLE_CHECK
+    return "Сообщение клиенту %s: %s" % (what, said), TITLE_CHECK
+
+
+def _told(conn, card_id, stay: str, prefix: str = "") -> bool:
+    """The journal has the send of this stay: `prefix` TOLD («появилось в наличии») or TOLD_ANALOG; "" either."""
+    return any(conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'chat' AND text LIKE ? AND at >= ? LIMIT 1",
+                            (card_id, p + "%", stay or "")).fetchone() for p in ([prefix] if prefix else [TOLD, TOLD_ANALOG]))
+
+
+def _form_analog(conn, card_id, stay: str, now: str) -> None:
+    """The words of the task «Есть аналоги» a manager sent from its form are the offer of an analog of this stay (TOLD_ANALOG, once): the
+    exact tire found later is not offered a second time by itself (the review 2026-11-27)."""
+    if _told(conn, card_id, stay, TOLD_ANALOG):
+        return
+    task = conn.execute("SELECT id FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, TASK_ANALOG, stay)).fetchone()
+    if task is None:
+        return
+    log = conn.execute("SELECT chat_row, message_id FROM chat_send_log WHERE token = ? AND status = 'sent'", ("o%dt%d" % (card_id, task[0]),)).fetchone()
+    if log is None:
+        return
+    words = conn.execute("SELECT text FROM avito_message WHERE chat_row = ? AND message_id = ?", (log[0], log[1])).fetchone() if log[1] else None
+    orders.add_event(conn, card_id, now, AUTHOR, "chat", TOLD_ANALOG + (words[0] if words and words[0] else "отправлено менеджером из задачи «%s»" % TITLE_ANALOG),
+                     level="green")
+    conn.commit()
+
+
+def _analog_holds(conn, card_id, stay: str) -> Optional[str]:
+    """The tires of the offer of an analog that went by itself (or may have gone: its task TITLE_CHECK) in this stay, as HELD keeps them; None
+    when it holds nothing (the switch off, a failed send, a task skipped)."""
+    token = _token(card_id, stay)
+    said = store.get_state(conn, HELD % token)
+    if not said or store.get_state(conn, KIND % token) != "analog":
+        return None
+    if _told(conn, card_id, stay, TOLD_ANALOG):
+        return said
+    task = conn.execute("SELECT status FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, TASK_ANALOG, stay)).fetchone()
+    return said if task is not None and task[0] != "skipped" else None
+
+
+def _call_note(conn, card: dict, lines: List[dict], picks: List, stock: List, price_of: Optional[PriceOf], kinds, why: str) -> str:
+    """The words of the task «позвоните клиенту» (no Avito chat, the owner 2026-11-27): the client's name and phone, the positions of the order,
+    what appeared with its price when it can be told (the price of the main account's ad, else the price of the order form)."""
+    analog = bool(kinds) and "analog" in kinds
+    shown = []
+    for index, (line, pick) in enumerate(zip(lines, picks)):
+        kind = kinds[index] if kinds else "exact"
+        price = None
+        if price_of is not None:
+            try:
+                offer, price, said = _line_price(conn, line, pick, stock, None, price_of, {}, kind)
+                floor = _ad_price(conn, line, offer, stock, None, kind) if not said else None
+                price = None if said else max(price, floor or 0)
+                pick = offer if not said else pick
+            except Exception:                                      # a call is made with or without the price
+                conn.rollback()
+                price = None
+        name = " ".join(str(pick.name_orig or pick.name or pick.code or "").split())
+        shown.append("%s%s (%d шт. нужно, в наличии %d), цена %s" % ("аналог " if kind == "analog" else "", name, line["qty"], pick.stock,
+                                                                    templates.money(price) + " ₽ за штуку" if price else "не определена"))
+    items = "; ".join("%s — %d шт." % (i["name"], i["qty"]) for i in card.get("items") or []) or "позиций нет"
+    has_chat = conn.execute("SELECT 1 FROM avito_chat WHERE order_id = ? LIMIT 1", (card["id"],)).fetchone() is not None
+    head = "Написать в чат Авито из панели нельзя" if has_chat else "Чата Авито нет"       # a chat whose account does not send (the review 2026-11-27)
+    return ("%s (%s): позвоните клиенту и сообщите, что %s. Клиент: %s, телефон %s. Состав заказа: %s. Появилось: %s." % (
+        head, (why or "чат не найден").rstrip("."),"появился аналог" if analog else "нужные шины появились в наличии", card["client_name"] or "имя не указано",
+        card["client_phone"] or "не указан", items, "; ".join(shown) or "см. позиции в наличии"))
 
 
 def _notes(conn, card_id, token: str, stay: str, now: str) -> None:
@@ -570,12 +769,15 @@ def delivered(conn, token: str, text: str, now: str, how: str) -> None:
     if not found:
         return
     card_id = int(found.group(1))
-    for task_id, stay in conn.execute("SELECT id, entered_at FROM order_task WHERE order_id = ? AND rule_id = ? AND status = 'pending'", (card_id, TASK_EXACT)).fetchall():
+    analog = store.get_state(conn, KIND % token) == "analog"      # the offer of an analog: its task and its own record
+    for task_id, stay in conn.execute("SELECT id, entered_at FROM order_task WHERE order_id = ? AND rule_id = ? AND status = 'pending'",
+                                      (card_id, TASK_ANALOG if analog else TASK_EXACT)).fetchall():
         if re.sub(r"\D", "", stay or "") == found.group(2):
             conn.execute("UPDATE order_task SET status = 'done', result = ?, done_at = ? WHERE id = ?", (how, now, task_id))
     row = conn.execute("SELECT entered_at FROM order_card WHERE id = ?", (card_id,)).fetchone()
-    if row and re.sub(r"\D", "", row[0] or "") == found.group(2) and _state(conn, card_id) != "told":     # another stay: its own marks
-        orders.add_event(conn, card_id, now, AUTHOR, "chat", TOLD + (text or store.get_state(conn, SENT_TEXT % token) or how), level="green")
+    prefix = TOLD_ANALOG if analog else TOLD
+    if row and re.sub(r"\D", "", row[0] or "") == found.group(2) and not _told(conn, card_id, row[0] or "", prefix):     # another stay: its own marks
+        orders.add_event(conn, card_id, now, AUTHOR, "chat", prefix + (text or store.get_state(conn, SENT_TEXT % token) or how), level="green")
         _notes(conn, card_id, token, row[0] or "", now)
     conn.execute("DELETE FROM app_state WHERE key IN (?, ?)", (SENT_TEXT % token, NOTES % token))     # another stay, or told already: not written
     conn.commit()
@@ -593,30 +795,110 @@ def _answered(conn, log) -> bool:
                         (log[0], since)).fetchone() is not None
 
 
+def answer_of(text) -> str:
+    """The client's answer to the offer, read only when it is a bare «Да» or «Нет» (the owner 2026-11-27: any case, spaces, a dot): "yes",
+    "no"; anything else is "" and goes to the manager."""
+    word = re.sub(r"[\s.]+", " ", str(text or "")).strip().casefold()
+    return {"да": "yes", "нет": "no"}.get(word, "")
+
+
+def _reply_log(conn, card_id, stay):
+    """The send of this stay the client answers: the one that went by itself, else the words a manager sent from the form of the task
+    «Позиция появилась» / «Есть аналоги» (its mark «o<order>t<task>»). None when nothing went."""
+    log = conn.execute("SELECT chat_row, message_id, at FROM chat_send_log WHERE token = ? AND status = 'sent'", (_token(card_id, stay),)).fetchone()
+    if log is not None:
+        return log
+    for (task_id,) in conn.execute("SELECT id FROM order_task WHERE order_id = ? AND rule_id IN (?, ?) AND entered_at = ? ORDER BY id",
+                                   (card_id, TASK_EXACT, TASK_ANALOG, stay)).fetchall():
+        log = conn.execute("SELECT chat_row, message_id, at FROM chat_send_log WHERE token = ? AND status = 'sent'", ("o%dt%d" % (card_id, task_id),)).fetchone()
+        if log is not None:
+            return log
+    return None
+
+
+def _first_answer(conn, log, card_id) -> Optional[Tuple[str, bool]]:
+    """(the words of the client's first message in the chat after ours, whether they answer our offer); None when there is none
+    (`log`: chat_row, message_id, at of the send). They answer it only when nothing of ours went to the chat between (no message of a manager
+    nor of the system, nor a send of the panel to it: «Доставка нужна?» — «Нет» is no answer to the offer) and the chat is still the
+    order's (the review 2026-11-27); else they are the manager's."""
+    ts, _at = _since(conn, log)
+    row = conn.execute("SELECT text, ts, at FROM avito_message WHERE chat_row = ? AND direction = 'in' AND kind NOT IN %s AND ts > ? ORDER BY ts, id LIMIT 1"
+                       % NOT_AN_ANSWER, (log[0], ts)).fetchone()
+    if row is None:
+        return None
+    ours = conn.execute("SELECT 1 FROM avito_message WHERE chat_row = ? AND direction = 'out' AND kind != 'system' AND ts > ? AND ts <= ? "
+                        "AND message_id != ? LIMIT 1", (log[0], ts, row[1], log[1] or "")).fetchone()
+    pending = conn.execute("SELECT 1 FROM chat_send_log WHERE chat_row = ? AND at > ? AND at <= ? AND status != 'failed' LIMIT 1",
+                           (log[0], log[2], row[2])).fetchone()      # our own send has the very `at` of the log
+    linked = conn.execute("SELECT 1 FROM avito_chat WHERE id = ? AND order_id = ?", (log[0], card_id)).fetchone()
+    return str(row[0] or ""), not ours and not pending and linked is not None
+
+
+def _close_wait(conn, card: dict, stay: str, now: str) -> str:
+    """«Нет» of the client (the owner 2026-11-27): the waiting is closed by the existing way of the panel, the stage «Отмена» with the reason
+    NO_REASON («другое»: the client is not marked «Неблагонадёжный»), the rules of «Отмена» asleep (nothing more goes to the client); the task
+    TITLE_NO (done) and the journal say so. "" when it moved, else why not (the caller gives the manager the task)."""
+    stage = next((s for s in orders.list_stages(conn) if s["code"] == "cancel"), None)
+    if stage is None:
+        return "в воронке нет этапа отмены"
+    conn.execute("INSERT OR IGNORE INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at, done_at) "
+                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (card["id"], TASK_REPLY, stay, "remind", "", card["stage_id"], "done", TITLE_NO,
+                                                       "Клиент ответил «Нет» на предложение из листа ожидания.", "заказ переведён в «%s»" % stage["name"], now, now))
+    orders.add_event(conn, card["id"], now, AUTHOR, "rule", "Клиент ответил «Нет» на предложение из листа ожидания: ожидание закрыто, заказ переводится в «%s»." % stage["name"])
+    try:
+        moved = orders.move_card(conn, card["id"], stage["id"], now, AUTHOR, changes={"cancel_reason": NO_REASON}, fire_rules=False)
+    except orders.OrderError as err:                               # the move rolled back the task and the record with it
+        return str(err)
+    if not moved:
+        conn.rollback()
+        return "заказ уже перенесли"
+    return ""
+
+
 def replies(conn, now: str, notify=None) -> int:
-    """Any message of the client in the chat after «появилось в наличии», while the order is still in that stay in the stage: one task per message
-    for the responsible (the owner 2026-11-05; the words are not read as consent), run by the minute's sync. `notify(card_id, title, body)` once
-    per task. Returns how many were made."""
+    """The client's first message in the chat after the offer of this stay (by itself or from the form), while the order is still in that stay
+    in the stage, read once (the owner 2026-11-27, answer_of): a bare «Да» is the task TITLE_YES and the tag TAG_YES (the order stays in the
+    stage, its tires held); a bare «Нет» closes the waiting (_close_wait); anything else is the task TITLE_REPLY, as before (2026-11-05).
+    Run by the minute's sync. `notify(card_id, title, body)` once per task. Returns how many were made."""
     made = 0
     rows = conn.execute("SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'wait'").fetchall()
     for card_id, stay in rows:
         try:
-            log = conn.execute("SELECT chat_row, message_id, at FROM chat_send_log WHERE token = ? AND status = 'sent'", (_token(card_id, stay),)).fetchone()
+            log = _reply_log(conn, card_id, stay)
             if log is None or conn.execute("SELECT 1 FROM order_task WHERE order_id = ? AND rule_id = ? AND entered_at = ?", (card_id, TASK_REPLY, stay)).fetchone():
                 continue
-            if not _answered(conn, log):
+            first = _first_answer(conn, log, card_id)
+            if first is None:
                 continue
             card = orders.get_card(conn, card_id)
             from . import order_arrived
+            answer = answer_of(first[0]) if first[1] else ""         # we wrote in between, or the chat moved: the manager's
             body = "Заказ №%d, клиент %s. Ответственный: %s. Ответ клиента в чате заказа: %s" % (
                 card_id, card["client_name"] or card["client_phone"] or "—", card["responsible"], order_arrived._link(conn, card_id))
+            title = TITLE_REPLY
+            if answer == "no":
+                why = _close_wait(conn, card, stay, now)
+                if not why:
+                    made += 1
+                    if notify is not None:
+                        notify(card_id, TITLE_NO, body)
+                    continue
+                body += " Клиент ответил «Нет», но закрыть ожидание не вышло: %s. Закройте его сами." % why.rstrip(".")
+            elif answer == "yes":
+                title = TITLE_YES
+                body += " Клиент ответил «Да»: свяжитесь с ним и оформите заказ."
             if conn.execute("INSERT OR IGNORE INTO order_task (order_id, rule_id, entered_at, kind, arg, stage_id, status, title, body, result, created_at) "
-                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (card_id, TASK_REPLY, stay, "remind", "", card["stage_id"], "pending", TITLE_REPLY, body, "", now)).rowcount:
-                orders.add_event(conn, card_id, now, AUTHOR, "rule", "Задача создана: %s" % TITLE_REPLY)
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (card_id, TASK_REPLY, stay, "remind", "", card["stage_id"], "pending", title, body, "", now)).rowcount:
+                orders.add_event(conn, card_id, now, AUTHOR, "rule", "Задача создана: %s" % title)
                 conn.commit()
                 made += 1
+                if answer == "yes" and TAG_YES not in card["tags"]:
+                    try:
+                        orders.update_card(conn, card_id, {"tags": ",".join(card["tags"] + [TAG_YES])}, now, AUTHOR)
+                    except orders.OrderError:                      # ten tags already: the task is there
+                        conn.rollback()
                 if notify is not None:
-                    notify(card_id, TITLE_REPLY, body)
+                    notify(card_id, title, body)
             conn.commit()
         except Exception:                                          # one card, or an alert that fails, never stops the others nor the sync
             conn.rollback()
@@ -767,21 +1049,31 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
     QUEUED_TOLD or QUEUED_TASK and no task. An order whose line does not name one tire (_one_tire) is the manager's and holds nothing. Stock
     for all: all go. At most `max_sends` messages a cycle, the longest waiting first; the rest
     hold their tires and go at the next one."""
+    offers = list(offers)
     stock = [o for o in offers if o.stock >= 1]
     out: Dict[str, List[int]] = {"exact": [], "analogs": []}
     cards = []
     stays: Dict[int, str] = {}
     for card_id, stay in conn.execute("SELECT c.id, c.entered_at FROM order_card c JOIN order_stage s ON s.id = c.stage_id WHERE s.code = 'wait' ORDER BY c.entered_at, c.id").fetchall():
         try:                                                       # a cycle cut off in the send: settled whatever the stock is now
-            log = conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (_token(card_id, stay),)).fetchone()
-            if log and log[0] == "sent" and _state(conn, card_id) != "told":
-                delivered(conn, _token(card_id, stay), "", now, "отправлено")
-            elif log and log[0] in ("sending", "unknown", "retry", "lost") and not _state(conn, card_id):      # it may have gone: never the form
-                _mark(conn, card_id, "exact", [], now, notify, CUT_OFF, TITLE_CHECK)
+            token = _token(card_id, stay)
+            log = conn.execute("SELECT status FROM chat_send_log WHERE token = ?", (token,)).fetchone()
+            analog = store.get_state(conn, KIND % token) == "analog"
+            if log and log[0] == "sent" and not _told(conn, card_id, stay, TOLD_ANALOG if analog else TOLD):
+                delivered(conn, token, "", now, "отправлено")
+            elif log and log[0] in ("sending", "unknown", "retry", "lost") and (analog or not _state(conn, card_id)):      # it may have gone: never the form
+                _mark(conn, card_id, "analog" if analog else "exact", [], now, notify, CUT_OFF, TITLE_CHECK)
+            _form_analog(conn, card_id, stay, now)
         except Exception:
             conn.rollback()
             logging.getLogger("tires_sync.order_wait").warning("the send of card %s could not be settled", card_id, exc_info=True)
         lines = list_wants(conn, card_id)
+        if not lines:
+            try:
+                lines = lines_from_items(conn, card_id, offers, now)
+            except Exception:                                      # an order whose positions cannot be read stays as it was
+                conn.rollback()
+                logging.getLogger("tires_sync.order_wait").warning("the positions of card %s could not become lines", card_id, exc_info=True)
         results = [_line_result(line, stock) for line in lines]
         covered = bool(lines) and all(r is not None for r in results)
         kind = ("exact" if all(r[0] == "exact" for r in results) else "analogs") if covered else ""
@@ -794,7 +1086,7 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
         if not covered:
             continue                                               # a part of the set is no sale: nothing is marked
         out[kind].append(card_id)
-        cards.append((card_id, kind, lines, [r[1] for r in results]))
+        cards.append((card_id, kind, lines, [r[1] for r in results], [r[0] for r in results]))
         stays[card_id] = stay
     log = logging.getLogger("tires_sync.order_wait")
     left: Dict[str, int] = {}
@@ -822,7 +1114,14 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
     def named(card_id, lines):
         card = orders.get_card(conn, card_id)
         return not any(_one_tire(conn, card, line, stock) for line in lines)
-    for card_id, kind, lines, _found in cards:                     # those already told or being offered hold their tires, however long the others wait
+    for card_id, kind, lines, _found, _kinds in cards:             # those already told or being offered hold their tires, however long the others wait
+        try:                                                       # the offer of an analog holds its tires too (the review 2026-11-27)
+            said = _analog_holds(conn, card_id, stays[card_id])
+            if said:
+                take_held(said, card_id, "told")
+        except Exception:
+            conn.rollback()
+            log.warning("card %s could not be looked at", card_id, exc_info=True)
         if kind == "exact":
             try:
                 states[card_id] = _state(conn, card_id)
@@ -836,10 +1135,23 @@ def check(conn, offers: Iterable, now: str, notify=None, deliver=None, price_of:
                 conn.rollback()
                 log.warning("card %s could not be looked at", card_id, exc_info=True)
                 states[card_id] = "closed"
-    for card_id, kind, lines, found in cards:
+    for card_id, kind, lines, found, kinds in cards:
         try:
-            if kind == "analogs":
-                _mark(conn, card_id, "analog", found, now, notify)
+            if kind == "analogs":                                  # the offer «появился аналог» (the owner 2026-11-27), held as the exact one
+                if _analog_holds(conn, card_id, stays[card_id]) or _told(conn, card_id, stays[card_id], TOLD_ANALOG):
+                    continue                                       # offered in this stay: its tires are held above, nothing more goes
+                need: Dict[str, int] = {}
+                for o, line in zip(found, lines):
+                    need[o.goods_id] = need.get(o.goods_id, 0) + line["qty"]
+                busy = any(first.get(g, (card_id,))[0] != card_id or left.get(g, next(o.stock for o in found if o.goods_id == g)) < q
+                           for g, q in need.items())               # an earlier order holds them, or what is left is short: the manager's
+                told = (NOT_SENT % "этих шин не хватает: их придержали за другим заказом листа ожидания.", "") if busy else _tell_client(
+                    conn, card_id, lines, found, stock, now, None if deliver is None else counted, price_of, sends[0] < max_sends, left, kinds)
+                if told is not None:
+                    _mark(conn, card_id, "analog", found, now, notify, told[0], told[1])
+                said = _analog_holds(conn, card_id, stays[card_id])
+                if said:                                           # went (or may have): the next orders of this cycle do not get them
+                    take_held(said, card_id, "told")
                 continue
             if states[card_id]:
                 continue
