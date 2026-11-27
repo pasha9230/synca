@@ -1049,8 +1049,10 @@ def register(app) -> None:
         conn = get_conn()
         point_id = _point_id(conn)
         who = current_user()["login"]                                           # notify.js keeps what it has seen per person (a shared PC)
-        from .. import order_call
-        calls = order_call.sounds(conn, who, local_iso())                      # one's own tasks «Позвонить…» (working as a point too)
+        from .. import office_notify, order_call
+        office = current_user()["as_point"] is not None or current_user()["role"] != "point"     # the office, working as a point or not
+        # one's own tasks «Позвонить…» (working as a point too): the office person's as their «Мои уведомления» say (office_notify)
+        calls = office_notify.calls(conn, who, local_iso()) if office else order_call.sounds(conn, who, local_iso())
         if point_id is None:
             return jsonify({"who": who, "items": calls})
         from .routes_alerts import HERE, grouped, href, with_orders
@@ -1072,6 +1074,10 @@ def register(app) -> None:
         items += [{"key": "order-%d" % card["id"], "title": "Заказ № %s едет к вам" % mgr.label(card) if card["stage"]["code"] != "at_point"
                    else "Заказ № %s на точке" % mgr.label(card), "text": card["client_name"] or "",
                    "href": HERE if card["stage"]["code"] == "at_point" else "/my-point"} for card in cards]     # «Едут» is the page itself
+        if office:                                                              # the stages of the orders ring for the point's own person only
+            for item in items:                                                  # (the owner 2026-11-27): the office working as it — quiet
+                if item["key"].startswith("order-"):
+                    item["quiet"] = True
         try:
             point = points.get_point(conn, point_id)
         except points.PointError:                                               # the manager's point was deleted: nothing to show

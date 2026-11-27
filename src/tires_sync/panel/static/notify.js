@@ -9,7 +9,7 @@
 // в поле ввода, нет уходящей формы. Занята — ждёт простоя. Не чаще раза в 30 с. Вкладка и поиск остаются (они в адресе), прокрутка — тоже.
 (function () {
   "use strict";
-  var KEY = "tires.notify.seen:", EVERY = 30000, MAX_SHOWN = 3, NOTHING = "новое видно только на странице и в колокольчике.";
+  var KEY = "tires.notify.seen:", EVERY = 30000, MAX_SHOWN = 3, SEEN_MAX = 500, NOTHING = "новое видно только на странице и в колокольчике.";
   // Офис (решение владельца 2026-11-12): тот же звук по своим задачам «Позвонить…» заказов без чата, ключ меняется каждые 2 часа (/tasks/feed).
   var me = document.currentScript, FEED = (me && me.getAttribute("data-feed")) || "/my-point/feed";
   var button = document.querySelector("[data-notify-enable]"), state = document.querySelector("[data-notify-state]");
@@ -90,6 +90,14 @@
     return items.filter(function (it) { var k = keyOf(it.key); if (had[k]) return false; had[k] = true; it.key = k; return true; });
   }
 
+  function remember(seen, keys) {                         // the keys seen before and now, the newest last, at most SEEN_MAX
+    var now = {}, out = [];
+    keys.forEach(function (k) { now[k] = true; });
+    (Array.isArray(seen) ? seen : []).forEach(function (k) { if (!now[k]) out.push(k); });
+    out = out.concat(keys);
+    return out.length > SEEN_MAX ? out.slice(out.length - SEEN_MAX) : out;
+  }
+
   var memory = null;                                      // what this page has seen when the browser keeps nothing
   function check() {
     // «seen=1»: the tab is in front — only then may the feed count a showing of «Заказ должен был приехать» (arrival_remind, 2026-11-27)
@@ -101,8 +109,11 @@
       changed(data.rev);
       var items = once(data.items || []), keys = items.map(function (it) { return it.key; });
       var who = String(data.who || ""), stored = readSeen(who), seen = stored === undefined ? memory : stored;
-      memory = keys;
-      writeSeen(who, keys);
+      // What was shown is added to, never replaced (2026-11-27): two tabs of one login with other feeds (the office tab and one «Работать
+      // как точка», a tab in front and one behind) wrote their own lists over each other, and each saw the other's items as new on every
+      // look — the endless sound and notifications. A key once seen stays seen (the newest SEEN_MAX kept); what is to ring again gets a new key.
+      memory = remember(seen, keys);
+      writeSeen(who, memory);
       var quiet = !!(data.notify && data.notify.on === false);              // the office or the point switched them off (point_notify)
       if (data.notify && data.notify.ask > 0) offerSoon();
       if (!seen) return;                                  // the first look: what is there now is not new
@@ -112,6 +123,8 @@
       if (!added.length) return;
       refreshSoon();
       if (quiet) return;                                  // no sound, no notification: the page and the bell still show it
+      added = added.filter(function (it) { return !it.quiet; });              // an item the server keeps quiet (office_notify, a stage for the office)
+      if (!added.length) return;
       ring();
       added.slice(0, MAX_SHOWN).forEach(tell);
       if (added.length > MAX_SHOWN) tell({key: "more", title: "Ещё " + (added.length - MAX_SHOWN), text: FEED === "/my-point/feed" ? "Новое на «Рабочем месте»" : "Новые задачи", href: FEED === "/my-point/feed" ? "/my-point" : "/tasks"});
