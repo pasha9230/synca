@@ -47,7 +47,9 @@ class Context:
     wheel_stocks: Dict[str, int] = field(default_factory=dict)  # trusted wheel ad ID -> supplier stock
     wheel_template_tags: FrozenSet[str] = frozenset()
     wheel_addresses: FrozenSet[str] = frozenset()
+    wheel_address_texts: FrozenSet[str] = frozenset()
     wheel_photo_prefix: str = ""
+    wheel_phone: str = ""
     stocks: Dict[str, int] = field(default_factory=dict)        # supplier code -> stock
     min_stock: int = 4
     phone: str = ""                                    # the cabinet's phone as +7..., "" when it is not to be checked
@@ -136,8 +138,9 @@ def check_feed(ads: List[ET.Element], ctx: Context, rules: Optional[dict] = None
             from .wheel_feed import validate_ads as validate_wheel_ads
             checks = validate_wheel_ads([ad], template_tags=ctx.wheel_template_tags,
                                         expected_ids=frozenset(ctx.wheel_stocks), stock_by_id=ctx.wheel_stocks,
-                                        allowed_addresses=ctx.wheel_addresses, expected_phone=ctx.phone,
-                                        allowed_photo_prefix=ctx.wheel_photo_prefix, foreign_ids=ctx.other_ids)
+                                        allowed_addresses=ctx.wheel_addresses, expected_phone=ctx.wheel_phone or ctx.phone,
+                                        allowed_photo_prefix=ctx.wheel_photo_prefix, foreign_ids=ctx.other_ids,
+                                        allowed_address_texts=ctx.wheel_address_texts)
             for _wheel_id, errors in checks:
                 add("required_fields", ad_id, "диск: " + ", ".join(errors))
             continue

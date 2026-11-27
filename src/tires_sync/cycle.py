@@ -11,11 +11,11 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
-from . import connections, feed_check, mirror_feed, oth_stock, photo_library, store
+from . import connections, feed_check, mirror_feed, oth_stock, photo_library, store, wheel_manifest
 from .decide import SETTINGS_DRIVEN
 from .models import Action, Settings
 from .publishing import expected_for
-from .settings_store import active_settings
+from .settings_store import active_settings, get_active
 from .sync import run_cycle
 from .webmim import parse_unload
 
@@ -91,7 +91,8 @@ def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), 
     folder = Path(feed_root) / account["feed_token"]
     try:
         path = folder / "avito_feed.xml" if source == "published" else folder / "next" / "avito_feed.xml"
-        ads = ET.parse(str(path)).getroot().findall("Ad")
+        feed_bytes = path.read_bytes()
+        ads = ET.fromstring(feed_bytes).findall("Ad")
     except (OSError, ET.ParseError):
         return []
     identity = connections.get_avito_identity(conn, account["id"])
@@ -110,8 +111,21 @@ def gate(conn, account, mode, eff, parsed, ref, feed_root, today=None, held=(), 
                                 store.load_published(conn, account["id"])),
                    **(id_codes or {}))       # Ids that do not carry their code (alias scheme, inherited Ids): from the account's bindings, so `feed-check` reads them too
     tochki = _tochki_context(conn, account, ads, id_code, getattr(parsed, "offers", {}) or {}, folder, source)
+    wheel_stocks, wheel_addresses, wheel_texts, wheel_tags = {}, set(), set(), frozenset()
+    if account["id"] == connections.PRIMARY_ACCOUNT and any((a.findtext("Id") or "").startswith("wheel_") for a in ads):
+        wheel_stocks = wheel_manifest.load(conn, account["id"], feed_bytes) or {}
+        wheel_tags, _problem = feed_check.read_template(Path(__file__).parent / "data/avito-templates/diski-2026-11-26.xml")
+        selected = set(get_active(conn)[1].get("wheel_accounts", {}).get(str(account["id"]), []))
+        for address in connections.list_addresses(conn, account["id"]):
+            if address["address_id"] in selected:
+                if connections.get_address_mode(conn, account["id"]) == "text":
+                    wheel_texts.add(address["address_text"])
+                else:
+                    wheel_addresses.add(address["address_id"])
     ctx = feed_check.Context(
         mode=mode, template_tags=template or frozenset(t for ad in ads for t in (c.tag for c in ad)), reference=ref or {},
+        wheel_stocks=wheel_stocks, wheel_template_tags=wheel_tags, wheel_addresses=frozenset(wheel_addresses),
+        wheel_address_texts=frozenset(wheel_texts), wheel_photo_prefix=prefix, wheel_phone=identity["phone"] or eff.contact_phone,
         stocks={code: int(getattr(o, "stock", 0) or 0) for code, o in (getattr(parsed, "offers", {}) or {}).items()},
         min_stock=eff.min_stock, phone=identity["phone"] if identity["phone_source"] == "cabinet" else "",
         other_ids=frozenset(others), pack4=bool(getattr(eff, "pack4", False)), photo_prefix=prefix if mode == "generated" and not mirror_feed.adopted_maps(conn, account["id"])[1] else "",
@@ -277,6 +291,7 @@ def run_for_accounts(
     parsed=None,
     input_sha: Optional[str] = None,
     now=None,
+    wheel_path=None,
 ) -> List[AccountResult]:
     """Dry-run cycle for every Avito account; each account writes its own private feed folder.
 
@@ -369,7 +384,15 @@ def run_for_accounts(
                 account_id=account["id"], record_seen=(index == 0), expected_removals=expected,
                 parsed=account_parsed, input_sha=input_sha, now=now,
                 removed_before=lately)                                 # an hour holds at most one threshold of removals, passes included
-            result = AccountResult(account["id"], connections.display_name(conn, account["id"]), True, "", report.counts, report.feed_count,
+            wheel_stocks, wheel_codes, wheel_note = {}, {}, ""
+            if account["id"] == connections.PRIMARY_ACCOUNT:
+                from . import wheel_runtime
+                wheel_stocks, wheel_codes, wheel_note = wheel_runtime.append_candidate(
+                    conn, account, Path(feed_root) / account["feed_token"],
+                    connections.effective_settings(conn, account["id"], settings), identity, wheel_path)
+                report.id_codes.update(wheel_codes)
+                report.feed_count += len(wheel_stocks)
+            result = AccountResult(account["id"], connections.display_name(conn, account["id"]), True, wheel_note, report.counts, report.feed_count,
                                    report.guard_tripped,
                                    tuple(sorted({"%s / %s" % (u["brand"], u["model"]) for u in report.unmatched})),
                                    sum(1 for d in report.decisions if d.action is Action.HOLD and d.reason.startswith("cart_wait:")
@@ -509,11 +532,54 @@ def stock_pass(conn, parsed, ref, today: date, feed_root, settings: Optional[Set
                 singles = [i for i in found[code] if not feed_check.PACK.search(i.split("_")[0])]
                 item["ad_id"] = singles[0] if singles else None             # the Id of the single ad: remembered for the same tire later
                 pending.append(item)
+            old_wheels = [a for a in kept if (a.findtext("Id") or "").startswith("wheel_")]
+            wheel_stocks = None
+            if old_wheels:
+                wheel_info = wheel_manifest.load_info(conn, account["id"], (folder / "avito_feed.xml").read_bytes())
+                wheel_stocks = wheel_info['stocks'] if wheel_info else None
+                if wheel_stocks is None or set(wheel_stocks) != {a.findtext("Id") for a in old_wheels}:
+                    raise ValueError("Не удалось проверить опубликованные диски: обновление остановлено.")
+                # The lightweight tire pass can follow a newer wheel download.
+                # Reduce quantities against it before binding the new candidate.
+                from . import wheel_runtime
+                import hashlib
+                basis = dict(wheel_info.get('basis') or {})
+                source = basis.get('path')
+                snapshot = wheel_runtime._snapshot(source, connections.supplier_territory(conn, 1, eff))
+                if source:
+                    try:
+                        basis['sha'] = snapshot.snapshot_sha if snapshot else hashlib.sha256(Path(source).read_bytes()).hexdigest()
+                    except OSError:
+                        basis['sha'] = 'missing'
+                codes = wheel_info.get('codes') or {}
+                if snapshot:
+                    for ad in old_wheels:
+                        aid = ad.findtext('Id')
+                        code = codes.get(aid, '')
+                        offer = snapshot.offers.get(code[6:]) if code.startswith('wheel:') else None
+                        if offer is None:
+                            if code.startswith('wheel:') and not code.startswith('wheel:wheel_'):
+                                kept.remove(ad)
+                                wheel_stocks.pop(aid, None)
+                            continue
+                        quantity = ad.find('Quantity')
+                        if quantity is None or not (quantity.text or '').isdigit():
+                            raise ValueError("Нельзя проверить прежний остаток диска.")
+                        if offer.stock < eff.min_stock:
+                            kept.remove(ad)
+                            wheel_stocks.pop(aid, None)
+                            continue
+                        quantity.text = str(min(int(quantity.text), offer.stock))
+                        wheel_stocks[aid] = offer.stock
+                wheel_info['basis'] = basis
+                wheel_info['codes'] = {k: v for k, v in codes.items() if k in wheel_stocks}
             feed_bytes = assemble_feed(kept)
             draft = folder / "next" / "avito_feed.xml"
             draft.parent.mkdir(parents=True, exist_ok=True)
             write_atomic(draft, feed_bytes)
             store.save_pending(conn, account["id"], feed_bytes, pending)
+            if wheel_stocks is not None:
+                wheel_manifest.save(conn, account["id"], feed_bytes, wheel_stocks, basis=wheel_info.get('basis'), codes=wheel_info.get('codes'))
             # what stays in the file as the last cycle left it (held, or to be taken off by the hourly cycle for another reason) is not judged by stock
             held = set(held_before) | {d.goods_id for d in ds.decisions
                                        if d.action is Action.HOLD or (d.action is Action.REMOVE and d.goods_id not in found)}

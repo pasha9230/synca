@@ -23,16 +23,31 @@ def ad_id(goods_id: str, account_id: int, address_id: str) -> str:
 
 
 def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, category, product_type, rim_types,
-              photo_for=None, photo_prefix=""):
+              photo_for=None, photo_prefix="", address_text=""):
     """Build only ads with approved account photo URLs; supplier URLs are not published."""
     if account_id != PRIMARY_ACCOUNT or not str(address_id).strip():
         raise ValueError('Укажите аккаунт и адрес для дисков.')
     if not all((str(phone).strip(), str(category).strip(), str(product_type).strip())):
         raise ValueError('Для фида дисков нужны телефон и категории Авито.')
     ads, rejected = [], {}
+    wheels = list(wheels)
+    def identity(w):
+        # Vendor duplicates of the same rim and color at one address must not
+        # become two live listings with different supplier IDs.
+        return tuple(' '.join(str(value or '').casefold().replace(',', '.').split()) for value in (
+            w.brand, w.model, w.diameter, w.width, w.holes, w.pcd, w.offset, w.center_bore, w.wheel_type, w.color))
+    groups = {}
+    for w in wheels:
+        key = brand_key(w.brand)
+        if key in enabled_brands and rules.get(key, {}).get('enabled') is True:
+            groups.setdefault(identity(w), []).append(w.goods_id)
+    duplicates = {gid for ids in groups.values() if len(ids) > 1 for gid in ids}
     for w in wheels:
         key = brand_key(w.brand)
         if key not in enabled_brands or rules.get(key, {}).get('enabled') is not True:
+            continue
+        if w.goods_id in duplicates:
+            rejected[w.goods_id] = ['duplicate']
             continue
         price = price_for(w, rules)
         image_url = photo_for(w) if photo_for else ""
@@ -55,7 +70,11 @@ def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, c
                   'Description': w.name, 'Price': str(price), 'RimBrand': w.brand, 'RimModel': w.model,
                   'RimDiameter': w.diameter, 'RimBolts': w.holes, 'RimBoltsDiameter': w.pcd,
                   'RimType': rim_type, 'RimDIA': w.center_bore, 'RimOffset': w.offset, 'RimWidth': w.width,
-                  'Quantity': str(w.stock), 'SellerAddressID': str(address_id), 'ContactPhone': str(phone)}
+                  'Quantity': str(w.stock), 'ContactPhone': str(phone)}
+        if address_text:
+            fields['Address'] = str(address_text)
+        else:
+            fields['SellerAddressID'] = str(address_id)
         for tag, value in fields.items():
             if value:
                 ET.SubElement(ad, tag).text = str(value)
@@ -92,7 +111,7 @@ def assemble_mixed_feed(tire_feed: bytes, wheel_ads):
 
 
 def validate_ads(ads, *, template_tags, expected_ids, stock_by_id, allowed_addresses,
-                 expected_phone, allowed_photo_prefix, foreign_ids=()):
+                 expected_phone, allowed_photo_prefix, foreign_ids=(), allowed_address_texts=()):
     """Check wheel candidates independently from tire-only validation rules.
 
     Expected identifiers and stocks are constructed from the trusted snapshot,
@@ -102,7 +121,7 @@ def validate_ads(ads, *, template_tags, expected_ids, stock_by_id, allowed_addre
     seen = set()
     required = ('Id', 'Category', 'GoodsType', 'AdType', 'ProductType', 'Condition', 'Title', 'Description',
                 'Price', 'RimBrand', 'RimDiameter', 'RimBolts', 'RimBoltsDiameter', 'RimType',
-                'RimDIA', 'RimOffset', 'RimWidth', 'Quantity', 'SellerAddressID', 'ContactPhone')
+                'RimDIA', 'RimOffset', 'RimWidth', 'Quantity', 'ContactPhone')
     for ad in ads:
         aid = (ad.findtext('Id') or '').strip()
         errors = []
@@ -118,7 +137,9 @@ def validate_ads(ads, *, template_tags, expected_ids, stock_by_id, allowed_addre
             errors.append('price')
         if not quantity.isascii() or not quantity.isdigit() or int(quantity) <= 0 or int(quantity) > stock_by_id.get(aid, 0):
             errors.append('stock')
-        if (ad.findtext('SellerAddressID') or '').strip() not in allowed_addresses:
+        address_id = (ad.findtext('SellerAddressID') or '').strip()
+        address_text = (ad.findtext('Address') or '').strip()
+        if bool(address_id) == bool(address_text) or (address_id and address_id not in allowed_addresses) or (address_text and address_text not in allowed_address_texts):
             errors.append('address')
         if (ad.findtext('ContactPhone') or '').strip() != expected_phone:
             errors.append('phone')
@@ -129,3 +150,16 @@ def validate_ads(ads, *, template_tags, expected_ids, stock_by_id, allowed_addre
         if errors:
             issues.append((aid, errors))
     return issues
+
+
+def checked_mixed_feed(tire_feed: bytes, wheel_ads, *, template_tags, expected_ids, stock_by_id,
+                       allowed_addresses, expected_phone, allowed_photo_prefix, foreign_ids=(), allowed_address_texts=()):
+    """Return mixed XML only after each wheel passes independently supplied facts."""
+    errors = validate_ads(wheel_ads, template_tags=template_tags, expected_ids=expected_ids,
+                          stock_by_id=stock_by_id, allowed_addresses=allowed_addresses,
+                          expected_phone=expected_phone, allowed_photo_prefix=allowed_photo_prefix,
+                          foreign_ids=foreign_ids, allowed_address_texts=allowed_address_texts)
+    if errors:
+        raise ValueError('Проверка дисков не пройдена: ' + '; '.join(
+            '%s (%s)' % (aid, ', '.join(problems)) for aid, problems in errors[:10]))
+    return assemble_mixed_feed(tire_feed, wheel_ads)

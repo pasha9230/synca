@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import tempfile
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -22,7 +23,7 @@ def count_ads(data: bytes) -> int:
     return len(ET.fromstring(data).findall("Ad"))
 
 
-def promote_feed(folder, allow_shrink: bool = False, expected_removals: int = 0) -> Dict[str, int]:
+def promote_feed(folder, allow_shrink: bool = False, expected_removals: int = 0, expected_sha: str = "") -> Dict[str, int]:
     """Make the candidate feed (next/) the one Avito reads, unless it shrank suspiciously."""
     folder = Path(folder)
     candidate = folder / "next" / "avito_feed.xml"
@@ -30,6 +31,8 @@ def promote_feed(folder, allow_shrink: bool = False, expected_removals: int = 0)
     if not candidate.exists():
         raise PublishError("Черновик фида ещё не создан: сначала нужен успешный цикл.")
     data = candidate.read_bytes()
+    if expected_sha and hashlib.sha256(data).hexdigest() != expected_sha:
+        raise PublishError("Черновик фида изменился после проверки: повторите сборку.")
     try:
         new = count_ads(data)
     except ET.ParseError:

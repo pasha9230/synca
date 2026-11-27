@@ -64,7 +64,7 @@ def apply_publish(app, verify=None, upload=False) -> list:
                 raise ValueError("выгрузка первого поставщика недоступна или пуста: публикация остановлена")
             ref = load_reference(app.config["REFERENCE_PATH"])
             built = run_for_accounts(conn, None, ref, now().date(), feed_root, settings=settings, parsed=parsed,
-                                     input_sha="panel", now=now() + timedelta(hours=3))
+                                     input_sha="panel", now=now() + timedelta(hours=3), wheel_path=wheel_snapshot_path(app.config["UNLOAD_PATH"]))
         except (OSError, ValueError) as err:
             return ["Фид не пересобран: %s" % err]
         failed = {r.account_id for r in built if not r.ok}

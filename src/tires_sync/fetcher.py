@@ -31,7 +31,21 @@ def wheel_snapshot_path(unload_path: Path) -> Path:
 
 
 def fetch_wheels_for_connection(conn, box: Optional[SecretBox], dest: Path, now: str, http: Transport = urllib_transport) -> dict:
-    """Download MIM rims into their own guarded snapshot, independently of tires."""
+    """Use a wheel-only lock shared by the timer and manual refresh."""
+    import fcntl
+    lock_path = Path(dest).with_name(Path(dest).name + ".wheels.lock")
+    with lock_path.open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise WebmimError("Выгрузка дисков уже обновляется.") from None
+        try:
+            return _fetch_wheels_locked(conn, box, dest, now, http)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _fetch_wheels_locked(conn, box: Optional[SecretBox], dest: Path, now: str, http: Transport) -> dict:
     owner = connections.supplier_owner(1)
     config = connections.get_config(conn, "webmim", owner)
     if not config.get("base_url") or not config.get("mode"):
