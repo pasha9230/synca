@@ -1,7 +1,7 @@
 """Бесшовность (the owner 2026-11-28): the pages keep where one was and what one did. «Рабочее место» keeps its place after «Принял/Выдал»
 (app.js 13d) and after its quiet refresh on a computer, where .main scrolls and not the window (notify.js); a press there comes back with
 the tab and the search; the board of orders keeps its columns after a move; <details data-remember> stays open or folded; the reply typed
-in a chat comes back after a reload and goes away after «Отправить» (app.js 13e). The scripts run in node where it is installed."""
+in a chat comes back after a reload and goes away after «Отправить» (app.js 13f). The scripts run in node where it is installed."""
 from __future__ import annotations
 
 import json
@@ -132,7 +132,7 @@ def test_the_board_keeps_its_side_scroll_after_a_move():
         assert "sessionStorage." not in line or ("try {" in line and "catch (e)" in line), line
 
 
-# --- app.js 13e: open blocks and the chat's draft --------------------------------------------------------------------------------
+# --- app.js 13f: open blocks and the chat's draft --------------------------------------------------------------------------------
 
 REMEMBER_HARNESS = r"""
 const fs = require("fs");
@@ -163,7 +163,7 @@ console.log(JSON.stringify(out));
 
 def run_remember(tmp_path, session):
     js = tmp_path / "remember.js"
-    js.write_text("// " + block("13e) Бесшовность", "13a) Заказ").rsplit("//", 1)[0], encoding="utf-8")   # the block alone, its comments too
+    js.write_text("// " + block("13f) Бесшовность", "13c) Карточка заказа").rsplit("//", 1)[0], encoding="utf-8")   # the block alone, its comments too
     harness = tmp_path / "remember_harness.js"
     harness.write_text(REMEMBER_HARNESS, encoding="utf-8")
     out = subprocess.run([node(), str(harness), str(js), json.dumps(session)], capture_output=True, text=True, timeout=30, check=True)
@@ -188,6 +188,6 @@ def test_the_three_blocks_carry_their_keys(tmp_path):
     assert 'data-remember="point-stages"' in (templates / "mypoint.html").read_text(encoding="utf-8")
     assert 'data-remember="order-extra"' in (templates / "_order_window.html").read_text(encoding="utf-8")
     assert 'data-remember="order-chain"' in (templates / "_order_chain.html").read_text(encoding="utf-8")
-    keep = block("13e) Бесшовность", "13a) Заказ")
+    keep = block("13f) Бесшовность", "13c) Карточка заказа")
     for line in keep.splitlines():
         assert "sessionStorage." not in line or ("try {" in line and "catch (e" in line), line

@@ -1221,34 +1221,7 @@
       }
     });
   });
-  // 13c) Карточка заказа (ТЗ №87) держит место прокрутки: F5, «Сохранить», смена этапа (страница грузится снова с того же адреса) — то же место;
-  //     вход из другого места — сверху; явный якорь (#webmim-parts, #items…) — туда, куда он ведёт, кроме F5
-  (function () {
-    var KEY = "card-place", path = window.location.pathname + window.location.search;
-    if (!document.querySelector("[data-keep-place]")) {       // another page between two visits: the next visit to the card starts at its top
-      try { sessionStorage.removeItem(KEY); } catch (e) { /* no storage: nothing kept */ }
-      return;
-    }
-    function pageBox() {                                    // .main of the panel scrolls on a computer; a phone scrolls the page itself
-      var main = document.querySelector(".main");
-      if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
-      return document.scrollingElement || document.documentElement;
-    }
-    var mark = null, moved = false, nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
-    try { mark = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch (e) { mark = null; }
-    var again = !!mark && mark.path === path && typeof mark.top === "number";
-    function put() { if (again && !moved) pageBox().scrollTop = mark.top; }
-    if (again && (!window.location.hash || (nav && nav.type === "reload"))) {
-      put();
-      ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { moved = true; }, {once: true, passive: true}); });
-      window.addEventListener("load", put);                 // photos above push the place down: put it again unless the person scrolled
-    }
-    window.addEventListener("pagehide", function () {
-      try { sessionStorage.setItem(KEY, JSON.stringify({path: path, top: pageBox().scrollTop})); } catch (e) { /* private mode: the card opens at its top */ }
-    });
-  })();
-
-  // 13e) Бесшовность (2026-11-28): раскрытый или свёрнутый блок <details data-remember="ключ"> остаётся таким же после обновления страницы
+  // 13f) Бесшовность (2026-11-28): раскрытый или свёрнутый блок <details data-remember="ключ"> остаётся таким же после обновления страницы
   //      и кнопок (один ключ — одно состояние на всех страницах вкладки: «Дополнительно» во всех карточках заказов, «Все этапы» точки).
   //      Ответ клиенту, набранный и ещё не отправленный, возвращается в поле чата после обновления; после «Отправить» черновик удаляется
   //      (не ушло — текст вернёт сама панель, её черновик главнее). Только sessionStorage этой вкладки: без него — всё как раньше.
@@ -1288,6 +1261,33 @@
       if (!form.matches || !form.matches("form[data-photo-form]")) return;
       try { sessionStorage.removeItem(DRAFT + form.getAttribute("action")); } catch (err) { /* private mode */ }
     }, true);
+  })();
+
+  // 13c) Карточка заказа (ТЗ №87) держит место прокрутки: F5, «Сохранить», смена этапа (страница грузится снова с того же адреса) — то же место;
+  //     вход из другого места — сверху; явный якорь (#webmim-parts, #items…) — туда, куда он ведёт, кроме F5
+  (function () {
+    var KEY = "card-place", path = window.location.pathname + window.location.search;
+    if (!document.querySelector("[data-keep-place]")) {       // another page between two visits: the next visit to the card starts at its top
+      try { sessionStorage.removeItem(KEY); } catch (e) { /* no storage: nothing kept */ }
+      return;
+    }
+    function pageBox() {                                    // .main of the panel scrolls on a computer; a phone scrolls the page itself
+      var main = document.querySelector(".main");
+      if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
+      return document.scrollingElement || document.documentElement;
+    }
+    var mark = null, moved = false, nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
+    try { mark = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch (e) { mark = null; }
+    var again = !!mark && mark.path === path && typeof mark.top === "number";
+    function put() { if (again && !moved) pageBox().scrollTop = mark.top; }
+    if (again && (!window.location.hash || (nav && nav.type === "reload"))) {
+      put();
+      ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (type) { window.addEventListener(type, function () { moved = true; }, {once: true, passive: true}); });
+      window.addEventListener("load", put);                 // photos above push the place down: put it again unless the person scrolled
+    }
+    window.addEventListener("pagehide", function () {
+      try { sessionStorage.setItem(KEY, JSON.stringify({path: path, top: pageBox().scrollTop})); } catch (e) { /* private mode: the card opens at its top */ }
+    });
   })();
 
   // 13a) Заказ: ссылка на часть страницы (#wants после правки строки «Что нужно клиенту») раскрывает её, если она свёрнута
