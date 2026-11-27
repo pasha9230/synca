@@ -39,28 +39,61 @@ def test_the_handoff_bonus_is_per_tyre_from_the_first_of_december_and_none_befor
     assert rep["handoff"]["clients"] == 2 and rep["handoff"]["fee"] == 300              # both clients counted, the bonus of December only
 
 
-def test_kpi_one_cycle_needs_both_thresholds(tmp_path):
+def test_kpi_by_orders_or_by_tyres(tmp_path):
+    """The owner 2026-11-27: «ИЛИ» — a premium for every full kpi_orders orders OR every full kpi_tyres tyres, whichever gives more."""
     conn = db(tmp_path)
     a = point(conn, "Альфа")
-    clients(conn, a, 10, pieces=3)                                           # 10 orders, 30 tyres: no premium
+    assert order_report.KPI_TYRES == 36 and order_report.DEFAULTS["kpi_tyres"] == 36
+    clients(conn, a, 9, pieces=3)                                            # 9 orders, 27 tyres: no premium
     mine = order_report.point_income(conn, "2026-12-01", "2026-12-31", a)
     assert mine["kpi"] == 0 and mine["premiums"] == []
     month = mine["progress"]["2026-12"]
-    assert (month["orders"], month["tyres"], month["cycles"], month["need_orders"], month["need_tyres"]) == (10, 30, 0, 10, 38)
-    clients(conn, a, 1, first=50, pieces=8, day="2026-12-20")               # 11 orders, 38 tyres: the cycle closes on the 20th
+    assert (month["orders"], month["tyres"], month["cycles"], month["need_orders"], month["need_tyres"]) == (9, 27, 0, 10, 36)
+    clients(conn, a, 1, first=50, pieces=1, day="2026-12-20")               # 10 orders, 28 tyres: by the orders, on the 20th
     mine = order_report.point_income(conn, "2026-12-01", "2026-12-31", a)
     assert mine["kpi"] == 1500 and [(p["day"], p["cycle"], p["item"]) for p in mine["premiums"]] == [("2026-12-20", 1, "kpi:2026-12:1")]
     assert mine["total"] == round(sum(e["total"] for e in mine["orders"]) + 1500, 2)
 
 
+@pytest.mark.parametrize("pieces, cycles", [(45, 1), (72, 2), (36, 1), (35, 0), (100, 2)])
+def test_kpi_by_the_tyres_of_one_order(tmp_path, pieces, cycles):
+    """One order of 45 tyres → 1 premium and 9 toward the next; 72 → 2; exactly 36 → 1; not limited."""
+    conn = db(tmp_path)
+    a = point(conn, "Альфа")
+    clients(conn, a, 1, pieces=pieces)
+    mine = order_report.point_income(conn, "2026-12-01", "2026-12-31", a)
+    assert mine["kpi"] == 1500 * cycles and mine["progress"]["2026-12"]["cycles"] == cycles
+
+
+def test_kpi_tyres_threshold_of_the_settings(tmp_path):
+    conn = db(tmp_path)
+    a = point(conn, "Альфа")
+    order_report.set_rates(conn, "2026-12-01", "2026-11-27", NOW, "owner", kpi_tyres=40)
+    clients(conn, a, 1, pieces=39)
+    assert order_report.point_income(conn, "2026-12-01", "2026-12-31", a)["kpi"] == 0
+    clients(conn, a, 1, first=2, pieces=1)                                    # 40 tyres
+    mine = order_report.point_income(conn, "2026-12-01", "2026-12-31", a)
+    assert mine["kpi"] == 1500 and mine["progress"]["2026-12"]["need_tyres"] == 40
+
+
+def test_kpi_progress_toward_the_next_premium(tmp_path):
+    from tires_sync.panel import income_view
+    conn = db(tmp_path)
+    a = point(conn, "Альфа")
+    clients(conn, a, 1, pieces=45)
+    report = order_report.build(conn, "2026-12-01", "2026-12-31")
+    k = income_view._kpi(report, conn, a, "2026-12", "2026-12-15")
+    assert (k["cycles"], k["cycle_tyres"], k["tyres_left"], k["cycle_orders"], k["orders_left"]) == (1, 9, 27, 0, 10)
+
+
 def test_kpi_cycles_are_not_limited(tmp_path):
     conn = db(tmp_path)
     a = point(conn, "Альфа")
-    clients(conn, a, 20, pieces=4)                                           # 20 orders / 80 tyres → min(2, 2) = 2 premiums
+    clients(conn, a, 20, pieces=4)                                           # 20 orders / 80 tyres → max(2, 2) = 2 premiums
     mine = order_report.point_income(conn, "2026-12-01", "2026-12-31", a)
     assert mine["kpi"] == 3000 and mine["progress"]["2026-12"]["cycles"] == 2
-    clients(conn, a, 10, first=100, pieces=1)                                # 30 orders, 90 tyres → min(3, 2) = still 2
-    assert order_report.point_income(conn, "2026-12-01", "2026-12-31", a)["kpi"] == 3000
+    clients(conn, a, 10, first=100, pieces=1)                                # 30 orders, 90 tyres → max(3, 2) = 3
+    assert order_report.point_income(conn, "2026-12-01", "2026-12-31", a)["kpi"] == 4500
 
 
 def test_kpi_goes_to_the_handing_point_counts_its_month_and_reaches_the_report(tmp_path):
@@ -84,7 +117,7 @@ def test_kpi_not_before_its_start_and_not_for_reversed_or_plain_orders(tmp_path)
     a = point(conn, "Альфа")
     clients(conn, a, 10, pieces=4, day="2026-11-27")                          # November: before KPI_FROM
     assert order_report.point_income(conn, "2026-11-01", "2026-11-30", a)["kpi"] == 0
-    clients(conn, a, 9, first=100, pieces=4)
+    clients(conn, a, 9, first=100, pieces=3)
     for order_id in range(200, 205):
         sell(conn, order_id, a, pieces=4)                                    # its own plain orders: not handed, not counted
     sale = sell(conn, 300, a, pieces=4)
@@ -141,3 +174,20 @@ def test_a_client_given_by_phone_counts_as_handed(tmp_path):
     conn.commit()
     [entry] = order_report.point_income(conn, "2026-12-01", "2026-12-31", a)["orders"]
     assert (entry["order"], entry["handoff"], entry["issue"]) == (1, 200, 0)
+
+
+def test_the_tabs_say_the_day_of_a_change_up_to_the_day_after_it(tmp_path):
+    """The owner 2026-11-27: «Изменения с ДД.ММ.ГГГГ» on the tab whose rates change; up to the end of the day after, then gone."""
+    from tires_sync.panel import income_view
+    conn = db(tmp_path)
+    a = point(conn, "Альфа")
+    for tab in ("income", "bonus", "kpi"):                                    # the start of the bonuses and KPI, for all three
+        assert income_view.changes_day(conn, a, tab, "2026-11-28") == "01.12.2026"
+        assert income_view.changes_day(conn, a, tab, "2026-12-02") == "01.12.2026"
+        assert income_view.changes_day(conn, a, tab, "2026-12-03") == ""
+    order_report.set_rates(conn, "2027-01-10", "2026-12-15", NOW, "owner", kpi_tyres=40)
+    assert income_view.changes_day(conn, a, "kpi", "2026-12-15") == "10.01.2027"
+    assert income_view.changes_day(conn, a, "bonus", "2026-12-15") == ""
+    order_report.set_point_rates(conn, a, "2027-02-01", "2026-12-15", NOW, "owner", {"handoff_fee": 60})
+    assert income_view.changes_day(conn, a, "bonus", "2026-12-15") == "01.02.2027"
+    assert income_view.changes_day(conn, a, "kpi", "2027-01-12") == ""

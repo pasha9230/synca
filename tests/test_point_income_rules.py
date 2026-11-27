@@ -910,12 +910,12 @@ def test_the_kpi_text_shows_the_premium_of_the_settings_and_follows_a_change(tmp
     url = "/my-point/income?tab=kpi&km=2026-11"
     page = mine.get(url).get_data(as_text=True).replace("\xa0", " ")
     assert "+0 ₽" not in page and "+1 500 ₽</b> сверх выдачи и бонусов" in page
-    assert "20 заказов (от 76 шин) — +3 000 ₽" in page and "30 заказов (от 114 шин) — +4 500 ₽" in page
+    assert "20 заказов или 72 шин — +3 000 ₽" in page and "30 заказов или 108 шин — +4 500 ₽" in page
     assert "KPI считаются с 01 декабря 2026 года" in page and page.index("data-kpi-text") < page.index("data-income-tabs")
-    order_report.set_rates(conn, "2026-11-27", "2026-11-27", NOW, "owner", kpi_tyres=36, kpi_bonus=2000, handoff_fee=60)
+    order_report.set_rates(conn, "2026-11-27", "2026-11-27", NOW, "owner", kpi_tyres=40, kpi_bonus=2000, handoff_fee=60)
     page = mine.get(url).get_data(as_text=True).replace("\xa0", " ")
-    assert "10 заказов</b> (от 36 шин, ~9 комплектов)" in page and "+2 000 ₽</b>" in page
-    assert "30 заказов (от 108 шин) — +6 000 ₽" in page and "+ 2 160 ₽" in page          # the example: 36 tyres × 60 ₽
+    assert "10 заказов или 40 шин</b> (~10 комплектов)" in page and "+2 000 ₽</b>" in page
+    assert "30 заказов или 120 шин — +6 000 ₽" in page and "+ 2 400 ₽" in page          # the example: 40 tyres × 60 ₽
     bonus = mine.get("/my-point/income?tab=bonus").get_data(as_text=True).replace("\xa0", " ")
     assert "Бонус +240 ₽ за комплект" in bonus and bonus.index("data-bonus-banner") < bonus.index("data-income-tabs")
 
