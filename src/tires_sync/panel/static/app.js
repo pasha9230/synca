@@ -290,8 +290,10 @@
   //     (data-mlabel, учитывая colspan). Только на узком экране офиса; таблицы, пришедшие позже (каталог), — по MutationObserver.
   //     Таблица с data-m-scroll остаётся таблицей и прокручивается в своём блоке.
   (function () {
-    if (!document.body.classList.contains("ofc") || !window.matchMedia) return;
-    var narrow = window.matchMedia("(max-width:760px)");
+    //     Точка (body.pt-ui, point-mobile.css, 2026-11-28): только таблицы с data-m-cards.
+    var office = document.body.classList.contains("ofc"), point = document.body.classList.contains("pt-ui");
+    if (!(office || point) || !window.matchMedia) return;
+    var narrow = window.matchMedia("(max-width:760px)"), pick = office ? ".page table.table" : ".page table.table[data-m-cards]";
     var label = function (table) {
       if (table.hasAttribute("data-m-scroll") || table.closest("[data-m-scroll]")) return;
       var head = table.tHead && table.tHead.rows[table.tHead.rows.length - 1], names = [];
@@ -313,7 +315,7 @@
       });
       table.classList.add("m-cards");
     };
-    var run = function () { if (narrow.matches) document.querySelectorAll(".page table.table").forEach(label); };
+    var run = function () { if (narrow.matches) document.querySelectorAll(pick).forEach(label); };
     var timer = 0;
     new MutationObserver(function () { clearTimeout(timer); timer = setTimeout(run, 60); }).observe(document.body, { childList: true, subtree: true });
     if (narrow.addEventListener) narrow.addEventListener("change", run);
@@ -337,6 +339,8 @@
     var find = function (e) { return e.target.closest && e.target.closest("[data-tip]"); };
     document.addEventListener("mouseover", function (e) { var el = find(e); if (el) show(el); else hide(); });
     document.addEventListener("focusin", function (e) { var el = find(e); if (el) show(el); });
+    // телефон (2026-11-28): тап по «?» открывает подсказку, тап мимо — закрывает (на телефоне нет наведения, iOS не даёт фокус)
+    document.addEventListener("click", function (e) { var el = find(e); if (el) show(el); else hide(); });
     document.addEventListener("focusout", hide);
     document.addEventListener("scroll", hide, true);
   })();
