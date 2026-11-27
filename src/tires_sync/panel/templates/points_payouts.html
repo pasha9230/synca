@@ -25,10 +25,11 @@
 <tr class="strong"><td>Итого</td><td>{{ totals.issue|money }}</td><td>{{ totals.bonus|money }}</td><td>{{ totals.kpi|money }}</td><td>{{ totals.adj|money }}</td><td>{{ totals.total|money }}</td><td>{{ totals.paid|money }}</td><td>{{ totals.due|money }}</td><td></td></tr>
 </tbody></table></div>{% else %}<div class="card-body muted">За период выплат точкам нет.</div>{% endif %}</section>
 {% if can_post("points_payouts_adjust") and names %}<section class="card" style="margin-bottom:var(--s-4)" data-adjust-form><div class="card-body"><h3>Корректировка выплаты</h3>
-<p class="sub">Поправка к итоговой выплате точке (+ или −) с причиной. Расчётные суммы не меняются; точка видит её как «корректировку». Бонусы за шину и KPI считаются с 01.12.2026; разовый бонус точке за время до этого вносится здесь — сумма, дата, причина «разовый бонус за 23.10–25.11».</p>
+<p class="sub">Поправка к итоговой выплате точке (+ или −) с причиной. Вместо суммы можно указать количество шин по ручному подсчёту: сумма = ставка за шину × количество, в ведомости — «по ручному подсчёту N шт.». Расчётные суммы не меняются; точка видит её как «корректировку». Бонусы за шину и KPI считаются с 01.12.2026; разовый бонус точке за время до этого вносится здесь — сумма, дата, причина «разовый бонус за 23.10–25.11».</p>
 <form method="post" action="/points/payouts/adjust" class="row" style="gap:var(--s-3);align-items:flex-end;flex-wrap:wrap" data-once>{{ hidden }}
 <label class="field"><span class="label">Точка</span><select class="select" name="point_id" required>{% for id, name in names.items() %}<option value="{{ id }}"{% if id == point_id %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
-<label class="field"><span class="label">Сумма, ₽ (− удержать)</span><input class="input" name="amount" inputmode="decimal" required></label>
+<label class="field"><span class="label">Сумма, ₽ (− удержать)</span><input class="input" name="amount" inputmode="decimal" data-adjust-amount></label>
+<label class="field"><span class="label">или шин по ручному подсчёту</span><input class="input" name="pieces" inputmode="numeric" pattern="[0-9]*" style="max-width:7rem" data-adjust-pieces title="Сумма = ставка за шину × количество"></label>
 <label class="field"><span class="label">Дата</span><input class="input" type="date" name="day" value="{{ today }}" required></label>
 <label class="field" style="flex:1 1 16rem"><span class="label">Причина</span><input class="input" name="reason" maxlength="300" required></label>
 <button class="btn btn--primary">Записать</button></form></div></section>{% endif %}

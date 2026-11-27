@@ -175,7 +175,7 @@ def test_a_row_per_position_with_every_column(table):
 
 
 @pytest.mark.parametrize("code, kind, letter", [("placed", "webmim", ""), ("at_point", "webmim", ""), ("done", "webmim", "Р"), ("done", "stock", "Б"),
-                                                ("cancel", "webmim", ""), ("return", "webmim", ""), ("oth", "webmim", "О"),
+                                                ("cancel", "webmim", "О"), ("return", "webmim", ""), ("oth", "webmim", "Н"),
                                                 ("return_agree", "webmim", ""), ("return_given", "webmim", "")])
 def test_realization_follows_the_legend(table, code, kind, letter):
     conn, box, fake = table
@@ -613,8 +613,8 @@ def test_an_order_moved_back_has_its_rows_filled_grey_and_placed_again_cleared(t
     assert events(conn, mine)[-1] == "Заказ снова оформлен: серая заливка строк Google-таблицы снята: 2 стр."
     assert all(not op["create"] for op in fake.data_posts()[-1]["rows"])   # the same rows, never new ones
     orders.move_card(conn, mine, stage(conn, "cancel")["id"], LATEST, "owner", {"cancel_reason": "передумал"})
-    sheet.flush(conn, box, fake, LATEST)                                   # «Отмена» stands after placing: not grey, «Реализация» empty
-    assert fake.grey == set() and {(r["Этап"], r["Реализация"]) for r in fake.rows.values()} == {("Отмена", "")}
+    sheet.flush(conn, box, fake, LATEST)                                   # «Отмена» stands after placing: not grey; no tyres came — «О»
+    assert fake.grey == set() and {(r["Этап"], r["Реализация"]) for r in fake.rows.values()} == {("Отмена", "О")}
 
 
 def test_back_then_cancelled_loses_the_fill_and_its_letter(table):
@@ -622,7 +622,7 @@ def test_back_then_cancelled_loses_the_fill_and_its_letter(table):
     mine = placed(conn)
     orders.move_card(conn, mine, stage(conn, "oth")["id"], NOW, "owner")
     sheet.flush(conn, box, fake, NOW)
-    assert {r["Реализация"] for r in fake.rows.values()} == {"О"}
+    assert {r["Реализация"] for r in fake.rows.values()} == {"Н"}                 # the owner 2026-11-26: on «На ОТХ» — «Невыкуп»
     orders.move_card(conn, mine, stage(conn, "new")["id"], LATER, "owner")
     sheet.flush(conn, box, fake, LATER)
     assert fake.grey == set(fake.rows) and {r["Реализация"] for r in fake.rows.values()} == {""}

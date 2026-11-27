@@ -312,7 +312,7 @@ def test_the_table_lowers_the_old_row_and_marks_the_new_one(tmp_path):
     item = orders.get_card(conn, old)["items"][0]["id"]
     mark = order_sheet.key(old, item)
     written = order_sheet.rows_of(conn, old, T)
-    assert written[mark]["Кол-во"] == 4 and written[mark]["Реализация"] == "О"
+    assert written[mark]["Кол-во"] == 4 and written[mark]["Реализация"] == "Н"     # the owner 2026-11-26: on «На ОТХ» — «Невыкуп»
     cid = new_order(conn, qty=3)
     take(conn, cid)
     follow = {order_sheet.key(old, i) for i in oth_sale.given(conn, old)}

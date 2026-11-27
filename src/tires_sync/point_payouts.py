@@ -330,20 +330,43 @@ def unfix_items(conn, chosen: Iterable[Tuple[int, str]], now: str, author: str) 
 ADJUST_REASON_MAX = 300
 
 
-def adjust(conn, point_id: int, amount: float, reason: str, day: str, now: str, author: str) -> int:
+ADJUST_PIECES_MAX = 10000
+COUNTED = "по ручному подсчёту %d шт."           # the start of the reason of a correction by the count (the journal, the ledger, the point)
+
+
+def adjust(conn, point_id: int, amount: Optional[float], reason: str, day: str, now: str, author: str, pieces: Optional[int] = None) -> int:
     """«Корректировка» of what a point is paid (the owner 2026-11-25): a sum ± with a reason, on `day`; the counted sums stay as they are, the
-    correction is an item of its own (owed until «Рассчитан»), shown to the point. Audited."""
+    correction is an item of its own (owed until «Рассчитан»), shown to the point. Audited.
+    `pieces` (the owner 2026-11-26, «по ручному подсчёту»): the tyres counted by hand — the sum is the point's fee of the issue for `day`
+    a tyre × pieces (order_report.issue_fee: 75 ₽ a tyre), the reason starts with COUNTED; a sum typed too must be that sum."""
     if not conn.execute("SELECT 1 FROM point WHERE id = ?", (int(point_id),)).fetchone():
         raise PayoutError("Такой точки нет.")
     reason = " ".join(str(reason or "").split())[:ADJUST_REASON_MAX]
     if not reason:
         raise PayoutError("Напишите причину корректировки.")
+    if pieces is not None:
+        if pieces != int(pieces) or not 1 <= int(pieces) <= ADJUST_PIECES_MAX:
+            raise PayoutError("Количество по ручному подсчёту: целое число от 1 до %d шт." % ADJUST_PIECES_MAX)
+        pieces = int(pieces)
+        rates, by_point = order_report.list_rates(conn), order_report._by_point(order_report.list_point_rates(conn, point_id))
+        fee, counted = order_report.issue_fee(rates, by_point, int(point_id), day, pieces)
+        if not counted:                                                        # a day of the count once an order: no rate a tyre
+            raise PayoutError("Количество по ручному подсчёту: в этот день выплата считалась за заказ, укажите сумму.")
+        if amount is not None and round(float(amount), 2) != fee:
+            raise PayoutError("Укажите сумму или количество: по ставке %s × %d шт. = %s." % (_money(fee / pieces), pieces, _money(fee)))
+        amount = fee
+        reason = (COUNTED % pieces + ": " + reason)[:ADJUST_REASON_MAX]
+    if amount is None:
+        raise PayoutError("Корректировка: укажите сумму или количество шин.")
     amount = round(float(amount), 2)
     if not amount or abs(amount) > 1000000 or amount != amount:
         raise PayoutError("Корректировка: сумма не 0 и не больше 1 000 000 ₽.")
     adj_id = conn.execute("INSERT INTO point_adjust (point_id, day, amount, reason, at, author) VALUES (?,?,?,?,?,?)",
                           (int(point_id), day, amount, reason, now, author)).lastrowid
-    store.write_audit(conn, now, author, "point_adjust", {"point": int(point_id), "amount": amount, "reason": reason, "day": day, "id": adj_id})
+    detail = {"point": int(point_id), "amount": amount, "reason": reason, "day": day, "id": adj_id}
+    if pieces is not None:
+        detail["pieces"] = pieces
+    store.write_audit(conn, now, author, "point_adjust", detail)
     return adj_id
 
 
