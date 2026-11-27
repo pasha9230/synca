@@ -310,7 +310,8 @@ for _section, _endpoints in {
              "search", "search_json",                   # the search of the top bar: every role; search.scope_for narrows what it finds
              "tour_done", "tour_again",                 # «Обзор» (panel/tour.py): one's own mark «пройден», every role
              "whatsnew_page",                           # «Что нового» (routes_whatsnew): every role, its own items
-             "tasks_feed"),                             # the sound of one's own tasks «Позвонить…» (order_call.sounds): read-only
+             "tasks_feed",                              # the sound of one's own tasks «Позвонить…» (order_call.sounds): read-only
+             "settings_notify_mine"),                   # «Мои уведомления» of «Настройки → Уведомления» (office_notify): one's own setting
     "mypoint": ("mypoint_page", "mypoint_handed", "mypoint_income", "mypoint_income_request", "mypoint_action", "mypoint_feed", "mypoint_handoff_cancel",
                 "mypoint_not_taken",                    # «Водитель не забрал» of «Сегодня возврат!» (oth_point_return, 2026-11-12)
                 "mypoint_oth_sale"),                    # the window of «Продать» of a record on «На ОТХ» (oth_point_sale, ТЗ part D)

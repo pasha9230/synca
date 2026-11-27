@@ -78,7 +78,21 @@ def register(app) -> None:
         if not can("setup") and (own_point() is not None or current_user()["role"] == "point"):
             abort(403)
         values = notify_values(conn) if can("orders") and own_point() is None and current_user()["role"] != "point" else {}
-        return render_template("settings_notify.html", tab="notify", summary_on=daily_summary.is_on(conn), **values)
+        from .. import office_notify
+        mine = office_notify.get(conn, current_user()["login"]) if current_user()["role"] != "point" else None
+        return render_template("settings_notify.html", tab="notify", summary_on=daily_summary.is_on(conn), mine=mine, **values)
+
+    @app.route("/settings/notify/mine", methods=["POST"])
+    @login_required
+    def settings_notify_mine():
+        """«Мои уведомления» (office_notify, the owner 2026-11-27): one's own sound and notifications of the tasks «Позвонить…»."""
+        from .. import office_notify
+        if current_user()["role"] == "point":
+            abort(403)
+        calls = request.form.get("calls") == "1"
+        office_notify.put(get_conn(), current_user()["login"], calls, request.form.get("repeat") == "1")
+        flash("Звук и уведомления о новых задачах «Позвонить…» включены." if calls else "Звук и уведомления о задачах «Позвонить…» выключены.")
+        return redirect("/settings/notify#mine-notify")
 
     def _opens(href: str) -> bool:
         """The person may open the page of a line of «Требует внимания» (an outside link: yes)."""

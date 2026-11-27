@@ -208,8 +208,9 @@ def tick(conn, now: str) -> int:
     return made
 
 
-def sounds(conn, login: str, now: str) -> List[dict]:
-    """The items of notify.js of the open tasks «Позвонить…» set to `login`: a new key every 2 hours since the task was made."""
+def sounds(conn, login: str, now: str, repeat: bool = True) -> List[dict]:
+    """The items of notify.js of the open tasks «Позвонить…» set to `login`: a new key every 2 hours since the task was made (`repeat`);
+    without it one key per task — it rings once, when it is new (office_notify, the owner 2026-11-27)."""
     out = []
     try:
         moment = datetime.fromisoformat(now[:19])
@@ -223,6 +224,7 @@ def sounds(conn, login: str, now: str) -> List[dict]:
             step = max(0, int((moment - datetime.fromisoformat(str(created)[:19])).total_seconds() // SOUND_EVERY.total_seconds()))
         except ValueError:
             step = 0
+        step = step if repeat else 0
         try:
             label = order_manager.label(orders.get_card(conn, order_id)) if order_id else ""
         except Exception:                                                 # noqa: BLE001 - the sound still rings

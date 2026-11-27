@@ -7,5 +7,12 @@
 {% if can("setup") %}<section class="card"><div class="card-head"><h3>Уведомления</h3></div>
 <div class="card-body row" style="gap:var(--s-3);align-items:center"><span>Утренняя сводка в Telegram (владельцу и партнёру, после 9:00 МСК): <b>{{ "включена" if summary_on else "выключена" }}</b></span>
 {% if can_post("summary_toggle") %}<form method="post" action="/summary/toggle" class="inline ml-auto">{% else %}<fieldset disabled class="ro-form ml-auto" style="border:0;padding:0;margin:0;min-width:0">{% endif %}<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="on" value="{{ 0 if summary_on else 1 }}"><button class="btn btn--secondary btn--sm">{{ "Выключить" if summary_on else "Включить" }}</button>{% if can_post("summary_toggle") %}</form>{% else %}</fieldset>{% endif %}</div></section>{% endif %}
+{% if mine %}<section class="card" id="mine-notify"><div class="card-head"><h3>Мои уведомления</h3></div>
+<div class="card-body">{# office_notify (the owner 2026-11-27): the office gets no ring for the stages of the orders; only one's own tasks #}
+<p class="muted" style="margin:0 0 var(--s-2)">Звук и всплывающее уведомление браузера в панели — только ваши задачи «Позвонить…». О смене этапов заказов офис не оповещается.</p>
+<form method="post" action="/settings/notify/mine" class="row" style="gap:var(--s-3);align-items:center;flex-wrap:wrap" data-mine-notify><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label><input type="checkbox" name="calls" value="1"{% if mine.calls %} checked{% endif %}> Звук и уведомление о новой задаче «Позвонить…»</label>
+<label><input type="checkbox" name="repeat" value="1"{% if mine.repeat %} checked{% endif %}> Повторять каждые 2 часа, пока задача открыта</label>
+<button class="btn btn--secondary btn--sm ml-auto">Сохранить</button></form></div></section>{% endif %}
 {% if states is defined %}{% include "_points_notify_block.html" %}{% endif %}
 {% endblock %}
