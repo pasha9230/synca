@@ -95,8 +95,8 @@ def register(app) -> None:
     @app.route("/tasks/feed")
     @login_required
     def tasks_feed():
-        """For notify.js of the office (read-only): the person's own open tasks «Позвонить…» (order_call.sounds) — rung or quiet, repeated
-        every 2 hours or not, as «Настройки → Уведомления → Мои уведомления» say (office_notify)."""
+        """For notify.js of the office: the person's own open important tasks (office_notify) — at most 2 rings a working day, or quiet, as
+        «Настройки → Уведомления → Мои уведомления» say. A ring taken is kept (task_sound)."""
         from .. import office_notify
         who = current_user()["login"]
         return jsonify({"who": who, "items": office_notify.calls(get_conn(), who, local_iso())})
