@@ -1322,7 +1322,24 @@ def describe_changes(raw: dict, changes: dict, offers=None, min_stock=None) -> l
                 brand, SEASON_NAMES.get(season, season),
                 _pct(old_rule["pct_small"] if old_rule else None), _pct(new_rule["pct_small"]),
                 _pct(old_rule["pct_large"] if old_rule else None), _pct(new_rule["pct_large"])))
+    if "wheel_pricing" in changes:
+        old_rules = raw.get("wheel_pricing") or {}
+        for brand, new_rule in sorted(changes["wheel_pricing"].items()):
+            old_rule = old_rules.get(brand) or {}
+            if new_rule != old_rule:
+                lines.append("Диски %s: до R17 %s → %s, от R18 %s → %s" % (
+                    brand, _pct(old_rule.get("pct_small")), _pct(new_rule["pct_small"]),
+                    _pct(old_rule.get("pct_large")), _pct(new_rule["pct_large"])))
+                if bool(old_rule.get("enabled")) != bool(new_rule.get("enabled")):
+                    lines.append("Диски %s: подготовка к публикации %s" % (brand, "включена" if new_rule.get("enabled") else "выключена"))
+    if "wheel_accounts" in changes:
+        old_accounts, new_accounts = raw.get("wheel_accounts") or {}, changes["wheel_accounts"] or {}
+        for account in sorted(set(old_accounts) | set(new_accounts)):
+            if old_accounts.get(account) != new_accounts.get(account):
+                lines.append("Диски, аккаунт %s: адреса %s → %s" % (account, ", ".join(old_accounts.get(account, [])) or "нет", ", ".join(new_accounts.get(account, [])) or "нет"))
     for key in sorted(changes):
+        if key in ("wheel_pricing", "wheel_accounts"):
+            continue
         if key == "excluded_brands":
             old_set, new_set = set(raw.get(key) or []), set(changes[key] or [])
             for brand in sorted(new_set - old_set):

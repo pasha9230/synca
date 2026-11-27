@@ -206,3 +206,18 @@ def test_a_bare_removed_status_is_not_a_deletion_from_the_cabinet():
     taken_off = {"ad_id": "A_a2", "avito_status": "removed", "messages": [{"title": "Объявление снято с публикации", "description": ""}]}
     assert heal.deleted_ids([taken_off, item("B_a2")]) == ["B_a2"]
     assert heal.plan(feed, [taken_off, item("B_a2")], [], {}, {}, TODAY)["renew"] == ["B"]
+
+
+def test_wheel_ads_are_not_rebound_or_renewed_as_tires():
+    feed = {'wheel_abc': ad('wheel_abc')}
+    result = heal.plan(feed, [item('wheel_abc')], [], {}, {}, TODAY)
+    assert result['bind'] == [] and result['renew'] == [] and result['repeat'] == []
+
+
+def test_tire_reconcile_never_binds_a_wheel_as_orphan():
+    from tires_sync import reconcile
+    from test_reconcile import ad
+    feed = {'100': ad('100')}
+    cabinet = [{'ad_id': 'wheel_example', 'status': 'active', 'title': 'Ikon Tyres Test Model 205/55 R16 94T'}]
+    assert reconcile.plan(feed, cabinet) == []
+    assert heal.plan(feed, [], cabinet, {}, {}, TODAY)['bind'] == []

@@ -25,7 +25,8 @@ from .backup import BackupError, backup_db, verify_backup
 from . import offsite
 from . import notify
 from .notify import NotifyError, notifier_for
-from .fetcher import fetch_for_connection
+from .fetcher import fetch_for_connection, fetch_wheels_for_connection, wheel_snapshot_path
+from .wheel_runtime import promote_checked as promote_checked_feed
 from .publish import PublishError, count_ads, ensure_feed, plan_feed, promote_feed, status_report, upload_now
 from .publishing import clear_expected, expected_for, feed_lock
 from .mappings import MappingError, auto_mappings, confirm_mapping, pending_mappings
@@ -393,6 +394,10 @@ def _build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--out", required=True)
     fetch.add_argument("--supplier", type=int, default=1, help="номер поставщика (по умолчанию первый)")
     fetch.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    wheels = sub.add_parser("fetch-wheels", help="скачать отдельную выгрузку дисков МИМ")
+    wheels.add_argument("--db", required=True)
+    wheels.add_argument("--unload", required=True, help="путь к выгрузке шин, рядом с которой хранится снимок дисков")
+    wheels.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     return parser
 
 
@@ -456,6 +461,20 @@ def _cmd_fetch(args) -> int:
     meta = fetch_for_connection(conn, box, Path(args.out), _now(), http=_http(), supplier_id=args.supplier)
     print("items: %d, fetched_at: %s" % (meta["items"], meta["fetched_at"]))
     return 0
+
+
+def _cmd_fetch_wheels(args) -> int:
+    box = load_box(args.key_file)
+    if box is None:
+        print("error: мастер-ключ недоступен", file=sys.stderr)
+        return 2
+    conn = store.connect(args.db)
+    try:
+        meta = fetch_wheels_for_connection(conn, box, Path(args.unload), _now(), http=_http())
+        print("диски: %d, обновлено: %s" % (meta["items"], meta["fetched_at"]))
+        return 0
+    finally:
+        conn.close()
 
 
 ALERT_PAUSE_SECONDS = 600
@@ -872,7 +891,7 @@ def _cmd_stock_pass(args) -> int:
             account = connections.get_account(conn, r.account_id)
             folder = Path(args.feed_root) / account["feed_token"]
             try:
-                done = promote_feed(folder, expected_removals=expected)
+                done = promote_checked_feed(conn, account, folder, args.feed_root, promoter=promote_feed, expected_removals=expected)
                 _record_state(conn, account, folder)
                 try:
                     remember_pass_removals(conn, r.account_id, len(r.removed))
@@ -944,11 +963,11 @@ def _run_cycle(args) -> int:
     _record_probe(conn, parsed, "cycle")
     _record_archive(conn, box, parsed, args.unload)
     with feed_lock(args.feed_root):
-        results = run_for_accounts(conn, None, ref, date.today(), args.feed_root, parsed=parsed, input_sha=input_sha, now=moscow_now())
+        results = run_for_accounts(conn, None, ref, date.today(), args.feed_root, parsed=parsed, input_sha=input_sha, now=moscow_now(), wheel_path=wheel_snapshot_path(args.unload))
         if args.publish:
             applied = _prebind_accounts(conn, box, args.feed_root, results, parsed=parsed)           # new codes take the Id of the live ad of their tire...
             if applied:                                                                              # ...and the feeds are built again before anything is published
-                results = run_for_accounts(conn, None, ref, date.today(), args.feed_root, parsed=parsed, input_sha=input_sha, now=moscow_now())
+                results = run_for_accounts(conn, None, ref, date.today(), args.feed_root, parsed=parsed, input_sha=input_sha, now=moscow_now(), wheel_path=wheel_snapshot_path(args.unload))
                 _prebind_report(conn, box, args.feed_root, applied, offers=getattr(parsed, "offers", None),
                                 unavailable=getattr(parsed, "unavailable", frozenset()))
         if parsed is not None:
@@ -1000,7 +1019,7 @@ def _run_cycle(args) -> int:
                     continue
                 folder = Path(args.feed_root) / account["feed_token"]
                 try:
-                    done = promote_feed(folder, expected_removals=expected)
+                    done = promote_checked_feed(conn, account, folder, args.feed_root, promoter=promote_feed, expected_removals=expected)
                     published_ids.append(account["id"])             # the new feed is public: its prices too, even if the state below fails
                     _record_state(conn, account, folder)
                     promoted += 1
@@ -1077,13 +1096,14 @@ def _cmd_feed_publish(args) -> int:
     if account is None:
         raise ValueError("аккаунт №%d не найден" % args.account)
     folder = Path(args.feed_root) / account["feed_token"]
-    result = promote_feed(folder, allow_shrink=args.allow_shrink)
+    with feed_lock(args.feed_root):
+        result = promote_checked_feed(conn, account, folder, args.feed_root, promoter=promote_feed, allow_shrink=args.allow_shrink)
+        _record_state(conn, account, folder)
     print("фид опубликован у нас на сервере: было %d, стало %d объявлений" % (result["old"], result["new"]))
-    _record_state(conn, account, folder)
     return 0
 
 
-def _cmd_avito_publish(args) -> int:
+def _cmd_avito_publish(args, *, feed_already_locked=False) -> int:
     conn, account, client = _avito_client(args, write=args.confirm)
     folder = Path(args.feed_root) / account["feed_token"]
     candidate = folder / "next" / "avito_feed.xml"
@@ -1104,9 +1124,11 @@ def _cmd_avito_publish(args) -> int:
     if not args.confirm:
         print("Ничего не изменено. Чтобы указать ссылку и запустить загрузку, добавьте --confirm.")
         return 0
-    result = promote_feed(folder, allow_shrink=args.allow_shrink)
+    from contextlib import nullcontext
+    with nullcontext() if feed_already_locked else feed_lock(args.feed_root):
+        result = promote_checked_feed(conn, account, folder, args.feed_root, promoter=promote_feed, allow_shrink=args.allow_shrink)
+        _record_state(conn, account, folder)
     print("фид опубликован у нас на сервере: было %d, стало %d объявлений" % (result["old"], result["new"]))
-    _record_state(conn, account, folder)
     ensure_feed(client, feed_url, plan=plan)
     upload_now(client, float(last) if last else None)
     store.set_state(conn, key, repr(_epoch()))
@@ -1150,7 +1172,7 @@ def _cmd_mirror_go_live(args) -> int:
         conn.commit()
         args.allow_shrink = False
         try:
-            code = _cmd_avito_publish(args)
+            code = _cmd_avito_publish(args, feed_already_locked=True)
         except BaseException:
             code = None
             raise
@@ -3330,6 +3352,8 @@ def main(argv=None) -> int:
             return _cmd_settings(args)
         if args.command == "fetch-unload":
             return _cmd_fetch(args)
+        if args.command == "fetch-wheels":
+            return _cmd_fetch_wheels(args)
         if args.command == "run-cycle":
             return _cmd_run_cycle(args)
         if args.command == "alert":

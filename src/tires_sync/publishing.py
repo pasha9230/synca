@@ -109,7 +109,8 @@ def publish_live_accounts(conn, feed_root, skip_ids=()) -> List[dict]:
             continue
         folder = Path(feed_root) / account["feed_token"]
         try:
-            done = promote_feed(folder, expected_removals=expected)
+            from .wheel_runtime import promote_checked
+            done = promote_checked(conn, account, folder, feed_root, promoter=promote_feed, expected_removals=expected)
             feed_bytes = (folder / "avito_feed.xml").read_bytes()
             # a mirror carries the plan only of its new positions: a plan of another feed (an older cycle) is not recorded, and is no error
             if store.has_pending(conn, account["id"]) and (account["feed_mode"] != "mirror" or store.pending_matches(conn, account["id"], feed_bytes)):

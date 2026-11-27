@@ -42,7 +42,9 @@ def test_catalog_shows_supplier_tabs_only_when_there_are_several(tmp_path):
     single = make_app(tmp_path / "x") if (tmp_path / "x").mkdir() is None else None
     c2 = single.test_client()
     login(c2)
-    assert "Все <span" not in c2.get("/catalog").get_data(as_text=True)
+    single_html = c2.get("/catalog").get_data(as_text=True)
+    assert "Диски" in single_html  # The wheel tab is available even with one supplier.
+    assert "Второй <span" not in single_html
 
 
 def test_supplier_tab_filters_positions_and_brand_prefix_is_hidden(tmp_path):
