@@ -310,8 +310,8 @@ a.p2-line:hover{border-color:var(--p2-primary)}
 .mp-act-links .mp-act-meta{flex:0 0 100%}
 
 /* «Доход / Бонусы / KPI» (the owner 2026-11-27): big tabs like buttons, in both widths (over the .p2w rules above) */
-.p2w .mp-tabs.mp-tabs--income{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;overflow:visible;border:0}
-.p2w .mp-tabs--income .mp-tab{justify-content:center;height:auto;min-height:48px;padding:8px 6px;font-size:17px;font-weight:600;border:2px solid var(--p2-border);border-radius:var(--p2-r);background:var(--p2-bg);color:var(--p2-text-2);min-width:0}
+.p2w .mp-tabs.mp-tabs--income{display:flex;flex-wrap:wrap;gap:6px;overflow:visible;border:0}
+.p2w .mp-tabs--income .mp-tab{justify-content:center;height:auto;min-height:34px;padding:4px 16px;font-size:17px;font-weight:600;border:1px solid var(--p2-border);border-radius:var(--p2-r);background:var(--p2-bg);color:var(--p2-text-2);min-width:0}
 .p2w .mp-tabs--income .mp-tab:hover{border-color:var(--p2-primary);color:var(--p2-primary)}
 .p2w .mp-tabs--income .mp-tab.is-active{border-color:var(--p2-primary);background:var(--p2-primary);color:var(--gray-0);font-weight:700}
 .inc-changes{font-size:16px}
