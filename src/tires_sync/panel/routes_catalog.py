@@ -11,17 +11,18 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request
 from werkzeug.datastructures import MultiDict
 
-from .. import catalog_archive, connections, market, own_bulk, order_oth, order_points, order_wait, orders, staging, store, tochki_feed
+from .. import catalog_archive, connections, market, own_bulk, order_oth, order_points, order_wait, orders, staging, store, tochki_feed, wheel_archive, wheel_manifest
 from ..config import own_price_value, settings_from_dict
 from ..fetcher import wheel_snapshot_path
 from ..webmim_wheels import parse_unload as parse_wheels
+from ..wheel_runtime import _snapshot as fresh_wheel_snapshot
 from ..wheel_pricing import price_for as wheel_price
 from ..pricing import position_price
 from ..settings_store import StaleDraftError, get_active
 from .common import author, can, can_post, current_user, get_conn, has_right, login_required, now, now_iso, remember_page, return_page, safe_path
 from .routes_design import office_page
 from .data import load_merged, stale_unload
-from ..webmim import ParseResult
+from ..webmim import ParseResult, brand_key
 from ..settings_store import active_settings
 from .routes_main import context
 from .routes_orders import local_iso
@@ -613,9 +614,38 @@ def register(app) -> None:
                 snapshot = parse_wheels(path.read_bytes(), territory)
             except (OSError, ET.ParseError):
                 snapshot = None
-            wheels = sorted(snapshot.offers.values(), key=lambda w: (w.brand.casefold(), w.name.casefold())) if snapshot else []
-            rules = get_active(conn)[1].get("wheel_pricing", {})
-            rows, filters, filters_active = wheel_catalog.filtered(wheels, request.args, lambda w: wheel_price(w, rules))
+            live_ids = set(snapshot.offers) if snapshot else set()
+            snapshot_fresh = fresh_wheel_snapshot(path, territory) is not None
+            wheels = sorted(wheel_archive.merged(conn, snapshot, territory).values(), key=lambda w: (w.brand.casefold(), w.name.casefold()))
+            raw = get_active(conn)[1]
+            effective = staging.effective_raw(conn)
+            rules = effective.get("wheel_pricing", {})
+            current_overrides, overrides = raw.get("price_overrides", {}), effective.get("price_overrides", {})
+            rows, filters, filters_active = wheel_catalog.filtered(wheels, request.args, lambda w: wheel_price(w, rules, overrides))
+            published = None
+            account = connections.get_account(conn, connections.PRIMARY_ACCOUNT)
+            if account and app.config.get("FEED_ROOT"):
+                try:
+                    feed = (Path(app.config["FEED_ROOT"]) / account["feed_token"] / "avito_feed.xml").read_bytes()
+                    feed_root = ET.fromstring(feed)
+                    feed_wheels = [a for a in feed_root.findall('Ad') if (a.findtext('Id') or '').startswith('wheel_')]
+                    info = wheel_manifest.load_info(conn, account['id'], feed)
+                    if not feed_wheels:
+                        published = set()
+                    elif info:
+                        published = {code[6:] for code in info['codes'].values() if code.startswith('wheel:')}
+                except (OSError, ET.ParseError, ValueError):
+                    pass
+            for row in rows:
+                wheel = row['wheel']
+                key = '1:w-' + wheel.goods_id
+                row['gone'] = snapshot is not None and wheel.goods_id not in live_ids
+                row['unverified'] = not snapshot_fresh
+                row['published'] = None if published is None else wheel.goods_id in published
+                row['own'] = overrides.get(key)
+                row['pending'] = current_overrides.get(key) != overrides.get(key)
+                row['brand_enabled'] = rules.get(brand_key(wheel.brand), {}).get('enabled', False)
+
             options = {key: wheel_catalog.choices(wheels, attr) for key, (attr, _) in wheel_catalog.PARAMETERS.items()}
             options['type'] = wheel_catalog.choices(wheels, 'wheel_type')
             options['brand'] = wheel_catalog.choices(wheels, 'brand')
@@ -638,11 +668,46 @@ def register(app) -> None:
                 fetched_at = ""
             return render_template("catalog_wheels.html", wheels=rows, supplier_tabs=tabs, filters=filters, options=options,
                                    filters_active=filters_active, more=(request.args.get("more") == "1" if "more" in request.args else bool(filters['pf'] or filters['pt'])),
-                                   available=snapshot is not None, fetched_at=fetched_at)
+                                   available=bool(wheels) or snapshot is not None, fetched_at=fetched_at, wheel_next=request.full_path.rstrip("?"))
         args = request.args                                                    # «Недавние» of the person (the owner 2026-11-09): the sizes searched
         client_catalog.remember_sizes(get_conn(), current_user()["login"], client_catalog.searched_sizes(
             _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), _view_filters(args)["sizes"]), now_iso())
         return catalog_page(args)
+
+    @app.route("/catalog/wheels/own-price", methods=["POST"])
+    @login_required
+    def wheel_own_price():
+        conn = get_conn()
+        back = _back('/catalog?category=wheels')
+        gid = str(request.form.get('g') or '').strip()
+        try:
+            if not re.fullmatch(r'[0-9]{1,40}', gid):
+                raise ValueError('Некорректный код диска.')
+            account = connections.get_account(conn, connections.PRIMARY_ACCOUNT)
+            if not account:
+                raise ValueError('Основной аккаунт для фида не подключён.')
+            territory = connections.supplier_territory(conn, 1, active_settings(conn))
+            try:
+                parsed = parse_wheels(wheel_snapshot_path(Path(app.config['UNLOAD_PATH'])).read_bytes(), territory)
+            except (OSError, ET.ParseError):
+                parsed = None
+            if parsed and parsed.offers and not parsed.issues:
+                wheel_archive.remember(conn, parsed.offers, now_iso(), only_missing=True)
+            wheels = wheel_archive.merged(conn, parsed, territory)
+            wheel = wheels.get(gid)
+            if wheel is None:
+                raise ValueError('Такого диска нет в выгрузке и в архиве.')
+            value = None if request.form.get('do') == 'clear' else _own_value(request.form.get('value'))
+            if value is not None:
+                own_price_value(value)
+                if 'pct' in value and wheel.price <= 0:
+                    raise ValueError('Закупка неизвестна: укажите цену в рублях.')
+            staging.set_own_price(conn, 'w-' + gid, [connections.PRIMARY_ACCOUNT], value, now_iso())
+        except (StaleDraftError, ValueError) as err:
+            flash(str(err))
+            return redirect(back)
+        flash('Своя цена диска сохранена в черновике. Подтвердите изменения, чтобы применить их.')
+        return redirect(back)
 
     @app.route("/catalog/wait", methods=["POST"])
     @login_required
