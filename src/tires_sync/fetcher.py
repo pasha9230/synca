@@ -57,4 +57,17 @@ def _fetch_wheels_locked(conn, box: Optional[SecretBox], dest: Path, now: str, h
                           api_key=connections.get_secret(conn, box, "webmim", owner, "api_key") or "", http=http,
                           service_id=wheel_service)
     territory = connections.supplier_territory(conn, 1, active_settings(conn))
-    return download_wheels(client, territory, wheel_snapshot_path(dest), now)
+    from . import wheel_archive
+    from .webmim_wheels import parse_unload as parse_wheels
+    import xml.etree.ElementTree as ET
+    path = wheel_snapshot_path(dest)
+    try:
+        previous = parse_wheels(path.read_bytes(), territory)
+        if previous.offers and not previous.issues:
+            wheel_archive.remember(conn, previous.offers, now)
+    except (OSError, ET.ParseError):
+        pass
+    result = download_wheels(client, territory, path, now)
+    current = parse_wheels(path.read_bytes(), territory)
+    wheel_archive.remember(conn, current.offers, now)
+    return result

@@ -20,7 +20,13 @@ RIM_TYPES = {'Лит.': 'Литые', 'Штамп.': 'Штампованные'}
 WHEEL_MAX_AGE = timedelta(hours=3)
 
 
-def _config_digest(raw, min_stock):
+def _config_digest(raw, min_stock, wheel_ids=None):
+    allowed = None if wheel_ids is None else {'1:w-' + gid for gid in wheel_ids}
+    data = {'pricing': raw.get('wheel_pricing') or {}, 'accounts': raw.get('wheel_accounts') or {}, 'own': {k: v for k, v in (raw.get('price_overrides') or {}).items() if k.startswith('1:w-') and (allowed is None or k in allowed)}, 'min_stock': min_stock}
+    return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def _legacy_config_digest(raw, min_stock):
     data = {'pricing': raw.get('wheel_pricing') or {}, 'accounts': raw.get('wheel_accounts') or {}, 'min_stock': min_stock}
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
@@ -103,12 +109,23 @@ def append_candidate(conn, account, folder, eff, identity, wheel_path):
         source_sha = snapshot.snapshot_sha if snapshot is not None else hashlib.sha256(Path(source_path).read_bytes()).hexdigest()
     except OSError:
         source_sha = 'missing'
-    basis = {'path': source_path, 'sha': source_sha, 'settings_version': settings_version, 'config_sha': _config_digest(raw_settings, eff.min_stock)}
+    previous_goods = sorted({previous_codes.get(ad.findtext('Id'), '')[6:] for ad in previous if previous_codes.get(ad.findtext('Id'), '').startswith('wheel:') and not previous_codes.get(ad.findtext('Id'), '').startswith('wheel:wheel_')})
+    unknown_previous = bool(previous) and len(previous_goods) != len(previous)
+    if snapshot is None and unknown_previous and any(k.startswith('1:w-') for k in (raw_settings.get('price_overrides') or {})):
+        raise ValueError('Нельзя проверить цены удерживаемых дисков: дождитесь выгрузки МИМ.')
+    basis = {'path': source_path, 'sha': source_sha, 'settings_version': settings_version, 'wheel_ids': previous_goods, 'config_sha': _config_digest(raw_settings, eff.min_stock, previous_goods)}
     stocks, codes, ads = {}, {}, []
     note = ''
     if snapshot is None:
         if previous and previous_basis.get('config_sha') != basis['config_sha']:
-            raise ValueError('Настройки дисков изменились, а выгрузка МИМ недоступна: прежний фид сохранён до обновления выгрузки.')
+            # Old manifests predate individual wheel prices. Their digest is
+            # compatible only if none of these wheels now has an override.
+            relevant = {'1:w-' + gid for gid in previous_goods}
+            legacy_ok = ('wheel_ids' not in previous_basis and
+                         previous_basis.get('config_sha') == _legacy_config_digest(raw_settings, eff.min_stock) and
+                         not relevant.intersection(raw_settings.get('price_overrides') or {}))
+            if not legacy_ok:
+                raise ValueError('Настройки дисков изменились, а выгрузка МИМ недоступна: прежний фид сохранён до обновления выгрузки.')
         ads, stocks = previous, previous_stocks
         note = 'выгрузка дисков недоступна или устарела; прежние объявления сохранены'
         codes = {ad.findtext('Id'): previous_codes.get(ad.findtext('Id'), 'wheel:' + ad.findtext('Id')) for ad in ads}
@@ -138,7 +155,7 @@ def append_candidate(conn, account, folder, eff, identity, wheel_path):
             created, rejected = wheel_feed.build_ads(
                 [w for w in selected_rows if assignments[w.goods_id] == address_id], rules, enabled, account_id=account['id'], address_id=address_id,
                 address_text=text, phone=phone, category='Запчасти и аксессуары', product_type='Диски', rim_types=RIM_TYPES,
-                photo_prefix=prefix, photo_for=lambda w: prefix + 'w-' + w.goods_id + '.jpg' if safe_source(w.image) and re.fullmatch(r'[0-9]{1,40}', w.goods_id) else '')
+                photo_prefix=prefix, overrides=raw_settings.get('price_overrides'), photo_for=lambda w: prefix + 'w-' + w.goods_id + '.jpg' if safe_source(w.image) and re.fullmatch(r'[0-9]{1,40}', w.goods_id) else '')
             for w in selected_rows:
                 aid = wheel_feed.ad_id(w.goods_id, account['id'], address_id)
                 if any(ad.findtext('Id') == aid for ad in created):
@@ -156,12 +173,21 @@ def append_candidate(conn, account, folder, eff, identity, wheel_path):
                     if quantity is None or not (quantity.text or '').isdigit():
                         raise ValueError('Нельзя проверить прежний остаток диска.')
                     quantity.text = str(min(int(quantity.text), available))
+                    from .wheel_pricing import price_for
+                    new_price = price_for(by_id[gid], rules, raw_settings.get('price_overrides'))
+                    price = old.find('Price')
+                    if new_price is None or new_price <= 0 or price is None:
+                        raise ValueError('Нельзя проверить цену прежнего объявления диска.')
+                    price.text = str(new_price)
                     created.append(old)
                     stocks[aid] = available
                     codes[aid] = 'wheel:' + gid
             if rejected:
                 note = 'часть дисков пропущена из-за неполных данных; прежние объявления сохранены'
             ads.extend(created)
+    goods_ids = sorted({v[6:] for v in codes.values() if v.startswith('wheel:') and not v.startswith('wheel:wheel_')})
+    basis['wheel_ids'] = goods_ids
+    basis['config_sha'] = _config_digest(raw_settings, eff.min_stock, goods_ids)
     path = folder / 'next' / 'avito_feed.xml'
     if not ads:
         # A tire-only candidate still needs evidence for a deliberate stock
@@ -232,7 +258,7 @@ def check_before_publish(conn, account, feed_path, feed_root, removal_count=None
         current_eff = connections.effective_settings(conn, account['id'], active_settings(conn))
         snapshot = _snapshot(candidate_basis.get('path'), connections.supplier_territory(conn, 1, current_eff))
         if (not snapshot or snapshot.snapshot_sha != candidate_basis.get('sha') or
-                candidate_basis.get('config_sha') != _config_digest(current, current_eff.min_stock)):
+                candidate_basis.get('config_sha') != _config_digest(current, current_eff.min_stock, candidate_basis.get('wheel_ids'))):
             snapshot = None
         old_codes = (old_info or {}).get('codes') or {}
         candidate_ids = {ad.findtext('Id') for ad in wheels}
@@ -272,7 +298,15 @@ def check_before_publish(conn, account, feed_path, feed_root, removal_count=None
     facts, basis = info['stocks'], info['basis']
     version, raw = get_active(conn)
     current_eff = connections.effective_settings(conn, account['id'], active_settings(conn))
-    if basis.get('config_sha') != _config_digest(raw, current_eff.min_stock) or not basis.get('path'):
+    digest_ok = basis.get('config_sha') == _config_digest(raw, current_eff.min_stock, basis.get('wheel_ids'))
+    if not digest_ok and 'wheel_ids' not in basis:
+        old_codes = list(info.get('codes', {}).values())
+        known = {code[6:] for code in old_codes if code.startswith('wheel:') and not code.startswith('wheel:wheel_')}
+        own = {k for k in (raw.get('price_overrides') or {}) if k.startswith('1:w-')}
+        safe_codes = len(known) == len(old_codes) or not own
+        digest_ok = (safe_codes and not own.intersection({'1:w-' + gid for gid in known}) and
+                     basis.get('config_sha') == _legacy_config_digest(raw, current_eff.min_stock))
+    if not digest_ok or not basis.get('path'):
         raise PublishError('Настройки дисков изменились: фид нужно пересобрать.')
     try:
         current_sha = hashlib.sha256(Path(basis['path']).read_bytes()).hexdigest()
