@@ -27,7 +27,8 @@ def test_filters_combine_and_normalize_wheel_parameters(tmp_path):
     page = client.get('/catalog?category=wheels&width=6.5&diameter=16&holes=5&pcd=114.3&offset=40&bore=66.1&type=Лит.&brand=Brand').get_data(as_text=True)
     assert 'Silver rim' in page and 'Black rim' not in page and 'Out of stock' not in page
     assert 'value="6,5" selected' in page
-    assert 'МИМ не передаёт страну' in page
+    assert 'Указанные параметры совпадают точно' not in page
+    assert 'Происхождение недоступно' not in page
     assert client.get('/catalog?category=wheels&q=42').get_data(as_text=True).count('Black rim') == 1
     assert 'Black rim' not in client.get('/catalog?category=wheels&width=bad').get_data(as_text=True)
 

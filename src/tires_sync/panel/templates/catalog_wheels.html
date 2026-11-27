@@ -16,15 +16,13 @@
 {% endfor %}
 </div>
 <div class="wheel-secondary">
-<p class="muted small wheel-exact">Указанные параметры совпадают точно</p>
 <label class="oc-outlined"><span>Тип</span><select class="select" name="type"><option value="">Все типы</option>{% for value in options.type %}<option value="{{ value }}"{% if filters.type == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
 <label class="oc-outlined"><span>Производитель</span><select class="select" name="brand"><option value="">Все бренды</option>{% for value in options.brand %}<option value="{{ value }}"{% if filters.brand == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
-<div class="wheel-origin" aria-label="Происхождение"><span class="muted small">Происхождение</span><div class="seg" title="МИМ не передаёт страну происхождения дисков"><label><input type="radio" checked disabled>Все</label><label><input type="radio" disabled>Импортные</label><label><input type="radio" disabled>Отечественные</label></div></div>
+<div class="wheel-origin" aria-label="Происхождение"><span class="muted small">Происхождение</span><div class="seg"><label><input type="radio" checked disabled>Все</label><label><input type="radio" disabled>Импортные</label><label><input type="radio" disabled>Отечественные</label></div></div>
 <label class="oc-outlined wheel-stock"><span>В наличии от</span><input class="input" name="sn" type="number" min="0" max="1000000" step="1" value="{{ filters.sn }}" aria-label="В наличии от, штук"></label>
 </div>
 <details class="wheel-more" data-wheel-details{% if more %} open{% endif %}><summary><span class="wheel-show">⌄&nbsp; Все фильтры</span><span class="wheel-hide">⌃&nbsp; Скрыть</span></summary><div class="wheel-extra"><label class="oc-outlined"><span>Цена от, ₽</span><input class="input" name="pf" type="number" min="0" step="1" value="{{ filters.pf }}"></label><label class="oc-outlined"><span>Цена до, ₽</span><input class="input" name="pt" type="number" min="0" step="1" value="{{ filters.pt }}"></label><span class="muted small">Фильтр по нашей цене</span></div></details>
 <div class="wheel-footer"><noscript><button type="submit" class="btn btn--secondary">Показать</button></noscript><a class="wheel-reset{% if not filters_active %} is-disabled{% endif %}" href="{% if filters_active %}/catalog?category=wheels{% else %}#{% endif %}"{% if not filters_active %} aria-disabled="true" tabindex="-1"{% endif %}>⊖&nbsp; Сбросить фильтры</a></div>
-<p class="muted small wheel-note">Происхождение недоступно: МИМ не передаёт страну для дисков.</p>
 </section>
 </form>
 {% if not available %}<p class="muted">Выгрузка дисков ещё не загружена.</p>{% else %}
