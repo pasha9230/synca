@@ -114,17 +114,16 @@ def test_the_list_of_what_was_shown_is_added_to_and_kept_short():
 
 # ---- the office's own choice -------------------------------------------------------------------------------------------------------
 
-def test_the_call_tasks_ring_once_by_default_and_every_2_hours_when_chosen(tmp_path):
+def test_the_call_tasks_ring_by_default_and_go_quiet_when_switched_off(tmp_path):
+    # the repeat every 2 hours of #97 gave way to «at most 2 a working day» (the owner 2026-11-28, test_important_task_sound)
     conn = db(tmp_path)
     at_point(conn, staffed(conn))
     later = "2026-10-15T14:30:00"                                             # 4.5 hours after the task was made
-    keys = lambda: [i["key"] for i in office_notify.calls(conn, "manager1", later)]
-    assert office_notify.get(conn, "manager1") == {"calls": True, "repeat": False}
-    assert keys()[0].endswith("-0")                                           # no new key every 2 hours: one ring
-    office_notify.put(conn, "manager1", True, True)
-    assert keys()[0].endswith("-2")                                           # the repeat chosen: as before (2026-11-12)
-    office_notify.put(conn, "manager1", False, True)
-    assert office_notify.get(conn, "manager1") == {"calls": False, "repeat": False}
+    assert office_notify.get(conn, "manager1") == {"sound": True}
+    items = office_notify.calls(conn, "manager1", later)
+    assert items[0]["key"].endswith("-20261015-1") and not items[0].get("quiet")
+    office_notify.put(conn, "manager1", False)
+    assert office_notify.get(conn, "manager1") == {"sound": False}
     assert all(i.get("quiet") for i in office_notify.calls(conn, "manager1", later))
     store.set_state(conn, office_notify.KEY % "manager1", "garbage")
     assert office_notify.get(conn, "manager1") == office_notify.DEFAULT
@@ -138,11 +137,12 @@ def test_the_settings_show_the_switch_and_save_it(tmp_path):
     tok = login(client)
     page = client.get("/settings/notify").get_data(as_text=True)
     assert "Мои уведомления" in page and 'action="/settings/notify/mine"' in page and "О смене этапов заказов офис не оповещается" in page
-    assert post(client, "/settings/notify/mine", tok, calls="1").status_code == 302
-    assert office_notify.get(conn, "owner") == {"calls": True, "repeat": False}
+    assert "Важные задачи: звук не чаще 2 раз в день" in page
+    assert post(client, "/settings/notify/mine", tok, sound="1").status_code == 302
+    assert office_notify.get(conn, "owner") == {"sound": True}
     assert post(client, "/settings/notify/mine", tok).status_code == 302
-    assert office_notify.get(conn, "owner")["calls"] is False
-    assert client.post("/settings/notify/mine", data={"calls": "1"}).status_code == 400        # no csrf
+    assert office_notify.get(conn, "owner")["sound"] is False
+    assert client.post("/settings/notify/mine", data={"sound": "1"}).status_code == 400        # no csrf
     cid = at_point(conn)
     items = client.get("/tasks/feed").get_json()["items"]
     assert [i["href"] for i in items] == ["/orders/%d" % cid] and items[0]["quiet"] is True

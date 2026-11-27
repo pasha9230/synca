@@ -1088,6 +1088,9 @@ def register(app) -> None:
         if own_point() is not None:                                             # the bell of the manager of the point: only theirs (routes_alerts)
             items += [{"key": "alert-%s-%s" % (r["id"], r["more"]), "title": "Чат без заказа" if r.get("chat_row") else "Заказ №%d" % r["order_id"],
                        "text": (r["text"] or "")[:200], "href": href(r)} for r in with_orders(conn, grouped(conn, who))]
+        if own_point() is not None and not office:                             # the office's tasks to the point (the red «!»): at most 3
+            from .. import task_sound                                           # rings a working day (the owner 2026-11-28), its own switch
+            items += task_sound.point_items(conn, point_id, now)
         answer = {"who": who, "items": items + calls}
         if own_point() is not None:                                             # the page of the point's own person reloads on a change (point_rev)
             answer["rev"] = point_rev(conn, cards + oth_cards, point_id, now[:10])
