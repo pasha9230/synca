@@ -175,10 +175,11 @@ def download_wheels(client: WebmimClient, territory_id: str, dest: Path, now: st
             previous = 0
         if previous and len(usable) < previous * min_ratio:
             raise WebmimError("Выгрузка дисков сократилась с %d до %d; прежний файл сохранён." % (previous, len(usable)))
-    return _download_catalog(body, territory_id, dest, now, min_ratio)
+    import hashlib
+    return _download_catalog(body, territory_id, dest, now, min_ratio, {'sha256': hashlib.sha256(body).hexdigest()})
 
 
-def _download_catalog(body: bytes, territory_id: str, dest: Path, now: str, min_ratio: float) -> dict:
+def _download_catalog(body: bytes, territory_id: str, dest: Path, now: str, min_ratio: float, extra_meta=None) -> dict:
     dest = Path(dest)
     try:
         count = _count_items(body, territory_id)
@@ -196,5 +197,6 @@ def _download_catalog(body: bytes, territory_id: str, dest: Path, now: str, min_
         raise WebmimError("Выгрузка уменьшилась с %d до %d товаров, файл не заменён." % (previous, count))
     _write_atomic(dest, body)
     meta = {"fetched_at": now, "items": count}
+    meta.update(extra_meta or {})
     _write_atomic(dest.with_name(dest.name + ".meta.json"), json.dumps(meta).encode("utf-8"))
     return meta

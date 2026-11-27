@@ -56,6 +56,7 @@ def _snapshot(path, territory):
         raw = path.read_bytes()
         result = parse_unload(raw, territory)
         result.snapshot_sha = hashlib.sha256(raw).hexdigest()
+        result.verified_full = metadata.get('sha256') == result.snapshot_sha
         if result.issues or not result.offers:
             return None
         return result
@@ -247,8 +248,13 @@ def check_before_publish(conn, account, feed_path, feed_root, removal_count=None
                 return False
             for ad in missing:
                 code = old_codes.get(ad.findtext('Id'), '')
-                offer = snapshot.offers.get(code[6:]) if code.startswith('wheel:') else None
-                if offer is None or offer.stock >= current_eff.min_stock:
+                if not code.startswith('wheel:') or not re.fullmatch(r'[0-9]{1,40}', code[6:]):
+                    return False
+                offer = snapshot.offers.get(code[6:])
+                if offer is None:
+                    if not snapshot.verified_full:
+                        return False
+                elif offer.stock >= current_eff.min_stock:
                     return False
             return True
         if any(not intentional(key) for key in reduced):
@@ -349,6 +355,10 @@ def promote_checked(conn, account, folder, feed_root, *, promoter, **kwargs):
             checked_sha = check_before_publish(conn, account, candidate, feed_root, removal_count=removed)
             kwargs['expected_removals'] = kwargs.get('expected_removals', 0) + sum(removed)
             result = promoter(folder, expected_sha=checked_sha, **kwargs)
+            if account['id'] == connections.PRIMARY_ACCOUNT:
+                keep = 'wheel_manifest:%d:%s' % (account['id'], checked_sha)
+                conn.execute('DELETE FROM app_state WHERE key LIKE ? AND key != ?',
+                             ('wheel_manifest:%d:%%' % account['id'], keep))
             conn.execute('RELEASE SAVEPOINT wheel_promotion')
             return result
         except Exception as err:

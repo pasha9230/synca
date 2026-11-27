@@ -916,3 +916,25 @@ def test_confirmed_disable_works_when_wheels_are_most_of_feed(tmp_path):
     assert result[0].ok, result[0].error
     result = publishing.publish_live_accounts(conn, root)
     assert result[0]['ok'], result[0]['message']
+
+
+def test_verified_snapshot_removes_missing_wheel_without_blocking_tires(tmp_path):
+    import hashlib, json
+    from datetime import datetime
+    from helpers import catalog_xml, commodity_xml
+    from test_cycle import REF, TODAY
+    from tires_sync import publishing, cycle, connections
+    from tires_sync.catalog import parse_reference
+    import xml.etree.ElementTree as ET
+    conn, aid, root, path = _candidate_for_race_tests(tmp_path)
+    assert publishing.publish_live_accounts(conn, root)[0]['ok']
+    replacement = wheel('43', territory='T1', stock='100').replace('<SMARKA>Brand</SMARKA>', '<SMARKA>Other</SMARKA>')
+    body = ('<CATALOG>' + replacement + '</CATALOG>').encode()
+    path.write_bytes(body)
+    path.with_name(path.name + '.meta.json').write_text(json.dumps({'fetched_at': datetime.utcnow().isoformat(), 'sha256': hashlib.sha256(body).hexdigest()}))
+    result = cycle.run_for_accounts(conn, catalog_xml(commodity_xml()), parse_reference(REF), TODAY, root, wheel_path=path)
+    assert result[0].ok, result[0].error
+    result = publishing.publish_live_accounts(conn, root)
+    assert result[0]['ok'], result[0]['message']
+    live = root / connections.get_account(conn, aid)['feed_token'] / 'avito_feed.xml'
+    assert not any((ad.findtext('Id') or '').startswith('wheel_') for ad in ET.parse(live).getroot())
