@@ -356,13 +356,14 @@ def sheet_phone(phone) -> str:
     return "8" + digits if len(digits) == 10 else digits
 
 
-def rows_of(conn, card_id: int, placed_at: str) -> Dict[str, dict]:
+def rows_of(conn, card_id: int, placed_at: str, with_note: bool = False) -> Dict[str, dict]:
     """The rows of the order now, as they go to the table: mark → {column of SENT: value}. Numbers are numbers, days are «YYYY-MM-DD» (the
     script makes them dates); the phone is sheet_phone. «Список» of the panel shows card_rows (the comment, the panel's phone)."""
     card = orders.get_card(conn, card_id)
     phone, account = sheet_phone(card["client_phone"]), account_label(conn, card)
     return {mark: dict({c: row[c] for c in SENT}, **{"Телефон": phone, "Аккаунт": account},
-                       **({NOTE_FLAG: True, "Примечание": row["Примечание"]} if row.get(NOTE_FLAG) else {}))    # the note of a sale from OTH (13.11)
+                       **({NOTE_FLAG: True, "Примечание": row["Примечание"]} if row.get(NOTE_FLAG) else {}),    # the note of a sale from OTH (13.11)
+                       **({"_note": row.get("Примечание") or ""} if with_note else {}))      # «Примечание» of the panel (resync)
             for mark, row in card_rows(conn, card, placed_at, _sent(conn, card_id)).items()}
 
 
@@ -985,7 +986,7 @@ def repair_candidates(conn) -> List[dict]:
         if not marks:
             continue
         try:
-            current = rows_of(conn, card_id, placed_at)
+            current = rows_of(conn, card_id, placed_at, with_note=True)
             grey = not listed(conn, card_id)
         except Exception:                                                  # one broken order never stops the others (as flush)
             log.exception("the Google table: the rows of order %s", card_id)
@@ -996,7 +997,7 @@ def repair_candidates(conn) -> List[dict]:
                 extra = {c: v for c, v in (op.get("extra") or {}).items() if c != "Примечание"}
                 op = dict({k: v for k, v in op.items() if k not in ("extra", "shade")}, shade=grey, **({"extra": extra} if extra else {}))
                 found.append({"order_id": card_id, "key": m, "op": op, "verify": {c: written[m].get(c, "") for c in CHECK},
-                              "placed_at": placed_at or "", "written": written[m],
+                              "placed_at": placed_at or "", "written": written[m], "panel_note": str(current[m].get("_note") or ""),
                               "open": code in OPEN_STAGES, "partial": str(written[m].get(PARTIAL) or ""),
                               "note": current[m].get("Примечание") if current[m].get(NOTE_FLAG) else None})
     return found
@@ -1184,19 +1185,20 @@ def _repair_write(conn, http: Transport, url: str, secret: str, now: str, author
 # panel is the truth. `python -m tires_sync sheet-resync` (and «Сверить таблицу с панелью» of the owner) sends every row written of every
 # order followed («Вести заказы, оформленные с», any stage) whole: every column the panel writes into a new row (SENT and «Аккаунт»), as
 # it would write it now — but the profit of the rows of orders placed before KEEPS_BEFORE stays what was written (no recount). The script
-# of 28.11 compares each cell and writes the ones that differ, whatever «Артикул» and «Телефон» hold now (a row cleared or rewritten by
-# hand is set right too, and said so); «Примечание» never (the owner's); the fill grey before «Заказ оформлен», our grey taken off after.
+# of 28.11 compares each cell and writes the ones that differ (a row cleared by hand is filled again); a row whose «Артикул» or «Телефон»
+# is not what the panel wrote is not touched, only listed with both values (the owner 28.11, asked again). «Примечание»: the owner's text
+# stays, the panel's is put after it once (« · »), an empty one gets the panel's; the fill grey before «Заказ оформлен», our grey taken off after.
 # A row whose mark is nowhere: made again at the end of the sheet for an open order; for a closed one only with `closed_too`. After it
 # `written` is what the sheet has: the row is followed again (no `_missing`, no baseline of the phone). A script before 28.11 writes
 # nothing (REPAIR_CHECK) and the panel says a new deployment is needed.
 
 PROFIT = ("Прибыль ₽", "Прибыль %")
 RESYNCED = "Google-таблица сверена с панелью: исправлено %d стр. (%s)."
-SYNC_SAID = {"differs": "расходится", "synced": "исправлена"}
+EDITED_RESYNC = "артикул/телефон в строке не совпадает с панелью — не трогаем"
 
 
 def _sync_values(c: dict) -> dict:
-    """The row as the panel writes it now (SENT, «Аккаунт»; never «Примечание»); the profit of an order placed before KEEPS_BEFORE as
+    """The row as the panel writes it now (SENT, «Аккаунт»; «Примечание» goes apart, as «note»); the profit of an order placed before KEEPS_BEFORE as
     written (KEEPS_BEFORE: no recount of old rows)."""
     values = dict(c["op"]["fields"], **c["op"].get("extra", {}))
     if c["placed_at"][:10] < KEEPS_BEFORE:
@@ -1208,7 +1210,7 @@ def _sync_values(c: dict) -> dict:
 def _sync_op(c: dict, probe: bool) -> dict:
     values = _sync_values(c)
     out = {"key": c["key"], "create": False, "fields": {k: v for k, v in values.items() if k in SENT}, "check": dict(REPAIR_CHECK),
-           "sync": True, "repair": list(BLANK), "verify": c["verify"], "shade": c["op"]["shade"]}
+           "sync": True, "repair": list(BLANK), "verify": c["verify"], "shade": c["op"]["shade"], "note": c["panel_note"]}
     extra = {k: v for k, v in values.items() if k not in SENT}
     if extra:
         out["extra"] = extra
@@ -1254,11 +1256,14 @@ def resync(conn, box, http: Transport, now: str, author: str = "cli", dry_run: b
         elif status == "differs":
             summary["differs"] += 1
             summary["blank"] += bool(reply.get("blank"))
-            summary["edited"] += bool(reply.get("edited"))
-            how = "стёрта вручную, " if reply.get("blank") else ("артикул/телефон правили вручную, " if reply.get("edited") else "")
-            out.append(_line(c, ("будет исправлена" if dry_run else "расходится") + (" (%s)" % how.rstrip(", ") if how else ""), reply,
+            out.append(_line(c, ("будет исправлена" if dry_run else "расходится") + (" (стёрта вручную)" if reply.get("blank") else ""), reply,
                              _changes_line(reply.get("changed") or {})))
             fix.append(c)
+        elif status == EDITED:                                             # the owner 28.11: such a row is not written over (asked)
+            summary["edited"] += 1
+            panel, there = _sync_values(c), reply.get("found") or {}
+            out.append(_line(c, EDITED_RESYNC, reply, "; ".join("%s: %s → в панели %s" % (k, there.get(k, "") or "пусто", panel.get(k, "") or "пусто")
+                                                               for k in CHECK if str(there.get(k, "")) != str(panel.get(k, "")))))
         elif status == GONE:
             summary["gone_open" if c["open"] else "gone_closed"] += 1
             if c["open"] or closed_too:
@@ -1280,7 +1285,7 @@ def resync(conn, box, http: Transport, now: str, author: str = "cli", dry_run: b
         for card_id in claimed:
             conn.execute("UPDATE sheet_order SET claim_until = '' WHERE order_id = ?", (card_id,))
         conn.commit()
-    rows += [_line(c, "занят другой отправкой") for c in busy] + [r for r in out if r["result"].startswith(("метки на листе нет, заказ закрыт", "ошибка"))]
+    rows += [_line(c, "занят другой отправкой") for c in busy] + [r for r in out if r["result"].startswith(("метки на листе нет, заказ закрыт", "ошибка", EDITED_RESYNC))]
     if summary["fixed"] or summary["created"]:
         store.write_audit(conn, now, author, "sheet_resync", {"orders": summary["orders"], "rows": summary["rows"], "fixed": summary["fixed"],
                                                               "created": summary["created"]})
@@ -1346,8 +1351,8 @@ def _resync_write(conn, http: Transport, url: str, secret: str, now: str, claime
 
 def summary_line(summary: dict, dry_run: bool) -> str:
     """The totals in words, for the command and the page."""
-    said = ("Заказов проверено: %d, строк: %d; как в панели: %d; расходятся: %d (из них стёрты: %d, артикул/телефон правили: %d); "
-            "без метки: %d у открытых, %d у закрытых; ошибок: %d." % (
+    said = ("Заказов проверено: %d, строк: %d; как в панели: %d; расходятся: %d (из них стёрты: %d); артикул/телефон не совпадает "
+            "(не тронуты): %d; без метки: %d у открытых, %d у закрытых; ошибок: %d." % (
                 summary["orders"], summary["rows"], summary["same"], summary["differs"], summary["blank"], summary["edited"],
                 summary["gone_open"], summary["gone_closed"], summary["errors"]))
     if not dry_run:

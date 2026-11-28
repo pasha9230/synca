@@ -202,8 +202,8 @@ def test_the_note_is_never_written_by_the_repair(table, monkeypatch):
     order, mark = rows["wiped"]
     real = sheet.rows_of
 
-    def with_note(conn_, card_id, placed_at):                              # a sale from OTH: the panel's «Примечание» (NOTE_FLAG)
-        out = real(conn_, card_id, placed_at)
+    def with_note(conn_, card_id, placed_at, **kw):                        # a sale from OTH: the panel's «Примечание» (NOTE_FLAG)
+        out = real(conn_, card_id, placed_at, **kw)
         if card_id == order:
             out[mark] = dict(out[mark], **{sheet.NOTE_FLAG: True, "Примечание": "продано с ОТХ"})
         return out
