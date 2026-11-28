@@ -10,7 +10,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from panel_helpers import make_app, shared_mark_of
-from test_order_sheet import FakeScript, events, placed, turn_on
+from test_order_sheet import FakeScript, events, placed, stage, turn_on
 from test_roles import person
 from test_sheet_restore import NewScript, mark_missing, written
 from test_webmim_create import NOW, db
@@ -37,8 +37,15 @@ class RepairScript(NewScript):
                 elif row.get("probe"):
                     out.append({"key": row["key"], "status": "blank", "repair": True, "row": order.index(row["key"]) + 2})
                 else:
-                    cells.update(row["fields"])
+                    cells.update({c: v for c, v in row["fields"].items() if c in self.columns})
                     cells.update({c: v for c, v in (row.get("extra") or {}).items() if c in self.columns})
+                    if row.get("shade") in (True, False):
+                        (self.grey.add if row["shade"] else self.grey.discard)(row["key"])
+                    lacking = [c for c in row["fields"] if c not in self.columns]
+                    if lacking:
+                        out.append({"key": row["key"], "status": "error", "error": "нет колонок: " + ", ".join(lacking) + " (остальное записано)",
+                                    "repair": True, "partial": True, "row": order.index(row["key"]) + 2})
+                        continue
                     out.append({"key": row["key"], "status": "repaired", "repair": True, "row": order.index(row["key"]) + 2})
             return {"ok": True, "results": out}
         return super().run(p)
@@ -176,3 +183,95 @@ def test_a_row_without_its_mark_is_made_again_at_the_end(table):
     detail = json.loads(conn.execute("SELECT detail FROM audit WHERE action = 'sheet_repair_blank'").fetchone()[0])
     assert detail == {"rows": 2, "orders": 2, "remade": 1}
     assert "создано в конце листа (метки не было): 1" in texts.audit_text({"action": "sheet_repair_blank", "detail": detail})
+
+
+def test_a_row_without_its_mark_of_a_closed_order_is_only_listed(table):
+    conn, box, fake, rows, before = table
+    order, mark = rows["whole"]
+    fake.rows.pop(mark)
+    orders.move_card(conn, order, stage(conn, "done")["id"], LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)                                    # the move goes as any other (the row is gone: made again)
+    fake.rows.pop(mark, None)                                              # and wiped again, mark and all
+    for dry in (True, False):
+        done = {d["key"]: d["result"] for d in sheet.repair_blank(conn, box, fake, LATER, dry_run=dry)}
+        assert done[mark] == sheet.GONE_CLOSED and mark not in fake.rows
+
+
+def test_a_failed_chunk_is_an_error_of_its_own_rows_only(table, monkeypatch):
+    conn, box, fake, rows, before = table
+    second = rows["whole"]
+    wipe(fake, second[1])
+    mark_missing(conn, second[0], [second[1]])
+    monkeypatch.setattr(sheet, "REPAIR_CHUNK", 1)
+    probes = len(sheet.repair_candidates(conn))
+    fake.fail = [None] * probes + [None, "500"]                            # the second chunk of writing fails
+    done = {d["key"]: d["result"] for d in sheet.repair_blank(conn, box, fake, LATER)}
+    first = rows["wiped"]
+    assert done[first[1]] == "записана заново" and not written(conn, first[0])[first[1]].get("_missing")
+    assert done[second[1]].startswith("ошибка") and written(conn, second[0])[second[1]]["_missing"] is True
+    assert fake.rows[second[1]] == {}
+
+
+def test_the_fill_follows_the_order_both_ways(table):
+    conn, box, fake, rows, before = table
+    order, mark = rows["wiped"]
+    fake.grey.add(mark)                                                    # a fill left on the wiped row of a placed order
+    sheet.repair_blank(conn, box, fake, LATER)
+    assert mark not in fake.grey and written(conn, order)[mark]["_grey"] is False
+    back = rows["whole"]
+    orders.move_card(conn, back[0], stage(conn, "new")["id"], LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    wipe(fake, back[1])
+    fake.grey.discard(back[1])                                             # the fill taken off by hand with the values
+    sheet.repair_blank(conn, box, fake, LATER)
+    assert back[1] in fake.grey and written(conn, back[0])[back[1]]["_grey"] is True
+
+
+def test_the_note_is_never_written_by_the_repair(table, monkeypatch):
+    conn, box, fake, rows, before = table
+    order, mark = rows["wiped"]
+    real = sheet.rows_of
+
+    def with_note(conn_, card_id, placed_at):                              # a sale from OTH: the panel's «Примечание» (NOTE_FLAG)
+        out = real(conn_, card_id, placed_at)
+        if card_id == order:
+            out[mark] = dict(out[mark], **{sheet.NOTE_FLAG: True, "Примечание": "продано с ОТХ"})
+        return out
+    monkeypatch.setattr(sheet, "rows_of", with_note)
+    sheet.repair_blank(conn, box, fake, LATER)
+    sent = [r for p in fake.data_posts() for r in p["rows"] if r["key"] == mark and not r.get("probe")]
+    assert sent and all("Примечание" not in r["fields"] and "Примечание" not in (r.get("extra") or {}) for r in sent)
+    assert "Примечание" not in fake.rows[mark] and written(conn, order)[mark]["Примечание"] == "продано с ОТХ"
+    before_posts = len(fake.data_posts())
+    sheet.flush(conn, box, fake, LATER)                                    # the next send does not write it either
+    assert all("Примечание" not in (r.get("extra") or {}) for p in fake.data_posts()[before_posts:] for r in p["rows"] if r["key"] == mark)
+
+
+def test_a_row_written_without_some_column_is_said_and_listed_later(table):
+    conn, box, fake, rows, before = table
+    order, mark = rows["wiped"]
+    fake.columns.remove("ПВЗ")
+    done = {d["key"]: d["result"] for d in sheet.repair_blank(conn, box, fake, LATER)}
+    assert done[mark].startswith("записана не полностью (нет колонок: ПВЗ")
+    assert fake.rows[mark]["Артикул"] == before["Артикул"] and not written(conn, order)[mark].get("_missing")
+    later = {d["key"]: d["result"] for d in sheet.repair_blank(conn, box, fake, LATER, dry_run=True)}
+    assert later[mark].startswith("записана не полностью")                 # never «filled» in silence
+
+
+def test_the_confirm_says_how_many_rows_without_a_mark(tmp_path, monkeypatch):
+    monkeypatch.setattr(users, "HASH_METHOD", "pbkdf2:sha256:1000")
+    box, fake = SecretBox(Fernet.generate_key()), RepairScript()
+    app = make_app(tmp_path, SECRET_BOX=box, SHEET_HTTP=fake, SHEET_RUN=lambda work: work())
+    conn = store.connect(app.config["DB_PATH"])
+    orders.ensure_pipeline(conn, NOW)
+    turn_on(conn, box)
+    placed(conn)
+    sheet.flush(conn, box, fake, NOW)
+    fake.rows.pop(sorted(fake.rows)[0])
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["user"], session["epoch"], session["csrf"] = "owner", 0, "tok"
+        session["pw"] = shared_mark_of(client.application)
+    client.post("/connections/sheet/repair", data={"csrf": "tok", "dry": "1"})
+    page = client.get("/connections/sheet").get_data(as_text=True)
+    assert "Строк без метки по последнему поиску: 1" in page and "создаётся заново в конце листа" in page

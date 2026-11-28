@@ -185,6 +185,8 @@ def repair_last(conn):
         last = json.loads(raw) if raw else None
     except ValueError:
         last = None
+    if last is not None:
+        last["gone"] = sum(1 for row in last.get("rows") or [] if str(row.get("result", "")).startswith("метки на листе нет — будет создана"))
     if last is not None or store.get_state(conn, REPAIR_KEY + ":run"):
         last = dict(last or {}, running=bool(store.get_state(conn, REPAIR_KEY + ":run")))
     return last
