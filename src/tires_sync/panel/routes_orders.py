@@ -79,7 +79,7 @@ def match_url(card: dict) -> str:
     return "/catalog?" + urlencode(args) if args else ""
 
 
-def error_kind(conn, fields: dict) -> str:
+def error_kind(conn, fields: dict, err=None) -> str:
     """The flash category of a refused order form: «field:<name>» for the first field that its own check refuses (the message goes under
     that field, docs/design.md §4), else «error» (a banner at the top)."""
     for key, value in fields.items():
@@ -91,6 +91,8 @@ def error_kind(conn, fields: dict) -> str:
             return "field:" + key
         except Exception:
             continue
+    if err is not None and str(err) == orders.PREPAY_NEEDS_SUM:          # «Предоплата» ticked without its sum: the message under the sum
+        return "field:prepay_amount"
     return "error"
 
 
@@ -534,6 +536,36 @@ def in_dates(data: dict, start: str, end: str) -> dict:
     return dict(data, columns=columns)
 
 
+FLAG_FILTERS = {"tk": "Отправка ТК", "pp": "Предоплата"}     # «Фильтры» of «Заказы» (the owner 2026-11-28): ?tk=1, ?pp=1
+
+
+def flag_ids(conn, args) -> Optional[set]:
+    """The orders the flags of «Фильтры» keep (every flag set must hold), None when no flag is set. «Отправка ТК»: «Доставка в другой
+    город» ticked (order_intercity); «Предоплата»: ticked or its sum typed."""
+    found = None
+    for key in FLAG_FILTERS:
+        if args.get(key) != "1":
+            continue
+        if key == "tk":
+            ids = order_intercity.enabled_ids(conn)
+        else:
+            ids = {r[0] for r in conn.execute("SELECT id FROM order_card WHERE prepay = 1 OR prepay_amount > 0")}
+        found = ids if found is None else found & ids
+    return found
+
+
+def only_ids(data: dict, ids: Optional[set]) -> dict:
+    """The board of only the cards `ids` (None: all), as in_dates: the counts and sums of what is left."""
+    if ids is None:
+        return data
+    columns = []
+    for col in data["columns"]:
+        cards = [c for c in col["cards"] if c["id"] in ids]
+        total = None if col["sum"] is None else round(sum(c["sum"] or 0 for c in cards), 2)
+        columns.append(dict(col, cards=cards, count=len(cards), sum=total))
+    return dict(data, columns=columns)
+
+
 CARD_LAYOUT = "order.card.layout"      # user_pref: the three columns of the card in «Новый вид» — {"w": [3 shares], "off": [3 folded]}
 
 
@@ -718,14 +750,19 @@ def register(app) -> None:
         if start or end:                                         # «Дата создания» (the new view only): the list and the file the same
             data = in_dates(data, start, end)
             rows = [r for r in rows if (not start or r["card"]["created"] >= start) and (not end or r["card"]["created"] <= end)]
-        table = list_table(conn, rows, only) if view == "list" else None
+        flags = {k: "1" for k in FLAG_FILTERS if request.args.get(k) == "1"} if own_point() is None else {}   # «Отправка ТК», «Предоплата»: the office's
+        kept = flag_ids(conn, flags)
+        if kept is not None:
+            data = only_ids(data, kept)
+            rows = [r for r in rows if r["card"]["id"] in kept]
+        table = list_table(conn, rows, only, flags) if view == "list" else None
         notes = order_notes.latest(conn, [r["card"]["id"] for r in rows],          # «Есть примечание» (the owner 2026-10-30); a point:
                                    clean=(lambda text: orders.without_account_names(conn, text)) if own_point() else None)   # no account's name
         total = sum(col["count"] for col in data["columns"])
         to_list = [{"stage": col["stage"], "count": col["count"]} for col in data["columns"]    # «Выполнено» and «Отмена» — links into «Список» (audit 32)
                    if col["stage"]["code"] in ("done", "cancel")] if view == "board" and not own_point() and only is None else []
         if view == "board" and not own_point():          # «Показывать на доске» off: no column (the stage chosen in «Этап» shows; the owner 2026-11-03),
-            found = bool(query or tag or returning)                   # unless a search or a tag found orders there (what was found shows, as the folded ones)
+            found = bool(query or tag or returning or flags)                   # unless a search or a tag found orders there (what was found shows, as the folded ones)
             data = dict(data, columns=[col for col in data["columns"] if col["stage"]["on_board"] or col["stage"]["id"] == only
                                        or (found and col["count"])])
         extra = dict(date_from=start, date_to=end, bulk_targets=order_bulk.targets(conn), bulk_reason=order_bulk.DEFAULT_REASON, responsible_options=_responsible_options(app, conn)) if office_new() else {}
@@ -737,6 +774,7 @@ def register(app) -> None:
                                points=[p for p in points.list_points(conn) if not own_point() or p["id"] == own_point()],
                                stages=[] if own_point() else orders.list_stages(conn),
                                dots=_dots(conn), rows=rows, total_cards=total, only_stage=only, returning=returning, returning_filters=order_oth.FILTERS,
+                               flags=flags, flag_filters={} if own_point() else FLAG_FILTERS,
                                waiting={} if own_point() else engine.waiting_counts(conn), inbox_new=0 if own_point() else manager.new_count(conn),
                                empty_old=[] if own_point() else order_cleanup.empty_to_delete(conn, local_iso()), empty_sign=order_cleanup.empty_sign)
 
@@ -778,7 +816,7 @@ def register(app) -> None:
         """The purchase and the profit in the list: the right «money», never a manager of a point (the owner 2026-10-29)."""
         return has_right("money") and own_point() is None
 
-    def list_table(conn, rows: list, only) -> dict:
+    def list_table(conn, rows: list, only, flags: Optional[dict] = None) -> dict:
         """«Список» as the Google table (orders_list): the rows of one page, the totals of every page of the filter."""
         money, ids = list_money(), [r["card"]["id"] for r in rows]
         pages = max(1, -(-len(ids) // orders_list.PAGE))
@@ -796,6 +834,7 @@ def register(app) -> None:
         keep = {k: v for k, v in (("v", "list"), ("p", request.args.get("p", "")), ("t", request.args.get("t", "")),
                                   ("q", request.args.get("q", "")), ("s", only or ""), ("from", _day(request.args.get("from")) if office_new() else ""),
                                   ("to", _day(request.args.get("to")) if office_new() else "")) if v}       # «Дата создания»: the new view's
+        keep.update(flags or {})                                          # «Отправка ТК», «Предоплата» across the pages
         return {"rows": lines, "columns": columns, "shown": [c["name"] for c in columns if c["shown"]], "totals": orders_list.totals(found, money),
                 "numbers": orders_list.NUMBERS, "page": page, "pages": pages, "orders": len(ids), "keep": keep,
                 "link": lambda n: "/orders?" + urlencode(dict(keep, page=n))}
@@ -864,6 +903,9 @@ def register(app) -> None:
         try:
             new = office_new()                                       # «Excel» of the selected and «Дата создания»: the new view's only
             ids = ({i for i in (_int(x) for x in request.args.get("ids", "").split(",")) if i} or None) if new else None
+            kept = flag_ids(conn, request.args) if own_point() is None else None       # «Отправка ТК», «Предоплата» of «Фильтры»
+            if kept is not None:
+                ids = kept if ids is None else ids & kept
             data = orders_export.build(conn, stamp, point_id=own_point() or _int(request.args.get("p")), tag=request.args.get("t", "").strip()[:30],
                                        query=request.args.get("q", "").strip()[:80], money=own_point() is None,   # a point: no sums
                                        only=ids, start=_day(request.args.get("from")) if new else "", end=_day(request.args.get("to")) if new else "")
@@ -1107,7 +1149,7 @@ def register(app) -> None:
             flash(str(err), "error")
             return new_page(conn, dict(request.form.items()), rows, busy=err.order_id)
         except orders.OrderError as err:
-            flash(str(err), error_kind(conn, fields))                    # the window comes back with what was typed: nothing is lost, no card is made
+            flash(str(err), error_kind(conn, fields, err))                 # the window comes back with what was typed: nothing is lost, no card is made
             return new_page(conn, dict(request.form.items()), rows)
         if found:
             flash("Добавлено по тексту: %s." % "; ".join(found))
@@ -1728,7 +1770,7 @@ def register(app) -> None:
             check_responsible(app, conn, changes.get("responsible"), card["responsible"])
             changed = orders.update_card(conn, card_id, changes, local_iso(), author())
         except orders.OrderError as err:
-            flash(str(err), error_kind(conn, changes))
+            flash(str(err), error_kind(conn, changes, err))
             if typed_row:
                 flash("Позиция не добавлена: окно не сохранено.", "error")
             if "stage_id" in request.form or request.form.get("tab") != "money":
