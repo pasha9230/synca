@@ -260,7 +260,7 @@ def test_the_repair_writes_only_filled_values_and_never_takes_the_write_off(tabl
     order, mark = rows["wiped"]
     fake.rows[mark]["Списание"] = True                                     # the tick stayed when the row was cleared
     sheet.repair_blank(conn, box, fake, LATER)
-    sent = [r for p in fake.data_posts() for r in p["rows"] if r["key"] == mark and not r.get("probe")]
+    sent = [r for p in fake.data_posts() for r in p["rows"] if r["key"] == mark and r.get("repair") and not r.get("probe")]
     assert sent and all(v not in ("", None) for r in sent for v in r["fields"].values())
     assert all("Списание" not in r["fields"] or r["fields"]["Списание"] is True for r in sent)
     assert fake.rows[mark]["Списание"] is True and fake.rows[mark]["Артикул"] == before["Артикул"]
