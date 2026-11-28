@@ -98,7 +98,7 @@ def table(tmp_path):
     rows = {"staged": first(staged), "wiped": first(wiped), "edited": first(edited), "gone_open": first(gone_open), "gone_closed": first(gone_closed)}
     orders_of = {"staged": staged, "wiped": wiped, "edited": edited, "gone_open": gone_open, "gone_closed": gone_closed}
     whole = {k: dict(fake.rows[m]) for k, m in rows.items()}
-    fake.rows[rows["staged"]].update({"Этап": "Новый заказ", "Реализация": "старое"})       # an old version brought back
+    fake.rows[rows["staged"]].update({"Этап": "Новый заказ"})                               # an old version brought back
     fake.rows[rows["wiped"]] = {}                                                           # cleared, the mark left
     fake.rows[rows["edited"]]["Артикул"] = "999"                                            # rewritten by hand
     mark_missing(conn, edited, [rows["edited"]])
@@ -127,7 +127,7 @@ def test_the_look_lists_every_difference_and_writes_nothing(table):
     assert s["same"] == s["rows"] - 5
     line = sheet.summary_line(s, True)
     assert line.startswith("Заказов проверено: 5, строк: %d; как в панели: %d; расходятся: 3 (из них стёрты: 1, артикул/телефон не совпадал: 1); "
-                           "без метки: 1 у открытых, 1 у закрытых; ошибок: 0." % (s["rows"], s["same"]))
+                           "будет исправлено строк: 3; не трогаем (решите вручную): 0; без метки: 1 у открытых, 1 у закрытых; ошибок: 0." % (s["rows"], s["same"]))
     assert json.dumps(fake.rows, sort_keys=True, ensure_ascii=False) == keep and {o: written(conn, o) for o in orders_of.values()} == base
     probes = [r for p in fake.data_posts()[-1:] for r in p["rows"]]
     assert all(r["probe"] and r["sync"] and r["check"] == sheet.REPAIR_CHECK and "Примечание" not in r["fields"] for r in probes)
@@ -164,29 +164,6 @@ def test_a_row_set_right_follows_the_order_again(table):
     orders.move_card(conn, order, stage(conn, "at_point")["id"], LATER, "owner")
     sheet.flush(conn, box, fake, LATER)
     assert fake.rows[rows["wiped"]]["Этап"] == "На точке, ждём клиента"
-
-
-def test_the_note_of_the_panel_follows_the_owners_text_once_and_old_profit_stays(table):
-    conn, box, fake, rows, orders_of, whole = table
-    mark, order = rows["staged"], orders_of["staged"]
-    conn.execute("UPDATE order_card SET comment = 'позвонить вечером' WHERE id = ?", (order,))
-    fake.rows[mark]["Примечание"] = "текст владельца"
-    wiped, wiped_order = rows["wiped"], orders_of["wiped"]
-    conn.execute("UPDATE order_card SET comment = 'клиент ждёт' WHERE id = ?", (wiped_order,))
-    kept = written(conn, order)
-    kept[mark]["Прибыль ₽"] = 111.0                                        # what was written before KEEPS_BEFORE
-    conn.execute("UPDATE sheet_order SET rows = ? WHERE order_id = ?", (json.dumps(kept, ensure_ascii=False), order))
-    conn.commit()
-    fake.rows[mark]["Прибыль ₽"] = 999.0
-    look = {d["key"]: d for d in sheet.resync(conn, box, fake, LATER, dry_run=True)["rows"]}
-    assert "Примечание: текст владельца → текст владельца · позвонить вечером" in look[mark]["values"]
-    sheet.resync(conn, box, fake, LATER)
-    assert fake.rows[mark]["Примечание"] == "текст владельца · позвонить вечером" and fake.rows[mark]["Прибыль ₽"] == 111.0
-    assert fake.rows[wiped]["Примечание"] == "клиент ждёт"                  # empty: the panel's text
-    sheet.resync(conn, box, fake, LATER)                                   # again: never twice
-    assert fake.rows[mark]["Примечание"] == "текст владельца · позвонить вечером"
-    assert sheet.resync(conn, box, fake, LATER, dry_run=True)["summary"]["differs"] == 0
-    assert all("Примечание" not in r["fields"] and "Примечание" not in (r.get("extra") or {}) for p in fake.data_posts() for r in p["rows"] if r.get("sync"))
 
 
 def test_the_fill_follows_the_order(table):
@@ -251,6 +228,7 @@ def test_the_button_is_the_owners_and_shows_the_totals(tmp_path, monkeypatch):
     mark = sorted(fake.rows)[0]
     whole = dict(fake.rows[mark])
     fake.rows[mark]["Этап"] = "Новый заказ"
+    fake.rows[mark]["Списание"] = True                                     # kept: shown apart
     client = app.test_client()
     with client.session_transaction() as session:
         session["user"], session["epoch"], session["csrf"] = "owner", 0, "tok"
@@ -260,8 +238,9 @@ def test_the_button_is_the_owners_and_shows_the_totals(tmp_path, monkeypatch):
     page = client.get("/connections/sheet").get_data(as_text=True)
     assert "Заказов проверено: 1" in page and "расходятся: 1" in page and "Этап: Новый заказ → " in page and fake.rows[mark]["Этап"] == "Новый заказ"
     assert "По последнему поиску: расходятся 1 стр." in page
+    assert page.index("Будет исправлено") < page.index("Не трогаем (решите вручную)") and "в таблице списание отмечено, в панели нет" in page
     assert client.post("/connections/sheet/resync", data={"csrf": "tok", "dry": "0"}).status_code == 302
-    assert fake.rows[mark] == whole and "Исправлено строк: 1" in client.get("/connections/sheet").get_data(as_text=True)
+    assert fake.rows[mark] == dict(whole, Списание=True) and "Исправлено строк: 1" in client.get("/connections/sheet").get_data(as_text=True)
     partner, _ = person(app, "partner")
     assert partner.post("/connections/sheet/resync", data={"csrf": "tok", "dry": "1"}).status_code == 403
     assert "Сверить таблицу с панелью" not in partner.get("/connections/sheet").get_data(as_text=True)
@@ -292,25 +271,6 @@ def test_a_lost_answer_of_a_new_code_is_checked_again_by_it(table):
     sheet.flush(conn, box, fake, LATER)
     assert fake.rows[mark]["Артикул"] == "8888" and not written(conn, order)[mark].get("_missing")
     assert written(conn, order)[mark]["Артикул"] == "8888"
-
-
-def test_a_changed_comment_replaces_only_the_panels_part_of_the_note(table):
-    conn, box, fake, rows, orders_of, whole = table
-    mark, order = rows["staged"], orders_of["staged"]
-    fake.rows[mark]["Примечание"] = "текст владельца"
-    conn.execute("UPDATE order_card SET comment = 'старый' WHERE id = ?", (order,))
-    conn.commit()
-    sheet.resync(conn, box, fake, LATER)
-    assert fake.rows[mark]["Примечание"] == "текст владельца · старый" and written(conn, order)[mark][sheet.NOTE_PANEL] == "старый"
-    conn.execute("UPDATE order_card SET comment = 'новый' WHERE id = ?", (order,))
-    conn.commit()
-    sheet.resync(conn, box, fake, LATER)
-    assert fake.rows[mark]["Примечание"] == "текст владельца · новый"     # never «… · старый · новый»
-    conn.execute("UPDATE order_card SET comment = '' WHERE id = ?", (order,))
-    conn.commit()
-    sheet.resync(conn, box, fake, LATER)
-    assert fake.rows[mark]["Примечание"] == "текст владельца"             # the owner's text stays
-    assert sheet.resync(conn, box, fake, LATER, dry_run=True)["summary"]["differs"] == 0
 
 
 def test_writing_goes_by_packs_of_15_and_an_unanswered_one_loses_nothing(table, monkeypatch):
@@ -357,3 +317,124 @@ def test_an_error_of_one_row_is_not_taken_for_an_old_script(table):
     done = sheet.resync(conn, box, fake, LATER)
     assert done["summary"]["errors"] == 1 and any(d["key"] == rows["wiped"] and d["result"] == "ошибка: сбой строки" for d in done["rows"])
     assert filled(fake.rows[rows["staged"]]) == filled(whole["staged"])
+
+
+# ---- THE SAFE RULES (the owner 28.11, after the look at the live sheet) ---------------------------------------------------------------
+
+def panel_says(monkeypatch, values_of):
+    """rows_of with some values of the panel set by the test: {mark: {column: value}} (a mark not of the order is added to it)."""
+    real = sheet.rows_of
+
+    def fake_rows(conn_, card_id, placed_at, **kw):
+        out = real(conn_, card_id, placed_at, **kw)
+        for mark, values in values_of.items():
+            if mark.startswith("tires:%d:" % card_id):
+                base = out.get(mark) or dict(next(iter(out.values())))
+                out[mark] = dict(base, **values)
+        return out
+    monkeypatch.setattr(sheet, "rows_of", fake_rows)
+
+
+def kept_of(done, mark):
+    return next((d["values"] for d in done["rows"] if d["key"] == mark and d.get("section") == "keep"), "")
+
+
+def test_the_note_is_never_written_but_the_note_of_a_sale_from_oth_into_an_empty_cell(table, monkeypatch):
+    conn, box, fake, rows, orders_of, whole = table
+    staged, wiped = rows["staged"], rows["wiped"]
+    conn.execute("UPDATE order_card SET comment = 'Объявление: шины' WHERE id IN (?, ?)", (orders_of["staged"], orders_of["wiped"]))
+    conn.commit()
+    fake.rows[staged]["Примечание"] = "текст владельца"
+    panel_says(monkeypatch, {staged: {sheet.NOTE_FLAG: True, "Примечание": "с ОТХ, заказ №1"},
+                             wiped: {sheet.NOTE_FLAG: True, "Примечание": "с ОТХ, заказ №2"}})
+    look = sheet.resync(conn, box, fake, LATER, dry_run=True)
+    assert "Примечание" not in next(d["values"] for d in look["rows"] if d["key"] == staged and d["section"] == "fix")
+    sheet.resync(conn, box, fake, LATER)
+    assert fake.rows[staged]["Примечание"] == "текст владельца"            # the owner's: never
+    assert fake.rows[wiped]["Примечание"] == "с ОТХ, заказ №2"              # empty: the note of the sale, as the usual send
+    for k in ("gone_open",):                                               # «Объявление: …» (the comment) never goes in
+        assert "Объявление" not in str(fake.rows[rows[k]].get("Примечание", ""))
+    sent = [r for p in fake.data_posts() for r in p["rows"] if r.get("sync")]
+    assert all("Примечание" not in r["fields"] and "Примечание" not in (r.get("extra") or {}) for r in sent)
+    assert all("Объявление" not in str(r.get("note") or "") for r in sent)
+
+
+def test_a_filled_cell_is_never_made_empty(table):
+    conn, box, fake, rows, orders_of, whole = table
+    mark = rows["staged"]
+    fake.rows[mark].update({"Уведомление клиенту": "02.11", "Дата счета": "2026-11-11", "Реализация": "О"})
+    look = sheet.resync(conn, box, fake, LATER, dry_run=True)
+    said = kept_of(look, mark)
+    for part in ("Уведомление клиенту: 02.11 → пусто (в панели пусто, в таблице есть значение)", "Дата счета: 2026-11-11 → пусто",
+                 "Реализация: О → пусто"):
+        assert part in said
+    assert look["summary"]["kept"] >= 1
+    sheet.resync(conn, box, fake, LATER)
+    assert (fake.rows[mark]["Уведомление клиенту"], fake.rows[mark]["Дата счета"], fake.rows[mark]["Реализация"]) == ("02.11", "2026-11-11", "О")
+    assert fake.rows[mark]["Этап"] == whole["staged"]["Этап"]              # the rest of the row is set right
+    sheet.flush(conn, box, fake, LATER, full=True)                         # nor does the usual send empty them afterwards
+    assert fake.rows[mark]["Уведомление клиенту"] == "02.11"
+
+
+def test_a_ticked_write_off_is_never_taken_off(table):
+    conn, box, fake, rows, orders_of, whole = table
+    mark = rows["staged"]
+    fake.rows[mark]["Списание"] = True
+    look = sheet.resync(conn, box, fake, LATER, dry_run=True)
+    assert "Списание: True → False (в таблице списание отмечено, в панели нет)" in kept_of(look, mark)
+    sheet.resync(conn, box, fake, LATER)
+    assert fake.rows[mark]["Списание"] is True
+
+
+def test_a_text_in_the_realization_is_not_replaced_by_a_code(table, monkeypatch):
+    conn, box, fake, rows, orders_of, whole = table
+    text, code, empty = rows["staged"], rows["wiped"], rows["edited"]
+    panel_says(monkeypatch, {m: {"Реализация": "Р"} for m in (text, code, empty)})
+    fake.rows[text]["Реализация"] = "ВЕРНУЛИ. ПРОВЕРИТЬ У НИКИТЫ"
+    fake.rows[code] = {"Реализация": "О"}
+    look = sheet.resync(conn, box, fake, LATER, dry_run=True)
+    assert "в таблице текст, а не код Р/Б/Н/О" in kept_of(look, text)
+    sheet.resync(conn, box, fake, LATER)
+    assert fake.rows[text]["Реализация"] == "ВЕРНУЛИ. ПРОВЕРИТЬ У НИКИТЫ"
+    assert fake.rows[code]["Реализация"] == "Р" and fake.rows[empty]["Реализация"] == "Р"
+
+
+def test_a_second_row_without_pieces_any_more_is_not_emptied(table, monkeypatch):
+    conn, box, fake, rows, orders_of, whole = table
+    order = orders_of["staged"]
+    second = rows["staged"] + ":2"
+    w = written(conn, order)
+    w[second] = dict(w[rows["staged"]], **{"Кол-во": 2, "№ заказа MIM": "M-2"})
+    conn.execute("UPDATE sheet_order SET rows = ? WHERE order_id = ?", (json.dumps(w, ensure_ascii=False), order))
+    conn.commit()
+    fake.rows[second] = dict(fake.rows[rows["staged"]], **{"Кол-во": 2, "№ заказа MIM": "M-2"})
+    panel_says(monkeypatch, {second: {"Кол-во": 0, "№ заказа MIM": "", "Сумма MIM": 0.0, "Сумма продажи": 0.0}})
+    look = sheet.resync(conn, box, fake, LATER, dry_run=True)
+    assert "вторая строка заказа: по панели добавленных шин нет" in kept_of(look, second)
+    assert not any(d["key"] == second and d["section"] == "fix" for d in look["rows"])
+    sheet.resync(conn, box, fake, LATER)
+    assert (fake.rows[second]["Кол-во"], fake.rows[second]["№ заказа MIM"]) == (2, "M-2")
+
+
+def test_an_invoice_day_a_day_off_is_only_said(table, monkeypatch):
+    conn, box, fake, rows, orders_of, whole = table
+    mark = rows["staged"]
+    panel_says(monkeypatch, {mark: {"Дата счета": "2026-11-01"}})
+    fake.rows[mark]["Дата счета"] = "2026-11-02"
+    look = sheet.resync(conn, box, fake, LATER, dry_run=True)
+    assert "Дата счета: 2026-11-02 → 2026-11-01 (дата отличается на один день — проверьте)" in kept_of(look, mark)
+    sheet.resync(conn, box, fake, LATER)
+    assert fake.rows[mark]["Дата счета"] == "2026-11-02"
+
+
+def test_the_command_prints_the_two_lists(table, monkeypatch, capsys, tmp_path):
+    conn, box, fake, rows, orders_of, whole = table
+    fake.rows[rows["staged"]]["Списание"] = True
+    key = tmp_path / "secret.key"
+    key.write_text("заглушка", encoding="utf-8")
+    monkeypatch.setattr(cli, "load_box", lambda key_file: box)
+    monkeypatch.setattr(cli, "_http", lambda: fake)
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    assert cli.main(["sheet-resync", "--db", db_path, "--key-file", str(key), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert out.index("Будет исправлено:") < out.index("Не трогаем (решите вручную):") and "не трогаем (решите вручную): 1" in out

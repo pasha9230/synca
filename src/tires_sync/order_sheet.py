@@ -1052,7 +1052,7 @@ def what_goes(op: dict) -> str:
 
 def _line(c: dict, result: str, reply: Optional[dict] = None, values: str = "") -> dict:
     row = (reply or {}).get("row")
-    return {"order_id": c["order_id"], "key": c["key"], "result": result, "values": values,
+    return {"order_id": c["order_id"], "key": c["key"], "result": result, "values": values, "section": "fix",
             "sheet_row": row if isinstance(row, int) and not isinstance(row, bool) else None}
 
 
@@ -1191,6 +1191,12 @@ def _repair_write(conn, http: Transport, url: str, secret: str, now: str, author
 # of 28.11 compares each cell and writes the ones that differ (a row cleared by hand is filled again; a row whose «Артикул» or «Телефон»
 # is not what the panel wrote too, said apart: the owner 28.11, only the panel changes them). «Примечание»: the owner's text
 # stays, the panel's is put after it once (« · »), an empty one gets the panel's; the fill grey before «Заказ оформлен», our grey taken off after.
+# THE SAFE RULES (the owner 28.11, after a look at the live sheet): what the look finds is written only where it cannot spoil a cell
+# (_plan): never «Примечание» (only the note of a sale from OTH into an empty cell, as the usual send); never a filled cell made empty;
+# never «Списание» taken off; «Реализация» only over a code (Р, Б, Н, О) or an empty cell; never a second row («:2») the panel has no
+# pieces for any more; never «Дата счета» a day off (said, to be looked at). The rest is listed «не трогаем (решите вручную)» with the
+# reason; the panel takes its own values as written for those cells, so the usual send does not write them either. The script stays
+# that of 28.11: the panel only sends the cells it may write (the look answers what each cell holds).
 # A row whose mark is nowhere: made again at the end of the sheet for an open order; for a closed one only with `closed_too`. After it
 # `written` is what the sheet has: the row is followed again (no `_missing`, no baseline of the phone). A script before 28.11 writes
 # nothing (REPAIR_CHECK) and the panel says a new deployment is needed.
@@ -1198,6 +1204,7 @@ def _repair_write(conn, http: Transport, url: str, secret: str, now: str, author
 PROFIT = ("Прибыль ₽", "Прибыль %")
 RESYNCED = "Google-таблица сверена с панелью: исправлено %d стр. (%s)."
 EDITED_RESYNC = "артикул/телефон в строке не совпадал с панелью"
+KEEP_SAID = "не трогаем (решите вручную)"
 NOTE_PANEL = "_note_panel"                                     # what the panel put into «Примечание» after the owner's text (resync)
 WRITE_CHUNK = 15                                               # rows written per call: the call has 30 s and the script's lock 30 s
 UNSURE = "не подтверждено (%s) — повторите сверку: ничего не потеряно"
@@ -1213,17 +1220,73 @@ def _sync_values(c: dict) -> dict:
     return values
 
 
-def _sync_op(c: dict, probe: bool) -> dict:
+def _sync_op(c: dict, probe: bool, go: Optional[dict] = None) -> dict:
+    """The look (`probe`: every column, the note of a sale from OTH only) or the writing of the cells `go` of _plan only (the script of
+    28.11 writes what it is sent and differs, nothing else; «note» only when «Примечание» is in `go`, the fill only when «заливка» is)."""
     values = _sync_values(c)
+    if not probe:
+        values = {k: v for k, v in values.items() if k in (go or {})}
     out = {"key": c["key"], "create": False, "fields": {k: v for k, v in values.items() if k in SENT}, "check": dict(REPAIR_CHECK),
-           "sync": True, "repair": list(BLANK), "verify": c["verify"], "shade": c["op"]["shade"], "note": c["panel_note"],
-           "note_prev": str(c["written"].get(NOTE_PANEL) or "")}
+           "sync": True, "repair": list(BLANK), "verify": c["verify"], "note_prev": "",
+           "note": (c["note"] or "") if probe or "Примечание" in (go or {}) else ""}
+    if probe or "заливка" in (go or {}):
+        out["shade"] = c["op"]["shade"]
     extra = {k: v for k, v in values.items() if k not in SENT}
     if extra:
         out["extra"] = extra
     if probe:
         out["probe"] = True
     return out
+
+
+CODES = (REALIZED, FROM_STOCK, NOT_BOUGHT, CANCELLED)
+
+
+def _days_apart(a: str, b: str) -> Optional[int]:
+    try:
+        return abs((datetime.fromisoformat(a[:10]) - datetime.fromisoformat(b[:10])).days)
+    except ValueError:
+        return None
+
+
+def _plan(c: dict, changed: dict) -> Tuple[dict, List[Tuple[str, list, str]]]:
+    """The cells the look found different, split by THE SAFE RULES: (to write, [(column, [was, now], why not)])."""
+    values = _sync_values(c)
+    gone_extra = c["key"].endswith(":2") and str(values.get("Кол-во", "")).strip() in ("", "0", "0.0")
+    go: dict = {}
+    keep: List[Tuple[str, list, str]] = []
+    for k, v in changed.items():
+        if not isinstance(v, (list, tuple)) or len(v) != 2:
+            continue
+        was, now = str(v[0] if v[0] is not None else "").strip(), str(v[1] if v[1] is not None else "").strip()
+        if k == "Примечание":                                              # only the note of a sale from OTH, into an empty cell
+            if not was and c["note"]:
+                go[k] = v
+            continue
+        if gone_extra:
+            if k != "заливка":
+                keep.append((k, list(v), "вторая строка заказа: по панели добавленных шин нет"))
+            continue
+        if k == "заливка":
+            go[k] = v
+        elif not now and was:
+            keep.append((k, list(v), "в панели пусто, в таблице есть значение"))
+        elif k == "Списание" and was.lower() == "true" and now.lower() != "true":
+            keep.append((k, list(v), "в таблице списание отмечено, в панели нет"))
+        elif k == "Реализация" and was and was not in CODES:
+            keep.append((k, list(v), "в таблице текст, а не код Р/Б/Н/О"))
+        elif k == "Дата счета" and was and now and _days_apart(was, now) == 1:
+            keep.append((k, list(v), "дата отличается на один день — проверьте"))
+        else:
+            go[k] = v
+    return go, keep
+
+
+def _keep_line(c: dict, reply: dict, keep: List[Tuple[str, list, str]]) -> dict:
+    cut = lambda v: (str(v)[:40] + "…") if len(str(v)) > 40 else str(v)
+    line = _line(c, KEEP_SAID, reply, "; ".join("%s: %s → %s (%s)" % (k, cut(v[0]) or "пусто", cut(v[1]) or "пусто", why) for k, v, why in keep))
+    line["section"] = "keep"
+    return line
 
 
 def _changes_line(changed: dict) -> str:
@@ -1246,12 +1309,13 @@ def resync(conn, box, http: Transport, now: str, author: str = "cli", dry_run: b
         raise SheetError("Секрет Google-таблицы не задан (или ключ не передан): ничего не отправлено.")
     found = repair_candidates(conn)
     summary = {"orders": len({c["order_id"] for c in found}), "rows": len(found), "same": 0, "differs": 0, "blank": 0, "edited": 0,
-               "gone_open": 0, "gone_closed": 0, "errors": 0, "fixed": 0, "created": 0, "lacking": []}
+               "gone_open": 0, "gone_closed": 0, "errors": 0, "fixed": 0, "created": 0, "lacking": [], "fixable": 0, "kept": 0}
     if not found:
         return {"rows": [], "summary": summary}
     probed = _ask(http, s["url"], secret, [_sync_op(c, True) for c in found], echo="sync")
     out: List[dict] = []
     fix, make, settle = [], [], []
+    kept: List[dict] = []
     lacking: List[str] = []
     for c in found:
         reply = probed.get(c["key"]) or {}
@@ -1264,9 +1328,18 @@ def resync(conn, box, http: Transport, now: str, author: str = "cli", dry_run: b
             summary["differs"] += 1
             summary["blank"] += bool(reply.get("blank"))
             summary["edited"] += bool(reply.get("edited"))
-            how = " (стёрта вручную)" if reply.get("blank") else (" (%s)" % EDITED_RESYNC if reply.get("edited") else "")
-            out.append(_line(c, ("будет исправлена" if dry_run else "расходится") + how, reply, _changes_line(reply.get("changed") or {})))
-            fix.append(c)
+            go, keep = _plan(c, reply.get("changed") or {})
+            c["go"] = go
+            if keep:
+                summary["kept"] += 1
+                kept.append(_keep_line(c, reply, keep))
+            if go:
+                summary["fixable"] += 1
+                how = " (стёрта вручную)" if reply.get("blank") else (" (%s)" % EDITED_RESYNC if reply.get("edited") else "")
+                out.append(_line(c, ("будет исправлена" if dry_run else "расходится") + how, reply, _changes_line(go)))
+                fix.append(c)
+            else:
+                settle.append(c)                                           # nothing it may write: its cells stay, the panel's taken as written
         elif status == GONE:
             summary["gone_open" if c["open"] else "gone_closed"] += 1
             if c["open"] or closed_too:
@@ -1279,9 +1352,10 @@ def resync(conn, box, http: Transport, now: str, author: str = "cli", dry_run: b
             out.append(_line(c, "ошибка: %s" % str(reply.get("error") or status)[:200], reply))
     summary["lacking"] = lacking
     if dry_run:
-        return {"rows": out, "summary": summary}
+        return {"rows": out + kept, "summary": summary}
     rows, busy = _resync_write(conn, http, s["url"], secret, now, fix, make, settle, summary)
     rows += [_line(c, "занят другой отправкой") for c in busy] + [r for r in out if r["result"].startswith(("метки на листе нет, заказ закрыт", "ошибка"))]
+    rows += kept
     if summary["fixed"] or summary["created"]:
         store.write_audit(conn, now, author, "sheet_resync", {"orders": summary["orders"], "rows": summary["rows"], "fixed": summary["fixed"],
                                                               "created": summary["created"]})
@@ -1296,8 +1370,6 @@ def _taken(c: dict, values: dict, lacking: List[str]) -> dict:
     if c["note"] is not None:
         row["Примечание"] = c["note"]
     row["_grey"] = bool(c["op"]["shade"])
-    if c["panel_note"] and "Примечание" not in lacking:                   # the panel's part of «Примечание» (put after the owner's text)
-        row[NOTE_PANEL] = c["panel_note"]
     if lacking:
         row[PARTIAL] = "нет колонок: %s" % ", ".join(lacking)
     return row
@@ -1335,7 +1407,7 @@ def _resync_write(conn, http: Transport, url: str, secret: str, now: str, fix: L
         try:
             fixing = [c for o in mine for c in writing[o] if c in fix]
             making = [c for o in mine for c in writing[o] if c in make]
-            answers = _ask(http, url, secret, [_sync_op(c, False) for c in fixing], echo="", size=WRITE_CHUNK) if fixing else {}
+            answers = _ask(http, url, secret, [_sync_op(c, False, c["go"]) for c in fixing], echo="", size=WRITE_CHUNK) if fixing else {}
             if making:
                 answers.update(_ask(http, url, secret, [_create_op(c) for c in making], echo="", size=WRITE_CHUNK))
             for card_id in mine:
@@ -1367,7 +1439,7 @@ def _resync_take(conn, now: str, card_id: int, rows: List[dict], fix: List[dict]
             fixed += 1
             columns += [k for k in (reply.get("changed") or {}) if k not in columns]
             done.append(_line(c, "исправлена" + (" (%s)" % EDITED_RESYNC if reply.get("edited") else ""), reply,
-                              _changes_line(reply.get("changed") or {})))
+                              _changes_line(reply.get("changed") or c.get("go") or {})))
         elif new and (status in ("created", "updated") or partial):
             op = _create_op(c)
             written[c["key"]] = _taken(c, dict(op["fields"], **op.get("extra", {})), _lacking(why) if partial else [])
@@ -1391,8 +1463,9 @@ def _resync_take(conn, now: str, card_id: int, rows: List[dict], fix: List[dict]
 def summary_line(summary: dict, dry_run: bool) -> str:
     """The totals in words, for the command and the page."""
     said = ("Заказов проверено: %d, строк: %d; как в панели: %d; расходятся: %d (из них стёрты: %d, артикул/телефон не совпадал: %d); "
-            "без метки: %d у открытых, %d у закрытых; ошибок: %d." % (
+            "%s: %d; не трогаем (решите вручную): %d; без метки: %d у открытых, %d у закрытых; ошибок: %d." % (
                 summary["orders"], summary["rows"], summary["same"], summary["differs"], summary["blank"], summary["edited"],
+                "будет исправлено строк" if dry_run else "можно было исправить строк", summary.get("fixable", 0), summary.get("kept", 0),
                 summary["gone_open"], summary["gone_closed"], summary["errors"]))
     if not dry_run:
         said += " Исправлено строк: %d, создано заново: %d." % (summary["fixed"], summary["created"])

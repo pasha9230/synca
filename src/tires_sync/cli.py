@@ -1464,9 +1464,13 @@ def _cmd_sheet_resync(args) -> int:
     except order_sheet.SheetError as err:
         print("ошибка: %s" % err, file=sys.stderr)
         return 1
-    for d in done["rows"]:
-        where = " · строка листа %d" % d["sheet_row"] if d.get("sheet_row") else ""
-        print("№%d · %s%s · %s%s" % (d["order_id"], d["key"], where, d["result"], (": " + d["values"]) if d["values"] else ""))
+    for section, title in (("fix", "Будет исправлено:" if args.dry_run else "Исправлено и прочее:"), ("keep", "Не трогаем (решите вручную):")):
+        lines = [d for d in done["rows"] if d.get("section", "fix") == section]
+        if lines:
+            print(title)
+        for d in lines:
+            where = " · строка листа %d" % d["sheet_row"] if d.get("sheet_row") else ""
+            print("№%d · %s%s · %s%s" % (d["order_id"], d["key"], where, d["result"], (": " + d["values"]) if d["values"] else ""))
     print(order_sheet.summary_line(done["summary"], args.dry_run) + (" (проверка: в таблицу и в базу ничего не записано)" if args.dry_run else ""))
     return 0
 
