@@ -762,6 +762,8 @@ def _migrate(conn) -> None:
                         ("special_amount", "REAL NOT NULL DEFAULT 0"), ("receipt_needed", "INTEGER NOT NULL DEFAULT 0")):
         _add_column(conn, "order_card", column, ddl)
     _add_column(conn, "order_card", "supplier_number", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "order_card", "prepay", "INTEGER NOT NULL DEFAULT 0")          # «Предоплата» of «Дополнительно» (the owner 2026-11-28): 1 = ticked
+    _add_column(conn, "order_card", "prepay_amount", "REAL NOT NULL DEFAULT 0")      # its sum, ₽: required while ticked (orders.needs_prepay_sum)
     _add_column(conn, "order_card", "wait_wish", "TEXT NOT NULL DEFAULT ''")         # «Лист ожидания» of the new order (2026-11-26): what the client waits for, in words
     _add_column(conn, "order_card", "wait_analogs", "INTEGER NOT NULL DEFAULT 0")    # 1: «можно другие бренды» (was «подойдут аналоги»)
     _add_column(conn, "order_card", "wait_other_sizes", "INTEGER NOT NULL DEFAULT 0")   # 1: «можно другие размеры» (a neighbour size)   # the number of the order of 4 Точки, «Оформил вручную» (order_supplier)

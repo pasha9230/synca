@@ -58,6 +58,8 @@ def _client_terms(conn, card: dict) -> Optional[str]:
         return "Заказ в другой город (данные доставки клиента)."
     if str(card.get("special_terms") or "").strip() or float(card.get("special_amount") or 0):
         return "В заказе особые условия клиента."
+    if card.get("prepay") or float(card.get("prepay_amount") or 0):       # «Предоплата» was a word of «Особые условия» before 2026-11-28
+        return "В заказе предоплата клиента."
     if card.get("receipt_needed"):
         return "Клиенту нужен товарный чек."
     return None

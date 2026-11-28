@@ -11,14 +11,14 @@
 {% block body_class %}o2 o2-orders{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2.css') }}">{% endblock %}
 {% block content %}
-{% set keep = {'q': query, 'p': point or '', 't': tag, 'from': date_from, 'to': date_to} %}
+{% set keep = dict({'q': query, 'p': point or '', 't': tag, 'from': date_from, 'to': date_to}, **flags) %}{# flags: «Отправка ТК», «Предоплата» (tk, pp) #}
 {% set keep_q %}{% for k, v in keep.items() if v %}&amp;{{ k }}={{ v|urlencode }}{% endfor %}{% endset %}
 <header class="page-head"><div><h1>Заказы</h1><p class="sub">Заказы клиентов по этапам воронки: от переговоров до выдачи на точке.</p></div>
 <div class="actions"><div class="seg" role="group" aria-label="Вид"><a href="/orders?v=board{{ keep_q }}"{% if view == "board" %} class="is-active" aria-current="true"{% endif %}>{{ icon("layers", "i-sm") }}Доска</a><a href="/orders?v=list{{ keep_q }}"{% if view == "list" %} class="is-active" aria-current="true"{% endif %}>{{ icon("report", "i-sm") }}Список</a></div>
 <details class="menu orders-more"><summary class="btn btn--secondary">Ещё ⋯</summary><div class="menu-list">
 {% if has_right("money") %}<a class="menu-item" href="/orders/report">Отчёт</a>{% endif %}
 <a class="menu-item" href="/orders/webmim">Сверка с WebMIM</a>
-<a class="menu-item" href="/orders/export.xlsx?{{ {'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}|urlencode }}" title="Файл Excel с заказами по текущим фильтрам (поиск, точка, тег, дата создания)">Выгрузить в Excel</a>
+<a class="menu-item" href="/orders/export.xlsx?{{ dict({'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}, **flags)|urlencode }}" title="Файл Excel с заказами по текущим фильтрам (поиск, точка, тег, дата создания)">Выгрузить в Excel</a>
 <a class="menu-item" href="/orders/inbox">Входящие{% if inbox_new %} ({{ inbox_new }}){% endif %}</a>{# no button on the head (the owner 08.11); the page stays reachable #}
 {% if can_post("orders_bulk_run") %}<a class="menu-item" href="/orders/bulk">Закрыть разом</a>{% endif %}
 {% if can("setup") %}<a class="menu-item" href="/orders/templates">Шаблоны</a>
@@ -26,7 +26,7 @@
 <hr><a class="menu-item" href="/deleted">Удалённые</a>{% include "_orders_empty_delete.html" %}
 </div></details>
 {% if can_post("order_blank") %}<form method="post" action="/orders/blank" data-once style="display:inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--primary" data-new-order title="Откроется карточка нового заказа: те же поля, что у любого заказа">{{ icon("plus") }}Новый заказ</button></form>{% endif %}{# the owner 26.11: the same card as any order, not a window of its own #}</div></header>
-{% set more_on = [point, tag, only_stage, returning, date_from or date_to]|select|list|length %}
+{% set more_on = [point, tag, only_stage, returning, date_from or date_to]|select|list|length + flags|length %}
 <form method="get" action="/orders" class="card o2-filters o2-filters--fold{% if more_on %} is-open{% endif %}" data-o2-filters>{# the owner 08.11: the search and «Сбросить» in sight, the rest under «Фильтры» #}
 <input type="hidden" name="v" value="{{ view }}">
 <label class="field o2-f-wide"><span class="label">Поиск</span><span class="input-icon">{{ icon("search") }}<input class="input" name="q" value="{{ query }}" placeholder="Клиент, телефон, № заказа, позиция, размер"></span></label>
@@ -37,14 +37,15 @@
 <label class="field"><span class="label">{{ stage_name("return_given") }}</span><select class="select" name="r" data-return-filter><option value="">Все</option>{% for key, name in returning_filters.items() %}<option value="{{ key }}"{% if returning == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>{% endif %}
 <div class="field"><span class="label">Дата создания</span><span class="o2-dates"><input class="input" type="date" name="from" value="{{ date_from }}" aria-label="Дата создания: с"><span class="muted">—</span><input class="input" type="date" name="to" value="{{ date_to }}" aria-label="Дата создания: по"></span></div>
 <label class="field"><span class="label">Тег</span><input class="input" name="t" value="{{ tag }}" placeholder="Авито, предоплата…"></label>
+{% for key, name in flag_filters.items() %}<label class="field"><span class="label">{{ name }}</span><select class="select" name="{{ key }}" data-flag-filter="{{ key }}"><option value="">Все</option><option value="1"{% if flags.get(key) %} selected{% endif %}>Только с {{ "отправкой ТК" if key == "tk" else "предоплатой" }}</option></select></label>{% endfor %}
 <button class="btn btn--secondary">Показать</button>
-<a class="btn btn--secondary o2-icon-btn" href="/orders/export.xlsx?{{ {'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}|urlencode }}" title="Скачать в Excel по текущим фильтрам" aria-label="Скачать в Excel">{{ icon("download") }}</a></div>
+<a class="btn btn--secondary o2-icon-btn" href="/orders/export.xlsx?{{ dict({'p': point or '', 't': tag, 'q': query, 'from': date_from, 'to': date_to}, **flags)|urlencode }}" title="Скачать в Excel по текущим фильтрам" aria-label="Скачать в Excel">{{ icon("download") }}</a></div>
 </form>
-{% set on = [query, point, tag, only_stage, returning, date_from or date_to]|select|list|length %}
+{% set on = [query, point, tag, only_stage, returning, date_from or date_to]|select|list|length + flags|length %}
 {% if on %}<div class="o2-filter-on" data-o2-filter-on>Фильтр включён: {{ on }} · <a href="/orders?v={{ view }}">Сбросить фильтры</a></div>{% endif %}
 {% if only_stage %}<p class="small" data-only-stage="{{ only_stage }}">Только этап «{{ data.columns[0].stage.name }}» · <a href="/orders?v={{ view }}{{ keep_q }}">все этапы</a></p>{% endif %}
 <div class="flash flash--err" id="board-msg" hidden>{{ icon("alert") }}<div class="flash-text"></div></div>
-{% if total_cards == 0 and not query and not tag and not point and not (date_from or date_to) %}
+{% if total_cards == 0 and not query and not tag and not point and not (date_from or date_to) and not flags %}
 <div class="flash flash--info" style="margin-bottom:var(--s-4)">{{ icon("info") }}<div class="flash-text"><b>Заказов пока нет.</b> Создайте первый, когда клиент написал вам на Авито: кнопка «Новый заказ».</div></div>
 {% endif %}
 {% set dot_label = {"red": "Нужно действие", "yellow": "Внимание", "green": "Движется"} %}
