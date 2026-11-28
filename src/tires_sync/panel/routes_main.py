@@ -85,13 +85,13 @@ def register(app) -> None:
     @app.route("/settings/notify/mine", methods=["POST"])
     @login_required
     def settings_notify_mine():
-        """«Мои уведомления» (office_notify, the owner 2026-11-27): one's own sound and notifications of the tasks «Позвонить…»."""
+        """«Мои уведомления» (office_notify, the owner 2026-11-27/28): one's own sound and notifications of the important tasks."""
         from .. import office_notify
         if current_user()["role"] == "point":
             abort(403)
-        calls = request.form.get("calls") == "1"
-        office_notify.put(get_conn(), current_user()["login"], calls, request.form.get("repeat") == "1")
-        flash("Звук и уведомления о новых задачах «Позвонить…» включены." if calls else "Звук и уведомления о задачах «Позвонить…» выключены.")
+        sound = request.form.get("sound") == "1"
+        office_notify.put(get_conn(), current_user()["login"], sound)
+        flash("Звук важных задач включён: не чаще 2 раз в день, в рабочее время." if sound else "Звук и уведомления важных задач выключены.")
         return redirect("/settings/notify#mine-notify")
 
     def _opens(href: str) -> bool:

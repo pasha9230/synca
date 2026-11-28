@@ -621,7 +621,18 @@
   (function () {
     var board = document.getElementById("board");
     if (!board) return;
-    var dragged = null;
+    var dragged = null, LEFT = "tires.board-left", keepLeft = false, was = null;
+    // the board scrolls sideways: after a card is moved (the page loads again) it stays on the same columns (2026-11-28), not back to the first
+    try { was = JSON.parse(sessionStorage.getItem(LEFT) || "null"); sessionStorage.removeItem(LEFT); } catch (e) { was = null; }
+    var navBoard = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
+    if (was && was.path === window.location.pathname && was.left > 0 && (was.keep || (navBoard && navBoard.type === "reload"))) {
+      var putLeft = function () { board.scrollLeft = was.left; };
+      putLeft();
+      window.addEventListener("load", putLeft);
+    }
+    window.addEventListener("pagehide", function () {
+      try { sessionStorage.setItem(LEFT, JSON.stringify({path: window.location.pathname, left: board.scrollLeft, keep: keepLeft})); } catch (e) { /* private mode: from the first column */ }
+    });
     var say = function (text) {
       var box = document.getElementById("board-msg");
       if (!box) return;
@@ -659,6 +670,7 @@
       e.preventDefault();
       var card = dragged;
       if (card.closest(".col") === col) return;
+      keepLeft = true;                                                     // a move: the board comes back on the same columns
       var data = new FormData();
       data.append("csrf", board.dataset.csrf); data.append("stage_id", col.dataset.stage);
       fetch("/orders/" + card.dataset.card + "/move", {method: "POST", body: data, credentials: "same-origin", headers: {"X-Requested-With": "fetch"}})
@@ -1213,6 +1225,48 @@
       }
     });
   });
+  // 13f) Бесшовность (2026-11-28): раскрытый или свёрнутый блок <details data-remember="ключ"> остаётся таким же после обновления страницы
+  //      и кнопок (один ключ — одно состояние на всех страницах вкладки: «Дополнительно» во всех карточках заказов, «Все этапы» точки).
+  //      Ответ клиенту, набранный и ещё не отправленный, возвращается в поле чата после обновления; после «Отправить» черновик удаляется
+  //      (не ушло — текст вернёт сама панель, её черновик главнее). Только sessionStorage этой вкладки: без него — всё как раньше.
+  (function () {
+    var OPEN = "tires.details-open", DRAFT = "tires.chat-draft:";
+    function opened() { try { return JSON.parse(sessionStorage.getItem(OPEN) || "{}") || {}; } catch (e) { return {}; } }
+    var kept = opened();
+    document.querySelectorAll("details[data-remember]").forEach(function (d) {
+      var key = d.getAttribute("data-remember");
+      if (!key || typeof kept[key] !== "boolean") return;
+      if (!kept[key] && d.querySelector && d.querySelector("[aria-invalid=true]")) return;     // a field's error inside (5a): it stays in sight
+      d.open = kept[key];
+    });
+    document.addEventListener("toggle", function (e) {                 // toggle does not bubble: caught on its way down
+      var d = e.target, key = d && d.tagName === "DETAILS" && d.getAttribute("data-remember");
+      if (!key) return;
+      var all = opened();
+      all[key] = !!d.open;
+      try { sessionStorage.setItem(OPEN, JSON.stringify(all)); } catch (err) { /* private mode: the block as the page shows it */ }
+    }, true);
+    function draftKey(area) {                                          // the reply of one chat: the same in «Чаты» and in the order card
+      var form = area && area.tagName === "TEXTAREA" && area.name === "text" && area.form;
+      return form && form.matches && form.matches("form[data-photo-form]") ? DRAFT + form.getAttribute("action") : null;
+    }
+    document.querySelectorAll('form[data-photo-form] textarea[name="text"]').forEach(function (area) {
+      var text = null;
+      try { text = sessionStorage.getItem(draftKey(area)); } catch (e) { text = null; }
+      if (text && !area.value) area.value = text;
+    });
+    document.addEventListener("input", function (e) {
+      var key = draftKey(e.target);
+      if (!key) return;
+      try { if (e.target.value) sessionStorage.setItem(key, e.target.value); else sessionStorage.removeItem(key); } catch (err) { /* private mode */ }
+    });
+    document.addEventListener("submit", function (e) {
+      var form = e.target;
+      if (!form.matches || !form.matches("form[data-photo-form]")) return;
+      try { sessionStorage.removeItem(DRAFT + form.getAttribute("action")); } catch (err) { /* private mode */ }
+    }, true);
+  })();
+
   // 13c) Карточка заказа (ТЗ №87) держит место прокрутки: F5, «Сохранить», смена этапа (страница грузится снова с того же адреса) — то же место;
   //     вход из другого места — сверху; явный якорь (#webmim-parts, #items…) — туда, куда он ведёт, кроме F5
   (function () {
@@ -1259,11 +1313,13 @@
   //      а не прыгает наверх. Только тот же адрес без учёта параметров (фильтры меняют их) и только после действия на самой странице
   //      (отправка формы, выбор в фильтре, ссылка на эту же страницу) или F5; вход из другого места — сверху. Другая страница выдачи
   //      (?page=), якорь в адресе и ошибка у поля — как прежде. Карточка заказа держит место сама (13c), «Чаты» — своё место списка.
+  //      «Рабочее место» точки — тоже (2026-11-28: после «Принял/Выдал» не прыгает наверх).
   (function () {
     var KEY = "list-place", path = window.location.pathname, armed = false, mark = null;
     try { mark = JSON.parse(sessionStorage.getItem(KEY) || "null"); sessionStorage.removeItem(KEY); } catch (e) { mark = null; }
     if (document.querySelector("[data-keep-place], [data-no-keep-place], .chats-list")) return;
-    if (path === "/my-point") return;                       // «Рабочее место»: its own place across its refresh (notify.js, tires.mypoint.scroll)
+    // «Рабочее место» (2026-11-28): after «Принял», «Выдал» and its other presses it stays where it was, as every list; its quiet refresh
+    // (notify.js, location.replace: not a press, not F5) puts its own place back (tires.mypoint.scroll), this block leaves it alone
     function pageBox() {                                    // the same box as 13c: .main of the panel on a computer, the page on a phone
       var main = document.querySelector(".main");
       if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
