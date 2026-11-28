@@ -224,6 +224,7 @@ def register(app) -> None:
     @app.route("/settings/brands")
     @login_required
     def settings_brands_page():
+        from .. import wheel_templates
         conn = get_conn()
         wheel_brands = _wheel_brands(conn)
         wheel_settings = staging.effective_raw(conn)
@@ -233,6 +234,8 @@ def register(app) -> None:
                            "selected": wheel_settings.get("wheel_accounts", {}).get(str(a["id"]), [])}
                           for a in connections.list_feed_accounts(conn) if a["id"] == connections.PRIMARY_ACCOUNT]
         return render_template("settings_brands.html", wheel_brands=wheel_brands, wheel_rules=wheel_rules, wheel_accounts=wheel_accounts, wheel_rev=staging.rev(staging.summary(conn)["changes"]),
+                               wheel_templates=wheel_settings.get("wheel_templates") or {}, wheel_template_help=wheel_templates.PLACEHOLDERS,
+                               wheel_default_title=wheel_templates.DEFAULT_TITLE, wheel_default_description=wheel_templates.DEFAULT_DESCRIPTION,
                                raw=get_active(conn)[1], pricing_tables=[
             {"supplier": sp, "rows": service.pricing_table(conn, sp["id"], app.config["UNLOAD_PATH"], load_reference(app.config["REFERENCE_PATH"])),
              "stale": service.supplier_stale_text(conn, sp["id"], app.config["UNLOAD_PATH"]),
@@ -289,6 +292,13 @@ def register(app) -> None:
     def settings_pricing():
         conn = get_conn()
         form = request.form
+        if form.get("scope") == "wheel_templates":
+            try:
+                staging.set_wheel_templates(conn, form.get("title", "").strip(), form.get("description", "").replace("\r\n", "\n").strip(), now_iso(), expect=form.get("rev"))
+            except (ValueError, StaleDraftError, staging.DraftChangedError) as err:
+                flash(str(err), "error")
+                return redirect("/settings/brands#templates-wheels")
+            return review_or_back(conn, "/settings/brands#templates-wheels")
         if form.get("scope") == "wheel_account":
             try:
                 account_id = int(form.get("account", ""))

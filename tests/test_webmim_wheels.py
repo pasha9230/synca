@@ -938,3 +938,50 @@ def test_verified_snapshot_removes_missing_wheel_without_blocking_tires(tmp_path
     assert result[0]['ok'], result[0]['message']
     live = root / connections.get_account(conn, aid)['feed_token'] / 'avito_feed.xml'
     assert not any((ad.findtext('Id') or '').startswith('wheel_') for ad in ET.parse(live).getroot())
+
+
+def test_wheel_manual_publication_respects_price_stock_and_brand():
+    from dataclasses import replace
+    from tires_sync.wheel_feed import build_ads
+    item = parse_unload(('<CATALOG>' + wheel() + '</CATALOG>').encode(), '10').offers['42']
+    params = dict(account_id=1, address_id='25', phone='123', category='Запчасти и аксессуары',
+                  product_type='Диски', rim_types={'': 'Литые'}, photo_for=lambda w: 'https://photos.example.test/a.jpg',
+                  photo_prefix='https://photos.example.test/')
+    rules = {'BRAND': {'pct_small': 10, 'pct_large': 15, 'enabled': False}}
+    ads, _ = build_ads([item], rules, set(), publication_overrides={'1:w-42': 'on'}, **params)
+    assert len(ads) == 1
+    assert build_ads([item], rules, {'BRAND'}, publication_overrides={'1:w-42': 'off'}, **params)[0] == []
+    assert build_ads([replace(item, stock=0)], rules, set(), publication_overrides={'1:w-42': 'on'}, **params)[0] == []
+    assert build_ads([item], {}, set(), publication_overrides={'1:w-42': 'on'}, **params)[0] == []
+
+
+def test_wheel_template_change_invalidates_feed_digest():
+    from tires_sync.wheel_runtime import _config_digest
+    base = {'wheel_pricing': {}, 'wheel_accounts': {}}
+    assert _config_digest(base, 1, []) != _config_digest(dict(base, wheel_templates={'title': '{brand}'}), 1, [])
+    assert _config_digest(base, 1, []) != _config_digest(dict(base, overrides={'1:w-42': 'off'}), 1, [])
+
+
+def test_last_manually_enabled_wheel_can_be_removed(tmp_path):
+    import xml.etree.ElementTree as ET
+    from helpers import catalog_xml, commodity_xml
+    from test_cycle import REF, TODAY
+    from tires_sync import publishing, cycle, connections
+    from tires_sync.catalog import parse_reference
+    from tires_sync.settings_store import create_draft, confirm_draft
+    conn, aid, root, path = _candidate_for_race_tests(tmp_path)
+    draft = create_draft(conn, {'wheel_pricing': {'BRAND': {'pct_small': 10, 'pct_large': 15, 'enabled': False}},
+                                'overrides': {'1:w-42': 'on'}}, '2026-11-27T10:00:00')
+    confirm_draft(conn, draft, '2026-11-27T10:01:00', 'owner')
+    result = cycle.run_for_accounts(conn, catalog_xml(commodity_xml()), parse_reference(REF), TODAY, root, wheel_path=path)
+    assert result[0].ok, result[0].error
+    assert publishing.publish_live_accounts(conn, root)[0]['ok']
+    live = root / connections.get_account(conn, aid)['feed_token'] / 'avito_feed.xml'
+    assert any((ad.findtext('Id') or '').startswith('wheel_') for ad in ET.parse(live).getroot())
+    draft = create_draft(conn, {'overrides': {'1:w-42': 'off'}}, '2026-11-27T10:02:00')
+    confirm_draft(conn, draft, '2026-11-27T10:03:00', 'owner')
+    result = cycle.run_for_accounts(conn, catalog_xml(commodity_xml()), parse_reference(REF), TODAY, root, wheel_path=path)
+    assert result[0].ok, result[0].error
+    result = publishing.publish_live_accounts(conn, root)
+    assert result[0]['ok'], result[0]['message']
+    assert not any((ad.findtext('Id') or '').startswith('wheel_') for ad in ET.parse(live).getroot())

@@ -62,6 +62,8 @@ def settings_from_dict(raw: dict, enforce_pct_limit: bool = True) -> Settings:
     from .wheel_pricing import validate_rules, validate_accounts
     validate_accounts(raw.get("wheel_accounts", {}))
     validate_rules(raw.get("wheel_pricing", {}), settings.pct_limit if enforce_pct_limit else None)
+    from .wheel_templates import validate_settings
+    validate_settings(raw.get("wheel_templates", {}))
     _validate(settings, enforce_pct_limit)
     return settings
 

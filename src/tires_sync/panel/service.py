@@ -1030,7 +1030,7 @@ def orphan_overrides(settings, parsed) -> list:
     result = []
     for key, mode in sorted(settings.overrides.items()):
         goods_id = key.split(":", 1)[1] if ":" in key else key
-        if goods_id not in parsed.offers:
+        if not goods_id.startswith("w-") and goods_id not in parsed.offers:
             result.append({"goods_id": goods_id, "mode": mode})
     return result
 
@@ -1279,6 +1279,8 @@ def _override_lines(raw: dict, changes: dict, offers, min_stock) -> list:
         goods_id = key.split(":", 1)[1] if ":" in key else key
         offer = (offers or {}).get(goods_id)
         label = "%s (%s)" % (offer.name_orig or offer.name, offer.code) if offer else goods_id
+        if goods_id.startswith('w-'):
+            label = 'диск ' + goods_id[2:]
         mode = new.get(key)
         if mode == "off":
             lines.append("Снять: %s" % label)
@@ -1337,8 +1339,12 @@ def describe_changes(raw: dict, changes: dict, offers=None, min_stock=None) -> l
         for account in sorted(set(old_accounts) | set(new_accounts)):
             if old_accounts.get(account) != new_accounts.get(account):
                 lines.append("Диски, аккаунт %s: адреса %s → %s" % (account, ", ".join(old_accounts.get(account, [])) or "нет", ", ".join(new_accounts.get(account, [])) or "нет"))
+    if 'wheel_templates' in changes:
+        for field, label in (('title', 'названия'), ('description', 'описания')):
+            if (raw.get('wheel_templates') or {}).get(field) != (changes['wheel_templates'] or {}).get(field):
+                lines.append('Диски: изменён шаблон ' + label)
     for key in sorted(changes):
-        if key in ("wheel_pricing", "wheel_accounts"):
+        if key in ("wheel_pricing", "wheel_accounts", "wheel_templates"):
             continue
         if key == "excluded_brands":
             old_set, new_set = set(raw.get(key) or []), set(changes[key] or [])
