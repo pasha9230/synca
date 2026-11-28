@@ -26,20 +26,20 @@ class RepairScript(NewScript):
 
     def run(self, p):
         if p.get("secret") == self.secret and not p.get("ping") and any(isinstance(r.get("repair"), list) for r in p.get("rows") or []):
-            out = []
+            out, order = [], sorted(self.rows)
             for row in p["rows"]:
                 cells = self.rows.get(row["key"])
                 if cells is None:
                     out.append({"key": row["key"], "status": "gone", "repair": True})
                 elif any(str(cells.get(c, "") or "").strip() for c in row["repair"]):
                     same = all(cells.get(c) == v for c, v in (row.get("verify") or {}).items())
-                    out.append({"key": row["key"], "status": "filled" if same else "edited", "repair": True})
+                    out.append({"key": row["key"], "status": "filled" if same else "edited", "repair": True, "row": order.index(row["key"]) + 2})
                 elif row.get("probe"):
-                    out.append({"key": row["key"], "status": "blank", "repair": True})
+                    out.append({"key": row["key"], "status": "blank", "repair": True, "row": order.index(row["key"]) + 2})
                 else:
                     cells.update(row["fields"])
                     cells.update({c: v for c, v in (row.get("extra") or {}).items() if c in self.columns})
-                    out.append({"key": row["key"], "status": "repaired", "repair": True})
+                    out.append({"key": row["key"], "status": "repaired", "repair": True, "row": order.index(row["key"]) + 2})
             return {"ok": True, "results": out}
         return super().run(p)
 
@@ -74,6 +74,7 @@ def test_the_dry_run_lists_the_wiped_and_the_edited_and_writes_nothing(table):
     by_key = {d["key"]: d for d in done}
     wiped = by_key[rows["wiped"][1]]
     assert wiped["result"] == "пустая — будет записано" and "Артикул: %s" % before["Артикул"] in wiped["values"]
+    assert wiped["sheet_row"] == sorted(fake.rows).index(rows["wiped"][1]) + 2           # the row of the sheet, for the owner to compare
     assert by_key[rows["edited"][1]]["result"].startswith("правлена вручную")
     assert rows["whole"][1] not in by_key                                  # a row as written is not listed
     assert json.dumps(fake.rows, sort_keys=True, ensure_ascii=False) == keep_rows
@@ -94,7 +95,7 @@ def test_a_wiped_row_gets_the_panel_data_back_and_is_followed_again(table):
     assert by_key[rows["edited"][1]].startswith("правлена вручную")
     assert fake.rows[rows["edited"][1]]["Телефон"] == "89990000000" and written(conn, rows["edited"][0])[rows["edited"][1]]["_missing"] is True
     audit = conn.execute("SELECT detail FROM audit WHERE action = 'sheet_repair_blank'").fetchone()
-    assert json.loads(audit[0]) == {"rows": 1, "orders": 1}
+    assert json.loads(audit[0]) == {"rows": 1, "orders": 1, "remade": 0}
     assert "sheet_repair_blank" in MOSCOW_AUDIT
     assert texts.audit_text({"action": "sheet_repair_blank", "detail": json.loads(audit[0])}).startswith("Google-таблица: строки, стёртые вручную")
     again = sheet.repair_blank(conn, box, fake, LATER)                     # again: only the edited one is left
@@ -125,11 +126,11 @@ def test_the_command_dry_run_and_run(table, monkeypatch, capsys, tmp_path):
     db_path = conn.execute("PRAGMA database_list").fetchone()[2]
     assert cli.main(["sheet-repair-blank", "--db", db_path, "--key-file", str(key), "--dry-run"]) == 0
     out = capsys.readouterr().out
-    assert "№%d · %s · пустая — будет записано: Артикул:" % rows["wiped"] in out and "(проверка: в таблицу и в базу ничего не записано)" in out
+    assert "№%d · %s · строка листа " % rows["wiped"] in out and "пустая — будет записано: Артикул:" in out and "(проверка: в таблицу и в базу ничего не записано)" in out
     assert fake.rows[rows["wiped"][1]] == {}
     assert cli.main(["sheet-repair-blank", "--db", db_path, "--key-file", str(key)]) == 0
     out = capsys.readouterr().out
-    assert "№%d · %s · записана заново" % rows["wiped"] in out and fake.rows[rows["wiped"][1]] == before
+    assert "№%d · %s · строка листа " % rows["wiped"] in out and "записана заново" in out and fake.rows[rows["wiped"][1]] == before
     assert cli.main(["sheet-repair-blank", "--db", db_path]) == 1          # no key: nothing sent
     assert "Секрет Google-таблицы не задан" in capsys.readouterr().err
 
@@ -160,3 +161,18 @@ def test_the_button_is_the_owners_and_shows_the_result(tmp_path, monkeypatch):
     assert partner.post("/connections/sheet/repair", data={"csrf": "tok", "dry": "1"}).status_code == 403
     assert "Строки, стёртые вручную" not in partner.get("/connections/sheet").get_data(as_text=True)
     assert mine
+
+
+def test_a_row_without_its_mark_is_made_again_at_the_end(table):
+    conn, box, fake, rows, before = table
+    order, mark = rows["whole"]
+    kept = dict(fake.rows.pop(mark))                                       # the hidden cell cleared too: the mark is nowhere
+    dry = {d["key"]: d for d in sheet.repair_blank(conn, box, fake, LATER, dry_run=True)}
+    assert dry[mark]["result"].startswith("метки на листе нет — будет создана заново") and dry[mark]["sheet_row"] is None
+    assert mark not in fake.rows
+    done = {d["key"]: d["result"] for d in sheet.repair_blank(conn, box, fake, LATER)}
+    assert done[mark] == sheet.REMADE_SAID and fake.rows[mark] == kept
+    assert any(e == sheet.REMADE % 1 for e in events(conn, order))
+    detail = json.loads(conn.execute("SELECT detail FROM audit WHERE action = 'sheet_repair_blank'").fetchone()[0])
+    assert detail == {"rows": 2, "orders": 2, "remade": 1}
+    assert "создано в конце листа (метки не было): 1" in texts.audit_text({"action": "sheet_repair_blank", "detail": detail})

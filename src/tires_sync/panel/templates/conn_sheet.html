@@ -34,7 +34,7 @@
 {% if repair %}
 {% if repair.running %}<p class="muted">Идёт проверка… обновите страницу через минуту.</p>{% endif %}
 {% if repair.at %}<p>{{ "Проверка" if repair.dry else "Восстановление" }} {{ repair.at[:16]|replace("T", " ") }} (МСК): {% if repair.error %}<span class="text-err">{{ repair.error }}</span>{% else %}строк в списке: <b>{{ repair.count }}</b>{% if repair.dry %} — в таблицу ничего не записано{% endif %}{% endif %}.</p>
-{% if repair.rows %}<ul class="stack" style="gap:4px;margin:0;padding-left:18px">{% for r in repair.rows %}<li><a href="/orders/{{ r.order_id }}">№{{ r.order_id }}</a> · <span class="mono">{{ r.key }}</span> · {{ r.result }}{% if r["values"] %}: {{ r["values"] }}{% endif %}</li>{% endfor %}</ul>{% if repair.count > repair.rows|length %}<p class="muted">Показаны первые {{ repair.rows|length }}.</p>{% endif %}{% endif %}
+{% if repair.rows %}<ul class="stack" style="gap:4px;margin:0;padding-left:18px">{% for r in repair.rows %}<li><a href="/orders/{{ r.order_id }}">№{{ r.order_id }}</a> · <span class="mono">{{ r.key }}</span>{% if r.sheet_row %} · строка листа {{ r.sheet_row }}{% endif %} · {{ r.result }}{% if r["values"] %}: {{ r["values"] }}{% endif %}</li>{% endfor %}</ul>{% if repair.count > repair.rows|length %}<p class="muted">Показаны первые {{ repair.rows|length }}.</p>{% endif %}{% endif %}
 {% endif %}{% endif %}
 </div></section>
 {% endif %}

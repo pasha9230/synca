@@ -1460,7 +1460,8 @@ def _cmd_sheet_repair_blank(args) -> int:
         print("ошибка: %s" % err, file=sys.stderr)
         return 1
     for d in done:
-        print("№%d · %s · %s%s" % (d["order_id"], d["key"], d["result"], (": " + d["values"]) if d["values"] else ""))
+        where = " · строка листа %d" % d["sheet_row"] if d.get("sheet_row") else ""
+        print("№%d · %s%s · %s%s" % (d["order_id"], d["key"], where, d["result"], (": " + d["values"]) if d["values"] else ""))
     print("строк: %d%s" % (len(done), " (проверка: в таблицу и в базу ничего не записано)" if args.dry_run else ""))
     return 0
 
