@@ -1,7 +1,7 @@
 """«Срок хранения ОТХ истекает завтра» for the office (the owner 2026-11-27).
 
 The term of storage of «На ОТХ» is the seventh day (order_oth.ask_due: the day it entered is the first, from 12:30 the order goes to
-«На возврат» by itself). The day before that day the office sees it: a mark on the row of the page «На ОТХ» and one task of «Задачи» (to the
+«Согласование возврата» by itself, the owner 2026-11-28: not to «На возврат»). The day before that day the office sees it: a mark on the row of the page «На ОТХ» and one task of «Задачи» (to the
 order's responsible of the office, else the owner: order_oth.office_assignee), once per order and stay on «На ОТХ» (TASK_KEY); the task
 closes itself when the order left that stay (on «На возврат», sold, back to its client). The same orders as the seventh day moves
 (order_oth._HELD_SQL: no agreed return, not to another city, not «не возвращаем», not a point's own sale).
@@ -26,7 +26,7 @@ def _stay(entered: str) -> str:
 
 
 def last_day(entered: str) -> str:
-    """The day the order goes to «На возврат» (the seventh day of order_oth.ask_due), '' when unknown."""
+    """The day the order goes to «Согласование возврата» (the seventh day of order_oth.ask_due), '' when unknown."""
     from .order_oth import HOLD_DAYS
     try:
         return (date.fromisoformat(str(entered or "")[:10]) + timedelta(days=HOLD_DAYS)).isoformat()
@@ -65,8 +65,9 @@ def tick(conn, now: str) -> int:
             owner = owner or order_notify.get_owner_login(conn)
             point = (card.get("point") or {}).get("name") or "точка №%s" % card["point_id"]
             title = "%s: заказ №%s, точка «%s»" % (TASK_TITLE, order_manager.label(card), point)
+            agree = orders.stage_name(conn, orders.RETURN_AGREE)
             task_id = tasks.add(conn, kind="other", title=title[:tasks.TITLE_MAX], due_at=now[:16], now=now, author="система", owner_login=owner,
-                                note="%s.%s в 12:30 заказ сам перейдёт «На возврат». Продать с ОТХ или решить, что делать, — сегодня." % (day[8:10], day[5:7]),
+                                note="%s.%s в 12:30 заказ сам перейдёт на «%s». Продать с ОТХ или решить, что делать, — сегодня." % (day[8:10], day[5:7], agree),
                                 assignee=order_oth.office_assignee(conn, card_id), order_id=card_id, commit=False)
             conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (key, str(task_id)))
             conn.commit()
