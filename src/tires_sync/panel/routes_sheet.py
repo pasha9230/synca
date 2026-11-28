@@ -72,7 +72,7 @@ def register(app) -> None:
         return render_template("conn_sheet.html", tabs=tabs, box_ok=box is not None, sheet=order_sheet.settings(conn),
                                sheet_secrets=connections.secret_status(conn, box, order_sheet.KIND, 0),
                                sheet_check=connections.get_check(conn, order_sheet.KIND, 0), sheet_status=order_sheet.status(conn),
-                               columns=order_sheet.ASKED + order_sheet.OPTIONAL, sheet_name=order_sheet.SHEET, repair=repair_last(conn))
+                               columns=order_sheet.ASKED + order_sheet.OPTIONAL, sheet_name=order_sheet.SHEET, resync=resync_last(conn), keeps_before=order_sheet.KEEPS_BEFORE)
 
     def save():
         conn = get_conn()
@@ -129,39 +129,43 @@ def register(app) -> None:
             connections.record_check(conn, order_sheet.KIND, 0, False, "Секреты не читаются: проверьте мастер-ключ.", now_iso())
         return redirect("/connections/sheet")
 
-    @app.route("/connections/sheet/repair", methods=["POST"])
+    @app.route("/connections/sheet/resync", methods=["POST"])
     @login_required
-    def connections_sheet_repair():
-        """«Строки, стёртые вручную» (the owner 28.11): order_sheet.repair_blank in a thread of its own (it asks the sheet about every row
-        written); «dry»: only the list. The owner only. The result is shown on the page (repair_last)."""
+    def connections_sheet_resync():
+        """«Сверить таблицу с панелью» (the owner 28.11): order_sheet.resync in a thread of its own (it asks the sheet about every row
+        written); «dry»: «Найти расхождения», only the list; «closed»: the rows without a mark of closed orders are made again too. The
+        owner only. The result is shown on the page (resync_last)."""
         if current_user()["role"] != "owner":
             abort(403)
         box = app.config.get("SECRET_BOX")
         if box is None:
             flash(NO_KEY)
             return redirect("/connections/sheet")
-        dry, who = request.form.get("dry") == "1", author()
+        dry, closed, who = request.form.get("dry") == "1", request.form.get("closed") == "1", author()
         moscow = (app.config["NOW"]() + timedelta(hours=3)).isoformat(timespec="seconds")      # the order's journal is in Moscow time
         http = app.config.get("SHEET_HTTP") or urllib_transport
         conn = get_conn()
-        if not store.claim_state(conn, REPAIR_KEY + ":run", moscow, (app.config["NOW"]() + timedelta(hours=3) - timedelta(minutes=15)).isoformat(timespec="seconds")):
-            flash("Проверка пустых строк уже идёт: обновите страницу через минуту.")
-            return redirect("/connections/sheet#repair")
+        if not store.claim_state(conn, RESYNC_KEY + ":run", moscow, (app.config["NOW"]() + timedelta(hours=3) - timedelta(minutes=15)).isoformat(timespec="seconds")):
+            flash("Сверка уже идёт: обновите страницу через минуту.")
+            return redirect("/connections/sheet#resync")
         conn.commit()
 
         def work():
             db = store.connect(app.config["DB_PATH"])
             try:
+                summary, rows, error = None, [], ""
                 try:
-                    done, error = order_sheet.repair_blank(db, box, http, moscow, author=who, dry_run=dry), ""
+                    done = order_sheet.resync(db, box, http, moscow, author=who, dry_run=dry, closed_too=closed)
+                    summary, rows = done["summary"], done["rows"]
                 except order_sheet.SheetError as err:
-                    done, error = [], str(err)
+                    error = str(err)
                 except Exception as err:                                  # noqa: BLE001: the page shows it, never a silent stop
-                    log.exception("the Google table: the repair of the wiped rows")
-                    done, error = [], "сбой панели (%s): сообщите разработчику." % type(err).__name__
-                store.set_state(db, REPAIR_KEY, json.dumps({"at": moscow, "dry": dry, "error": error, "count": len(done),
-                                                            "rows": done[:REPAIR_SHOWN]}, ensure_ascii=False))
-                store.set_state(db, REPAIR_KEY + ":run", "")
+                    log.exception("the Google table: the resync")
+                    error = "сбой панели (%s): сообщите разработчику." % type(err).__name__
+                store.set_state(db, RESYNC_KEY, json.dumps({
+                    "at": moscow, "dry": dry, "closed": closed, "error": error, "count": len(rows), "rows": rows[:RESYNC_SHOWN],
+                    "summary": summary, "said": order_sheet.summary_line(summary, dry) if summary else ""}, ensure_ascii=False))
+                store.set_state(db, RESYNC_KEY + ":run", "")
                 db.commit()
             finally:
                 db.close()
@@ -169,24 +173,23 @@ def register(app) -> None:
         if runner is not None:
             runner(work)
         else:
-            threading.Thread(target=work, name="google-sheet-repair", daemon=True).start()
-        flash("Проверка пустых строк запущена: результат появится ниже через минуту (обновите страницу).")
-        return redirect("/connections/sheet#repair")
+            threading.Thread(target=work, name="google-sheet-resync", daemon=True).start()
+        flash("Сверка запущена: результат появится ниже через минуту (обновите страницу).")
+        return redirect("/connections/sheet#resync")
 
 
-REPAIR_KEY = "sheet_repair_last"
-REPAIR_SHOWN = 300
+RESYNC_KEY = "sheet_resync_last"
+RESYNC_SHOWN = 300
 
 
-def repair_last(conn):
-    """The last result of «Строки, стёртые вручную»: {"at", "dry", "error", "count", "rows"}, or None; «running» while one goes."""
-    raw = store.get_state(conn, REPAIR_KEY)
+def resync_last(conn):
+    """The last result of «Сверить таблицу с панелью»: {"at", "dry", "error", "count", "rows", "summary", "said"}, or None; «running»
+    while one goes."""
+    raw = store.get_state(conn, RESYNC_KEY)
     try:
         last = json.loads(raw) if raw else None
     except ValueError:
         last = None
-    if last is not None:
-        last["gone"] = sum(1 for row in last.get("rows") or [] if str(row.get("result", "")).startswith("метки на листе нет — будет создана"))
-    if last is not None or store.get_state(conn, REPAIR_KEY + ":run"):
-        last = dict(last or {}, running=bool(store.get_state(conn, REPAIR_KEY + ":run")))
+    if last is not None or store.get_state(conn, RESYNC_KEY + ":run"):
+        last = dict(last or {}, running=bool(store.get_state(conn, RESYNC_KEY + ":run")))
     return last
