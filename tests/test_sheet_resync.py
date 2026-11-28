@@ -40,10 +40,7 @@ class SyncScript(RepairScript):
                     out.append({"key": row["key"], "status": "gone", "sync": True})
                     continue
                 blank = all(not str(cells.get(c, "")).strip() for c in row["repair"])
-                if not blank and any(cells.get(c) != v for c, v in row["verify"].items()):
-                    out.append({"key": row["key"], "status": "edited", "found": {c: str(cells.get(c, "")) for c in row["verify"]}, "sync": True,
-                                "row": order.index(row["key"]) + 2})
-                    continue
+                edited = not blank and any(cells.get(c) != v for c, v in row["verify"].items())
                 values = dict(row["fields"], **(row.get("extra") or {}))
                 changed, lacking = {}, []
                 for name, value in values.items():
@@ -68,7 +65,7 @@ class SyncScript(RepairScript):
                     if fill:
                         (self.grey.add if row["shade"] else self.grey.discard)(row["key"])
                 out.append({"key": row["key"], "status": ("differs" if row.get("probe") else "synced") if changed else "same", "changed": changed,
-                            "lacking": lacking, "blank": blank, "sync": True, "row": order.index(row["key"]) + 2})
+                            "lacking": lacking, "blank": blank, "edited": edited, "sync": True, "row": order.index(row["key"]) + 2})
             return {"ok": True, "results": out}
         return super().run(p)
 
@@ -108,16 +105,16 @@ def test_the_look_lists_every_difference_and_writes_nothing(table):
     assert staged["sheet_row"] == sorted(fake.rows).index(rows["staged"]) + 2
     assert by[rows["wiped"]]["result"] == "будет исправлена (стёрта вручную)"
     edited = by[rows["edited"]]
-    assert edited["result"] == sheet.EDITED_RESYNC and edited["values"] == "Артикул: 999 → в панели %s" % whole["edited"]["Артикул"]
+    assert edited["result"] == "будет исправлена (%s)" % sheet.EDITED_RESYNC and edited["values"] == "Артикул: 999 → %s" % whole["edited"]["Артикул"]
     assert edited["sheet_row"] == sorted(fake.rows).index(rows["edited"]) + 2
     assert by[rows["gone_open"]]["result"].startswith("метки на листе нет — будет создана заново")
     assert by[rows["gone_closed"]]["result"].startswith("метки на листе нет, заказ закрыт — не создаём")
     s = done["summary"]
-    assert (s["orders"], s["differs"], s["blank"], s["edited"], s["gone_open"], s["gone_closed"], s["errors"]) == (5, 2, 1, 1, 1, 1, 0)
+    assert (s["orders"], s["differs"], s["blank"], s["edited"], s["gone_open"], s["gone_closed"], s["errors"]) == (5, 3, 1, 1, 1, 1, 0)
     assert s["same"] == s["rows"] - 5
     line = sheet.summary_line(s, True)
-    assert line.startswith("Заказов проверено: 5, строк: %d; как в панели: %d; расходятся: 2 (из них стёрты: 1); артикул/телефон не совпадает "
-                           "(не тронуты): 1; без метки: 1 у открытых, 1 у закрытых; ошибок: 0." % (s["rows"], s["same"]))
+    assert line.startswith("Заказов проверено: 5, строк: %d; как в панели: %d; расходятся: 3 (из них стёрты: 1, артикул/телефон не совпадал: 1); "
+                           "без метки: 1 у открытых, 1 у закрытых; ошибок: 0." % (s["rows"], s["same"]))
     assert json.dumps(fake.rows, sort_keys=True, ensure_ascii=False) == keep and {o: written(conn, o) for o in orders_of.values()} == base
     probes = [r for p in fake.data_posts()[-1:] for r in p["rows"]]
     assert all(r["probe"] and r["sync"] and r["check"] == sheet.REPAIR_CHECK and "Примечание" not in r["fields"] for r in probes)
@@ -126,25 +123,24 @@ def test_the_look_lists_every_difference_and_writes_nothing(table):
 def test_the_fix_sets_every_row_right_and_a_second_look_finds_nothing(table):
     conn, box, fake, rows, orders_of, whole = table
     done = sheet.resync(conn, box, fake, LATER, author="owner")
-    for k in ("staged", "wiped", "gone_open"):
+    for k in ("staged", "wiped", "edited", "gone_open"):
         assert filled(fake.rows[rows[k]]) == filled(whole[k]), k
     assert rows["gone_closed"] not in fake.rows
-    assert fake.rows[rows["edited"]]["Артикул"] == "999"                    # not written over (the owner 28.11)
-    assert written(conn, orders_of["edited"])[rows["edited"]]["_missing"] is True
+    assert not written(conn, orders_of["edited"])[rows["edited"]].get("_missing")             # followed again
     assert not written(conn, orders_of["wiped"])[rows["wiped"]].get("_missing")
     assert any(e.startswith("Google-таблица сверена с панелью: исправлено 1 стр.") for e in events(conn, orders_of["staged"]))
     assert any(e == sheet.REMADE % 1 for e in events(conn, orders_of["gone_open"]))
-    assert (done["summary"]["fixed"], done["summary"]["created"]) == (2, 1)
-    assert any(d["result"] == sheet.EDITED_RESYNC for d in done["rows"])
+    assert (done["summary"]["fixed"], done["summary"]["created"]) == (3, 1)
+    assert any(d["result"] == "исправлена (%s)" % sheet.EDITED_RESYNC and d["key"] == rows["edited"] for d in done["rows"])
     detail = json.loads(conn.execute("SELECT detail FROM audit WHERE action = 'sheet_resync'").fetchone()[0])
-    assert detail["fixed"] == 2 and detail["created"] == 1 and "sheet_resync" in MOSCOW_AUDIT
+    assert detail["fixed"] == 3 and detail["created"] == 1 and "sheet_resync" in MOSCOW_AUDIT
     assert texts.audit_text({"action": "sheet_resync", "detail": detail}).startswith("Google-таблица сверена с панелью")
     again = sheet.resync(conn, box, fake, LATER, dry_run=True)["summary"]
-    assert (again["differs"], again["gone_open"], again["gone_closed"], again["errors"], again["edited"]) == (0, 0, 1, 0, 1)
+    assert (again["differs"], again["gone_open"], again["gone_closed"], again["errors"], again["edited"]) == (0, 0, 1, 0, 0)
     sheet.resync(conn, box, fake, LATER, closed_too=True)                   # the owner asked: the closed one too
     assert fake.rows[rows["gone_closed"]] == whole["gone_closed"]
     last = sheet.resync(conn, box, fake, LATER, dry_run=True)["summary"]
-    assert (last["differs"], last["gone_open"], last["gone_closed"], last["same"]) == (0, 0, 0, last["rows"] - 1)
+    assert (last["differs"], last["gone_open"], last["gone_closed"], last["same"]) == (0, 0, 0, last["rows"])
     assert conn.execute("SELECT COUNT(*) FROM sheet_order WHERE claim_until != ''").fetchone()[0] == 0
 
 
@@ -208,8 +204,8 @@ def test_a_failed_chunk_is_an_error_of_its_own_rows_only(table, monkeypatch):
     probes = len(sheet.repair_candidates(conn))
     fake.fail = [None] * probes + ["500"]                                  # the first row written fails, the others go
     done = sheet.resync(conn, box, fake, LATER)
-    assert done["summary"]["errors"] == 1 and done["summary"]["fixed"] == 1
-    assert sum(filled(fake.rows.get(rows[k])) == filled(whole[k]) for k in ("staged", "wiped")) == 1
+    assert done["summary"]["errors"] == 1 and done["summary"]["fixed"] == 2
+    assert sum(filled(fake.rows.get(rows[k])) == filled(whole[k]) for k in ("staged", "wiped", "edited")) == 2
 
 
 def test_the_command(table, monkeypatch, capsys, tmp_path):
@@ -224,7 +220,7 @@ def test_the_command(table, monkeypatch, capsys, tmp_path):
     assert "№%d · %s · строка листа " % (orders_of["staged"], rows["staged"]) in out and "Этап: Новый заказ → " in out
     assert "Заказов проверено: 5" in out and "(проверка: в таблицу и в базу ничего не записано)" in out
     assert cli.main(["sheet-resync", "--db", db_path, "--key-file", str(key)]) == 0
-    assert "Исправлено строк: 2, создано заново: 1." in capsys.readouterr().out
+    assert "Исправлено строк: 3, создано заново: 1." in capsys.readouterr().out
     assert cli.main(["sheet-resync", "--db", db_path, "--key-file", str(key), "--closed-too"]) == 0
     assert fake.rows[rows["gone_closed"]] == whole["gone_closed"]
 
@@ -255,3 +251,30 @@ def test_the_button_is_the_owners_and_shows_the_totals(tmp_path, monkeypatch):
     partner, _ = person(app, "partner")
     assert partner.post("/connections/sheet/resync", data={"csrf": "tok", "dry": "1"}).status_code == 403
     assert "Сверить таблицу с панелью" not in partner.get("/connections/sheet").get_data(as_text=True)
+
+
+def test_a_new_code_or_phone_of_the_panel_goes_by_the_usual_send(table):
+    """Only the panel changes «Артикул» and «Телефон» (the owner 28.11): a change goes over the cell, checked by the value written."""
+    conn, box, fake, rows, orders_of, whole = table
+    order, mark = orders_of["staged"], rows["staged"]
+    item = orders.get_card(conn, order)["items"][0]
+    conn.execute("UPDATE order_item SET code = '7777' WHERE id = ?", (item["id"],))
+    conn.execute("UPDATE order_card SET client_phone = '+7 900 000-00-01' WHERE id = ?", (order,))
+    orders.add_event(conn, order, LATER, "owner", "edit", "правка")
+    conn.commit()
+    sheet.flush(conn, box, fake, LATER)
+    assert fake.rows[mark]["Артикул"] == "7777" and fake.rows[mark]["Телефон"] == "89000000001"
+    assert written(conn, order)[mark]["Артикул"] == "7777" and not written(conn, order)[mark].get("_missing")
+
+
+def test_a_lost_answer_of_a_new_code_is_checked_again_by_it(table):
+    conn, box, fake, rows, orders_of, whole = table
+    order, mark = orders_of["staged"], rows["staged"]
+    item = orders.get_card(conn, order)["items"][0]
+    conn.execute("UPDATE order_item SET code = '8888' WHERE id = ?", (item["id"],))
+    orders.add_event(conn, order, LATER, "owner", "edit", "правка")
+    conn.commit()
+    fake.rows[mark]["Артикул"] = "8888"                                    # written by a send whose answer was lost
+    sheet.flush(conn, box, fake, LATER)
+    assert fake.rows[mark]["Артикул"] == "8888" and not written(conn, order)[mark].get("_missing")
+    assert written(conn, order)[mark]["Артикул"] == "8888"

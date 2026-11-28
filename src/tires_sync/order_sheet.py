@@ -43,7 +43,8 @@ ASKED = tuple(c for c in COLUMNS if c != "Примечание" and c not in OPT
 CLIENT = ("Имя", "Телефон")                                  # the owner 24.11 (ТЗ №88): changed in the panel, they follow the order in every
                                                              # row of it, over a correction in the cell (as «Аккаунт»); not changed — the cell stays
 UPDATED = ("№ заказа MIM", "Перемещение MIM", "Дата счета", "Этап", "Реализация", "Списание", "Прибыль %", "Прибыль ₽",
-           "Уведомление точке", "Уведомление клиенту") + CLIENT  # the rest is written once: a correction of the owner in the cell stays
+           "Уведомление точке", "Уведомление клиенту") + CLIENT + ("Артикул",)   # the rest is written once; «Артикул» changes only by
+                                                                                 # the panel (the owner 28.11): it follows, checked by the old one
 FOLLOWED = ("Кол-во", "Сумма MIM", "Сумма продажи")              # a position that gave tyres from «На ОТХ» (oth_sale): its row goes down
 CHECK = ("Артикул", "Телефон")                              # the script finds the row by its mark and checks it is still there;
                                                              # the phone too (the lead's review 2026-11-01): two rows of one code swapped
@@ -757,8 +758,8 @@ def _recheck_phone(http: Transport, url: str, secret: str, ops: List[dict], repl
     once more, checked by the new phone (the code as before): «updated» — the row is the order's, its columns are written and taken; «edited»
     again — a row rewritten by hand, as before. A failed second send leaves those rows not taken (an error: they go again later, never
     marked «edited» by a doubt). The script is not changed: it checks what the panel says."""
-    again = [dict(op, check=dict(op["check"], **{"Телефон": op["fields"]["Телефон"]})) for op in ops
-             if not op["create"] and "Телефон" in op["fields"] and _status(replies, op["key"]) == EDITED]
+    again = [dict(op, check=dict(op["check"], **{c: op["fields"][c] for c in CHECK if c in op["fields"]})) for op in ops   # «Артикул» too (28.11)
+             if not op["create"] and any(c in op["fields"] for c in CHECK) and _status(replies, op["key"]) == EDITED]
     if not again:
         return ops, replies, failed
     keys = {op["key"] for op in again}
@@ -1185,8 +1186,8 @@ def _repair_write(conn, http: Transport, url: str, secret: str, now: str, author
 # panel is the truth. `python -m tires_sync sheet-resync` (and «Сверить таблицу с панелью» of the owner) sends every row written of every
 # order followed («Вести заказы, оформленные с», any stage) whole: every column the panel writes into a new row (SENT and «Аккаунт»), as
 # it would write it now — but the profit of the rows of orders placed before KEEPS_BEFORE stays what was written (no recount). The script
-# of 28.11 compares each cell and writes the ones that differ (a row cleared by hand is filled again); a row whose «Артикул» or «Телефон»
-# is not what the panel wrote is not touched, only listed with both values (the owner 28.11, asked again). «Примечание»: the owner's text
+# of 28.11 compares each cell and writes the ones that differ (a row cleared by hand is filled again; a row whose «Артикул» or «Телефон»
+# is not what the panel wrote too, said apart: the owner 28.11, only the panel changes them). «Примечание»: the owner's text
 # stays, the panel's is put after it once (« · »), an empty one gets the panel's; the fill grey before «Заказ оформлен», our grey taken off after.
 # A row whose mark is nowhere: made again at the end of the sheet for an open order; for a closed one only with `closed_too`. After it
 # `written` is what the sheet has: the row is followed again (no `_missing`, no baseline of the phone). A script before 28.11 writes
@@ -1194,7 +1195,7 @@ def _repair_write(conn, http: Transport, url: str, secret: str, now: str, author
 
 PROFIT = ("Прибыль ₽", "Прибыль %")
 RESYNCED = "Google-таблица сверена с панелью: исправлено %d стр. (%s)."
-EDITED_RESYNC = "артикул/телефон в строке не совпадает с панелью — не трогаем"
+EDITED_RESYNC = "артикул/телефон в строке не совпадал с панелью"
 
 
 def _sync_values(c: dict) -> dict:
@@ -1256,14 +1257,10 @@ def resync(conn, box, http: Transport, now: str, author: str = "cli", dry_run: b
         elif status == "differs":
             summary["differs"] += 1
             summary["blank"] += bool(reply.get("blank"))
-            out.append(_line(c, ("будет исправлена" if dry_run else "расходится") + (" (стёрта вручную)" if reply.get("blank") else ""), reply,
-                             _changes_line(reply.get("changed") or {})))
+            summary["edited"] += bool(reply.get("edited"))
+            how = " (стёрта вручную)" if reply.get("blank") else (" (%s)" % EDITED_RESYNC if reply.get("edited") else "")
+            out.append(_line(c, ("будет исправлена" if dry_run else "расходится") + how, reply, _changes_line(reply.get("changed") or {})))
             fix.append(c)
-        elif status == EDITED:                                             # the owner 28.11: such a row is not written over (asked)
-            summary["edited"] += 1
-            panel, there = _sync_values(c), reply.get("found") or {}
-            out.append(_line(c, EDITED_RESYNC, reply, "; ".join("%s: %s → в панели %s" % (k, there.get(k, "") or "пусто", panel.get(k, "") or "пусто")
-                                                               for k in CHECK if str(there.get(k, "")) != str(panel.get(k, "")))))
         elif status == GONE:
             summary["gone_open" if c["open"] else "gone_closed"] += 1
             if c["open"] or closed_too:
@@ -1285,7 +1282,7 @@ def resync(conn, box, http: Transport, now: str, author: str = "cli", dry_run: b
         for card_id in claimed:
             conn.execute("UPDATE sheet_order SET claim_until = '' WHERE order_id = ?", (card_id,))
         conn.commit()
-    rows += [_line(c, "занят другой отправкой") for c in busy] + [r for r in out if r["result"].startswith(("метки на листе нет, заказ закрыт", "ошибка", EDITED_RESYNC))]
+    rows += [_line(c, "занят другой отправкой") for c in busy] + [r for r in out if r["result"].startswith(("метки на листе нет, заказ закрыт", "ошибка"))]
     if summary["fixed"] or summary["created"]:
         store.write_audit(conn, now, author, "sheet_resync", {"orders": summary["orders"], "rows": summary["rows"], "fixed": summary["fixed"],
                                                               "created": summary["created"]})
@@ -1329,7 +1326,8 @@ def _resync_write(conn, http: Transport, url: str, secret: str, now: str, claime
                 written[c["key"]] = _taken(c, _sync_values(c), lack)
                 fixed += 1
                 columns += [k for k in (reply.get("changed") or {}) if k not in columns]
-                done.append(_line(c, "исправлена", reply, _changes_line(reply.get("changed") or {})))
+                done.append(_line(c, "исправлена" + (" (%s)" % EDITED_RESYNC if reply.get("edited") else ""), reply,
+                                  _changes_line(reply.get("changed") or {})))
             elif new and (status in ("created", "updated") or partial):
                 op = _create_op(c)
                 written[c["key"]] = _taken(c, dict(op["fields"], **op.get("extra", {})), _lacking(why) if partial else [])
@@ -1351,8 +1349,8 @@ def _resync_write(conn, http: Transport, url: str, secret: str, now: str, claime
 
 def summary_line(summary: dict, dry_run: bool) -> str:
     """The totals in words, for the command and the page."""
-    said = ("Заказов проверено: %d, строк: %d; как в панели: %d; расходятся: %d (из них стёрты: %d); артикул/телефон не совпадает "
-            "(не тронуты): %d; без метки: %d у открытых, %d у закрытых; ошибок: %d." % (
+    said = ("Заказов проверено: %d, строк: %d; как в панели: %d; расходятся: %d (из них стёрты: %d, артикул/телефон не совпадал: %d); "
+            "без метки: %d у открытых, %d у закрытых; ошибок: %d." % (
                 summary["orders"], summary["rows"], summary["same"], summary["differs"], summary["blank"], summary["edited"],
                 summary["gone_open"], summary["gone_closed"], summary["errors"]))
     if not dry_run:
