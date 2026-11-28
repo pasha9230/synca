@@ -239,7 +239,8 @@ def test_cancel_and_return_need_their_own_data(tmp_path):
         orders.move_card(conn, other, stage_id(conn, "return"), NOW, "owner", {"return_kind": "client"})
     assert "причина возврата" in str(err.value) and "сумма возврата" in str(err.value) and "тип возврата" not in str(err.value)
     assert orders.move_card(conn, other, stage_id(conn, "return"), NOW, "owner",
-                            {"return_kind": "supplier", "return_reason": "брак", "return_amount": "9600"}) is True
+                            {"return_kind": "supplier", "return_reason": "брак", "return_amount": "9600"},
+                            return_exception="тест: без согласования") is True     # the owner 2026-11-28: an office's exception
     with pytest.raises(orders.OrderError):
         orders.move_card(conn, other, 999, NOW, "owner")
     with pytest.raises(orders.OrderError):
@@ -424,8 +425,12 @@ def test_with_a_live_sale_a_card_may_leave_the_successful_stage_only_for_a_closi
             orders.move_card(conn, cid, target, NOW, "owner")
         assert "сторнируйте" in str(err.value)
     assert orders.get_card(conn, cid)["stage"]["code"] == "done"
-    assert orders.move_card(conn, cid, stage_id(conn, "return"), NOW, "owner",
-                            {"return_kind": "client", "return_reason": "не подошли", "return_amount": "38400"}) is True    # a return is allowed: it ends with the reversal
+    returned = {"return_kind": "client", "return_reason": "не подошли", "return_amount": "38400"}
+    with pytest.raises(orders.OrderError, match="Сначала отмените продажу"):        # the owner 2026-11-28: sold or returned, never both
+        orders.move_card(conn, cid, stage_id(conn, "return"), NOW, "owner", returned)
+    assert orders.get_card(conn, cid)["stage"]["code"] == "done"
+    assert orders.reverse_sales(conn, cid, NOW, "owner") == 1
+    assert orders.move_card(conn, cid, stage_id(conn, "return"), NOW, "owner", returned) is True
 
 
 def test_the_sale_claim_needs_the_card_to_still_be_on_the_successful_stage(tmp_path):
@@ -505,7 +510,8 @@ def test_the_reason_of_a_cancelled_card_and_the_data_of_a_return_cannot_be_empti
         orders.update_card(conn, cid, {"cancel_reason": ""}, NOW, "owner")
     orders.update_card(conn, cid, {"cancel_reason": "другая причина"}, NOW, "owner")
     other = card(conn)
-    orders.move_card(conn, other, stage_id(conn, "return"), NOW, "owner", {"return_kind": "client", "return_reason": "брак", "return_amount": "500"})
+    orders.move_card(conn, other, stage_id(conn, "return"), NOW, "owner", {"return_kind": "client", "return_reason": "брак", "return_amount": "500"},
+                     return_exception="тест: без согласования")
     for bad in ({"return_kind": ""}, {"return_reason": ""}, {"return_amount": "0"}):
         with pytest.raises(orders.OrderError):
             orders.update_card(conn, other, bad, NOW, "owner")

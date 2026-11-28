@@ -221,7 +221,8 @@ def test_cancel_and_return_are_reachable_from_the_card_form(tmp_path):
     post(client, "/orders/%d/move" % cid, tok, stage_id=str(s["cancel"]), cancel_reason="клиент передумал")
     assert orders.get_card(conn, cid)["stage"]["code"] == "cancel" and orders.get_card(conn, cid)["cancel_reason"] == "клиент передумал"
     other = make_card(client, tok, client_name="Ольга")
-    post(client, "/orders/%d/move" % other, tok, stage_id=str(s["return"]), return_kind="client", return_reason="не подошли", return_amount="9600")
+    post(client, "/orders/%d/move" % other, tok, stage_id=str(s["return"]), return_kind="client", return_reason="не подошли", return_amount="9600",
+         return_exception="тест")
     assert orders.get_card(conn, other)["stage"]["code"] == "return" and orders.get_card(conn, other)["return_amount"] == 9600.0
 
 

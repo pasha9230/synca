@@ -14,9 +14,13 @@
 {% if not arrival.money %}<p class="small muted" data-no-arrival-locked>Ответ «да» снимает выплату точке — его даёт офис с правом «деньги». Сообщите владельцу, если шины не приезжали.</p>{% endif %}</fieldset>{% endif %}
 <div><button class="btn btn--danger-outline btn--sm">Отменить заказ</button></div></form>
 {% if not own_sale %}<hr>
-<form method="post" action="/orders/{{ c.id }}/move" class="stack" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ stage_ids['return'] }}">
+{% if c.sale_ids %}<div class="stack" data-return-sold><p class="small"><b>По заказу записана продажа.</b> Заказ не может быть и продан, и возвращён поставщику: сначала отмените продажу, потом оформляйте возврат.</p>
+<form method="post" action="/orders/{{ c.id }}/sale/reverse" data-once data-confirm-title="Отменить продажу?" data-confirm="Продажа по заказу сторнируется (отменится в «Продажах»). После этого можно оформить возврат." data-confirm-ok="Отменить продажу"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn--secondary btn--sm">Отменить продажу</button></form></div>
+{% else %}<form method="post" action="/orders/{{ c.id }}/move" class="stack" data-once{% if return_unagreed %} data-confirm-title="Вернули поставщику без согласования?" data-confirm="Возврат не согласован с поставщиком. Это исключение: причина запишется в журнал заказа." data-confirm-ok="Оформить как исключение"{% endif %}><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="stage_id" value="{{ stage_ids['return'] }}">
+{% if return_unagreed %}<p class="small" data-return-unagreed><b>Возврат не согласован.</b> Обычный путь: «Согласование возврата» → «На возврат» → «Вернули поставщику». Оформить сразу можно только как исключение офиса — с причиной.</p>
+<label class="field"><span class="label">Причина исключения (обязательно)</span><input class="input" name="return_exception" maxlength="300" required placeholder="Например: поставщик забрал шины сам, согласовано по телефону"></label>{% endif %}
 <label class="field"><span class="label">Тип возврата</span><select class="select" name="return_kind"><option value="">Не выбран</option>{% for key, label in return_kinds.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
 <div class="grid-2"><label class="field"><span class="label">Причина возврата</span><input class="input" name="return_reason" maxlength="300"></label>
 <label class="field"><span class="label">Сумма возврата, ₽</span><input class="input" name="return_amount" inputmode="decimal" autocomplete="off"{% for k, s in return_amount.suggest.items() %} data-suggest-{{ k }}="{{ s }}"{% endfor %} data-auto data-return-amount></label></div>
-<div><button class="btn btn--secondary btn--sm">Оформить возврат</button></div></form>{% endif %}{# a point's own sale: its four stages only (the owner 2026-10-30) #}
+<div><button class="btn btn--secondary btn--sm">Оформить возврат</button></div></form>{% endif %}{% endif %}{# a point's own sale: its four stages only (the owner 2026-10-30) #}
 </div></div></div>

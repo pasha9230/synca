@@ -8,7 +8,7 @@ from flask import abort, flash, redirect, render_template, request
 
 from .. import order_bulk, orders, oth_sale, store, trash
 from ..orders import OrderError
-from .common import author, get_conn, has_right, login_required, safe_path
+from .common import author, current_user, get_conn, has_right, login_required, safe_path
 from .routes_design import office_new
 from .routes_orders import _int, check_responsible, local_iso
 
@@ -138,11 +138,15 @@ def register(app) -> None:
                     cards.append(orders.get_card(conn, card_id))
                 except OrderError:
                     continue
-            return render_template("office2/orders_bulk_delete.html", cards=cards, back=safe_path(request.form.get("back", "")) or "/orders?v=list")
+            came = {c["id"]: trash.arrived_text(trash.arrived_info(conn, c["id"])) for c in cards}     # the owner 2026-11-28: always warned
+            return render_template("office2/orders_bulk_delete.html", cards=cards, back=safe_path(request.form.get("back", "")) or "/orders?v=list",
+                                   came={k: v for k, v in came.items() if v}, only_admin=trash.ARRIVED_ONLY_ADMIN,
+                                   admin=(current_user().get("role") or "") in trash.ADMINS)
         deleted = []
 
         def change(card):
-            trash.delete_order(conn, card["id"], local_iso(), author(), only_if=lambda c, _card: oth_sale.why_not_delete(c, card["id"]))
+            trash.delete_order(conn, card["id"], local_iso(), author(), only_if=lambda c, _card: oth_sale.why_not_delete(c, card["id"]),
+                               role=current_user().get("role") or "")
             deleted.append(card["id"])
             return True
         done, refused, stopped = _each(ids, change)

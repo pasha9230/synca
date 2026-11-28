@@ -57,6 +57,7 @@ def _return_from(card: dict) -> bool:
     return card["stage"]["code"] in RETURN_FROM or (card["stage"]["code"] == "cancel"
                                                     and str(card.get("cancel_reason") or "").strip().casefold().startswith(orders.NOT_BOUGHT))
 RETURN_REASON = "точка: шины отданы поставщику"
+POINT_UNAGREED = "точка отдала шины поставщику командой «Возврат отдал» без согласования"   # orders.UNAGREED_LINE: the office sees it
 RETURN_LINE = "точка: шины отданы поставщику (возврат)"
 RETURN_HEAD = "Точка отдала шины поставщику (возврат): "   # the records of the manager start so (routes_alerts.is_return_ask; the old ones too)
 RETURN_ASK = RETURN_HEAD + "заполните сумму возврата и переведите в «%s»."          # the current name of «return» (orders.stage_name)
@@ -773,7 +774,8 @@ def returned(conn, card: dict, who: str, now: str) -> Tuple[str, str]:
         return "возврат: этап не изменён, не заполнено: %s (жёлтая запись)" % ", ".join(gaps), answer
     conn.execute("UPDATE oth_return_plan SET signed_at = ?, signed_by = ? WHERE order_id = ? AND signed_at IS NULL", (now, who, card["id"]))
     try:
-        moved = orders.move_card(conn, card["id"], stage["id"], now, who, changes=order_oth.apply_refund(conn, card["id"], changes, now, who))
+        moved = orders.move_card(conn, card["id"], stage["id"], now, who, changes=order_oth.apply_refund(conn, card["id"], changes, now, who),
+                                 return_exception=POINT_UNAGREED)      # the point gave the tyres already: noted only when unagreed (2026-11-28)
     except OrderError as err:
         return "не выполнено: %s" % err, "Не получилось: %s" % err
     if not moved:
