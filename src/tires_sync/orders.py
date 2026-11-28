@@ -476,16 +476,16 @@ MARKS = {"settled_point_at": "Расчёт с точкой", "codes_written_off_
 EDITABLE = ("client_name", "client_phone", "avito_chat", "point_id", "delivery_date", "delivery_time", "tags", "comment",
             "webmim_id", "webmim_number", "webmim_status", "cancel_reason", "return_kind", "return_reason", "return_amount",
             "source", "deal_kind", "transfer_number", "settled_point_at", "codes_written_off_at", "settled_supplier_at", "responsible", "reserve_until",
-            "special_terms", "special_amount", "receipt_needed", "wait_wish", "wait_analogs", "wait_other_sizes")
+            "special_terms", "special_amount", "prepay", "prepay_amount", "receipt_needed", "wait_wish", "wait_analogs", "wait_other_sizes")
 LABELS = {"client_name": "Клиент", "client_phone": "Телефон", "avito_chat": "Чат Авито", "point_id": "Точка", "delivery_date": "Дата доставки",
           "delivery_time": "Время доставки", "tags": "Теги", "comment": "Комментарий", "webmim_id": "ID заказа WebMIM",
           "webmim_number": "Номер заказа WebMIM", "webmim_status": "Статус WebMIM", "cancel_reason": "Причина отмены",
           "return_kind": "Тип возврата", "return_reason": "Причина возврата", "return_amount": "Сумма возврата",
-          "source": "Откуда", "deal_kind": "Тип сделки", "transfer_number": "Номер перемещения", "responsible": "Ответственный", "reserve_until": "Крайняя дата резерва", "special_terms": "Особые условия", "special_amount": "Сумма по особым условиям",
+          "source": "Откуда", "deal_kind": "Тип сделки", "transfer_number": "Номер перемещения", "responsible": "Ответственный", "reserve_until": "Крайняя дата резерва", "special_terms": "Особые условия", "special_amount": "Сумма по особым условиям", "prepay": "Предоплата", "prepay_amount": "Сумма предоплаты",
           "receipt_needed": "Нужен товарный чек", "wait_wish": "Пожелания клиента (лист ожидания)", "wait_analogs": "Можно другие бренды", "wait_other_sizes": "Можно другие размеры", **MARKS}
 CARD_FIELDS = ("id, pipeline_id, stage_id, client_name, client_phone, avito_chat, point_id, delivery_date, delivery_time, tags, comment, "
                "webmim_id, webmim_number, webmim_status, cancel_reason, return_kind, return_reason, return_amount, sale_ids, "
-               "source, deal_kind, transfer_number, settled_point_at, codes_written_off_at, settled_supplier_at, responsible, reserve_until, special_terms, special_amount, receipt_needed, "
+               "source, deal_kind, transfer_number, settled_point_at, codes_written_off_at, settled_supplier_at, responsible, reserve_until, special_terms, special_amount, prepay, prepay_amount, receipt_needed, "
                "wait_wish, wait_analogs, wait_other_sizes, created_at, created_by, entered_at, updated_at")
 MAX_TAGS, MAX_TAG, MAX_COMMENT, MAX_NOTE = 10, 30, 2000, 2000
 MAX_WISH = 1000                  # «Пожелания клиента» of «Лист ожидания» (the owner 2026-11-26): what the client waits for, in words
@@ -505,6 +505,19 @@ def _single(value, limit: int, label: str) -> str:
     if len(text) > limit:
         raise OrderError("%s: не длиннее %d знаков." % (label, limit))
     return text
+
+
+PREPAY_NEEDS_SUM = "Отмечена «Предоплата»: укажите сумму предоплаты в рублях (или снимите галочку)."
+
+
+def needs_prepay_sum(prepay, amount) -> bool:
+    """«Предоплата» ticked without its sum (the owner 2026-11-28: the sum is required)."""
+    return bool(prepay) and not float(amount or 0) > 0
+
+
+def _check_prepay(prepay, amount) -> None:
+    if needs_prepay_sum(prepay, amount):
+        raise OrderError(PREPAY_NEEDS_SUM)
 
 
 def _clean(key: str, value, conn):
@@ -566,7 +579,7 @@ def _clean(key: str, value, conn):
         return _single(value, 40, label)
     if key == "special_terms":
         return _single(value, 300, label)
-    if key == "special_amount":
+    if key in ("special_amount", "prepay_amount"):
         if not str(value or "").strip():
             return 0.0
         try:
@@ -581,7 +594,7 @@ def _clean(key: str, value, conn):
         if len(text) > MAX_WISH:
             raise OrderError("Пожелания клиента: не длиннее %d знаков." % MAX_WISH)
         return text
-    if key in ("receipt_needed", "wait_analogs", "wait_other_sizes"):
+    if key in ("receipt_needed", "prepay", "wait_analogs", "wait_other_sizes"):
         return 1 if str(value or "").strip().lower() in ("1", "on", "true", "да") else 0
     if key == "responsible":
         return _single(value, 60, label)
@@ -648,6 +661,7 @@ def create_card(conn, fields: dict, now: str, author: str, require_contact: bool
     `scope_point`: the point the order is made for when the caller sets it after (a call, a chat of a point's account).
     `many_open`: the rule does not hold (an order of the client's catalog: a buyer makes several, the owner 2026-10-30)."""
     clean = {k: _clean(k, v, conn) for k, v in fields.items() if k in EDITABLE}
+    _check_prepay(clean.get("prepay", 0), clean.get("prepay_amount", 0.0))
     if require_contact and not any(clean.get(k) for k in ("client_name", "client_phone", "avito_chat")):
         raise OrderError("Укажите хотя бы имя, телефон или чат клиента.")
     stage = stage or _first_stage(conn)
@@ -777,7 +791,8 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
     not theirs (хвост З15: no empty client is made, no phone is added to the client put aside)."""
     card = _row(conn, card_id)
     clean = {k: _clean(k, v, conn) for k, v in changes.items() if k in EDITABLE}
-    changed = {k: v for k, v in clean.items() if card[k] != v and not (k in ("return_amount", "special_amount") and float(card[k]) == float(v))}
+    _check_prepay(clean.get("prepay", card["prepay"]), clean.get("prepay_amount", card["prepay_amount"]))
+    changed = {k: v for k, v in clean.items() if card[k] != v and not (k in ("return_amount", "special_amount", "prepay_amount") and float(card[k]) == float(v))}
     if not changed:
         return []
     before = _stage_gaps(conn, card_id)
@@ -786,9 +801,9 @@ def update_card(conn, card_id, changes: dict, now: str, author: str, commit: boo
     if "webmim_number" in changed:                                      # when it was typed (webmim_cabinet.typed_since_release)
         _mark_number(conn, card_id, changed["webmim_number"], now)
     for key, value in changed.items():
-        if key in ("receipt_needed", "wait_analogs", "wait_other_sizes"):
+        if key in ("receipt_needed", "prepay", "wait_analogs", "wait_other_sizes"):
             shown = "да" if value else "нет"
-        elif key == "special_amount":
+        elif key in ("special_amount", "prepay_amount"):
             shown = ("%.2f" % value).rstrip("0").rstrip(".") if value else "(пусто)"
         else:
             shown = "(пусто)" if value in ("", None, 0, 0.0) else str(value)[:80]
