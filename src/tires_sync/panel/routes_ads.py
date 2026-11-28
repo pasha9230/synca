@@ -5,10 +5,11 @@ address; the levels and «Колонки» are kept for the person)."""
 from __future__ import annotations
 
 from urllib.parse import urlencode
+from datetime import date, timedelta
 
 from flask import abort, redirect, render_template, request
 
-from .. import ads_spend, ads_tree, users
+from .. import ads_spend, ads_tree, users, user_prefs
 from .common import current_user, get_conn, local_today, login_required, now_iso, safe_path
 
 PERIOD_NAMES = {7: "7 дней", 30: "30 дней", 90: "90 дней"}
@@ -19,9 +20,11 @@ REASON_NAMES = {ads_spend.NO_CHAT: "у заказа нет чата Авито �
 PATH = "/economics/ads"
 
 
-def address(p: int, g, s: str, d: str, f: str) -> str:
+def address(p: int, g, s: str, d: str, f: str, start: str = "", end: str = "") -> str:
     """The address of the page with this choice: the default sort (by the spending, the most first) is spelled too, «d=asc» only when up."""
     query = [("p", p), ("g", ",".join(g)), ("s", s)] + ([("d", "asc")] if d == "asc" else []) + ([("f", f)] if f else [])
+    if start and end:
+        query += [("start", start), ("end", end)]
     return PATH + "?" + urlencode(query, safe=",")
 
 
@@ -35,6 +38,27 @@ def register(app) -> None:
         except ValueError:
             days = 30
         days = days if days in ads_spend.PERIODS else 30
+        today = local_today()
+        start_raw, end_raw = request.args.get("start", ""), request.args.get("end", "")
+        explicit = bool(start_raw or end_raw)
+        saved = None
+        if not explicit and "p" not in request.args:
+            saved = user_prefs.get(conn, login, "ads.period")
+            if isinstance(saved, dict):
+                start_raw, end_raw = saved.get("start", ""), saved.get("end", "")
+        valid_range = False
+        try:
+            start, end = date.fromisoformat(start_raw), date.fromisoformat(end_raw)
+            if start > end or end > today or (end - start).days >= ads_spend.KEEP_DAYS:
+                raise ValueError("invalid range")
+            days = (end - start).days + 1
+            valid_range = True
+        except (ValueError, TypeError):
+            end = today - timedelta(days=1)
+            start = end - timedelta(days=days - 1)
+        start_raw, end_raw = start.isoformat(), end.isoformat()
+        if ((explicit and valid_range) or (not explicit and "p" in request.args)) and user_prefs.get(conn, login, "ads.period") != {"start": start_raw, "end": end_raw}:
+            user_prefs.put(conn, login, "ads.period", {"start": start_raw, "end": end_raw}, now_iso())
         asked = request.args.getlist("l") and ",".join(request.args.getlist("l")) or request.args.get("g", "")
         levels = ads_tree.parse_levels(asked)
         if levels:
@@ -44,17 +68,17 @@ def register(app) -> None:
         sort = request.args.get("s", "")
         desc = request.args.get("d", "") != "asc"
         only = request.args.get("f", "")
-        data = ads_tree.build(conn, local_today(), days, levels, sort, desc, only)
+        data = ads_tree.build(conn, end + timedelta(days=1), days, levels, sort, desc, only, custom=True)
         hidden = set(ads_tree.hidden_columns(conn, login))
         shown = [c for c in ads_tree.COLUMNS if c[0] not in hidden and c[0] in data["filled"] | {"spend"}]
-        state = {"p": data["days"], "g": data["levels"], "s": data["sort"], "d": "" if data["desc"] else "asc", "f": data["only"]}
+        state = {"p": data["days"], "g": data["levels"], "s": data["sort"], "d": "" if data["desc"] else "asc", "f": data["only"], "start": start_raw if explicit or saved else "", "end": end_raw if explicit or saved else ""}
 
         def url(**changes):
             return address(**dict(state, **changes))
 
         return render_template("ads_analytics.html", data=data, periods=PERIOD_NAMES, filters=FILTER_NAMES, reasons=REASON_NAMES,
                                levels=ads_tree.LEVELS, columns=ads_tree.COLUMNS, shown=shown, hidden=hidden, url=url,
-                               here=url(), no_data=ads_tree.NO_DATA)
+                               here=url(), no_data=ads_tree.NO_DATA, today=today.isoformat())
 
     @app.route(PATH + "/columns", methods=["POST"])
     @login_required

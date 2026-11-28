@@ -153,7 +153,7 @@ def test_the_sort_is_a_link_on_the_head_down_first_then_up(tmp_path):
     assert "Просмотры ▲" in page and 'href="/economics/ads?p=7&amp;g=account,brand,ad&amp;s=views"' in page
     body = page.split("<tbody>", 1)[1]
     assert body.index("Шина-Колесо") < body.index("Основной")
-    assert 'href="/economics/ads?p=30&amp;g=account,brand,ad&amp;s=views&amp;d=asc"' in page          # the period keeps the sort
+    assert 'name="s" value="views"' in page and 'name="d" value="asc"' in page and 'data-preset="30"' in page
 
 
 def test_the_levels_are_kept_in_the_address_and_for_the_person(tmp_path):
@@ -186,7 +186,7 @@ def test_the_empty_columns_are_hidden_and_the_filters_kept_in_the_links(tmp_path
     assert 'href="/economics/ads?p=7&amp;g=account,brand,ad&amp;s=spend&amp;f=sales"' in page
     page = owner.get("/economics/ads?p=7&f=sales").get_data(as_text=True)
     assert "Cordiant" not in page and "Нет объявлений с продажами" in page
-    assert 'href="/economics/ads?p=30&amp;g=account,brand,ad&amp;s=spend&amp;f=sales"' in page
+    assert 'name="f" value="sales"' in page and 'data-preset="30"' in page
 
 
 def test_the_change_against_the_previous_period_is_shown_on_the_total_and_the_top_level(tmp_path):
@@ -221,3 +221,23 @@ def test_the_columns_of_the_partner_are_kept_and_the_others_may_not_post_them(tm
     with viewer.session_transaction() as s:
         s["csrf"] = "tok"
     assert viewer.post("/economics/ads/columns", data={"csrf": "tok", "show": ["spend"]}).status_code == 403
+
+
+def test_custom_period_is_saved_per_user_and_previous_period_is_aligned(tmp_path):
+    owner, conn = two_accounts(tmp_path)
+    page = owner.get('/economics/ads?start=2026-11-07&end=2026-11-09').get_data(as_text=True)
+    assert 'С 2026-11-07 по 2026-11-09' in page
+    assert 'с 2026-11-04 по 2026-11-06' in page
+    assert '1 234 ₽' in page
+    page = owner.get('/economics/ads').get_data(as_text=True)
+    assert 'С 2026-11-07 по 2026-11-09' in page
+    assert 'start=2026-11-07&amp;end=2026-11-09' in page
+    partner = as_user(owner.application, conn, 'other_period', 'partner')
+    assert 'С 2026-11-07 по 2026-11-09' not in partner.get('/economics/ads').get_data(as_text=True)
+
+
+def test_invalid_date_range_is_not_saved(tmp_path):
+    owner, conn = two_accounts(tmp_path)
+    owner.get('/economics/ads?start=2026-11-07&end=2026-11-09')
+    owner.get('/economics/ads?start=2026-11-09&end=2026-11-07')
+    assert 'С 2026-11-07 по 2026-11-09' in owner.get('/economics/ads').get_data(as_text=True)

@@ -232,15 +232,15 @@ def _filled(leaves: List[dict]) -> set:
     return out
 
 
-def build(conn, today: date, days: int, levels: Iterable[str], sort: str = "spend", desc: bool = True, only: str = "") -> dict:
+def build(conn, today: date, days: int, levels: Iterable[str], sort: str = "spend", desc: bool = True, only: str = "", *, custom: bool = False) -> dict:
     """The page: the tree of the period, «Итого» and the change against the previous period of the same length. Read only."""
-    if days not in ads_spend.PERIODS:
-        raise ValueError("period must be one of %s" % (ads_spend.PERIODS,))
+    if days not in ads_spend.PERIODS and not (custom and 1 <= days <= ads_spend.KEEP_DAYS):
+        raise ValueError("invalid period")
     levels = parse_levels(",".join(levels)) or DEFAULT_LEVELS
     sort = sort if sort in SORTABLE else "spend"
     only = only if only in ads_spend.FILTERS else ""
-    now = ads_spend.report(conn, today, days)
-    before = ads_spend.report(conn, today - timedelta(days=days), days)
+    now = ads_spend.report(conn, today, days, custom=custom)
+    before = ads_spend.report(conn, today - timedelta(days=days), days, custom=custom)
     leaves, old = _leaves(now["accounts"], only), _leaves(before["accounts"], only)
     attrs = attributes(conn, [(leaf["account_id"], leaf["row"]["ad_id"]) for leaf in leaves + old], today)
     for leaf in leaves + old:

@@ -807,12 +807,12 @@ def _summary(accounts: List[dict]) -> dict:
     return {"rows": lines, "total": total}
 
 
-def report(conn, today: date, days: int, sort: str = "spend", account: Optional[int] = None, only: str = "") -> dict:
+def report(conn, today: date, days: int, sort: str = "spend", account: Optional[int] = None, only: str = "", *, custom: bool = False) -> dict:
     """The page: the summary per feed account and the total; per account its ads (those with spending, views or sales in the period, `only`
     those with sales / with spending), their totals (whatever the filter), how many days of the period are read, how many prices of a view
     are read; `account` the one shown (the first by default); the sales without an ad apart, with why. Read only."""
-    if days not in PERIODS:
-        raise ValueError("period must be one of %s" % (PERIODS,))
+    if days not in PERIODS and not (custom and 1 <= days <= KEEP_DAYS):
+        raise ValueError("invalid period")
     sort = sort if sort in SORTS else "spend"
     only = only if only in FILTERS else ""
     since, until = bounds(today, days)
