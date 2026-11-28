@@ -628,6 +628,8 @@ def register(app) -> None:
                 holes, pcd = map(wheel_catalog.number, pattern)
                 rows = [row for row in rows if wheel_catalog.number(row['wheel'].holes) == holes
                         and wheel_catalog.number(row['wheel'].pcd) == pcd]
+            elif car['variant']:
+                rows = []
             filters_active = filters_active or bool(car['make'])
             published = None
             account = connections.get_account(conn, connections.PRIMARY_ACCOUNT)
