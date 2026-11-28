@@ -56,3 +56,34 @@ def test_collapsed_extra_filters_stay_collapsed_and_unknown_option_is_visible(tm
     assert 'value="8" selected' in page
     assert 'data-wheel-details open' not in page
     assert 'По выбранным условиям диски не найдены' in page
+
+
+def test_vehicle_selection_filters_by_bolt_pattern_and_keeps_other_filters(tmp_path, monkeypatch):
+    from tires_sync.panel import vehicle_fitment
+    records = [
+        {'make': 'Example', 'model': 'Example One', 'year': '2020-2022', 'chassis_code': 'A',
+         'bolt_pattern': '5x114.3', 'center_bore_mm': '66.1', 'oe_wheel': '16x6.5 ET40'},
+        {'make': 'Example', 'model': 'Example One', 'year': '2020-2022', 'chassis_code': 'B',
+         'bolt_pattern': '5x100', 'center_bore_mm': '57.1', 'oe_wheel': ''},
+    ]
+    monkeypatch.setattr(vehicle_fitment, 'dataset', lambda: records)
+    app, client, _ = world(tmp_path)
+    base = '/catalog?category=wheels&car_make=Example&car_year=2021&car_model=Example+One'
+    page = client.get(base).get_data(as_text=True)
+    assert 'Модификация автомобиля' in page and '5x114.3' in page
+    selected = vehicle_fitment.selection({'car_make': 'Example', 'car_year': '2021', 'car_model': 'Example One'})
+    index = next(i for i, v in enumerate(selected['variants']) if v[1] == '5x100')
+    page = client.get(base + '&car_variant=' + str(index)).get_data(as_text=True)
+    assert 'Silver rim' not in page and 'Black rim' not in page
+    index = next(i for i, v in enumerate(selected['variants']) if v[1] == '5x114.3')
+    page = client.get(base + '&car_variant=' + str(index) + '&brand=Brand').get_data(as_text=True)
+    assert 'Silver rim' in page and 'Black rim' not in page
+    assert 'Проверьте совместимость перед установкой' in page
+    assert 'ANKUSI Wheel Fitment Dataset' in page
+
+
+def test_vehicle_dataset_is_available_and_untrusted_selection_is_safe():
+    from tires_sync.panel import vehicle_fitment
+    assert len(vehicle_fitment.dataset()) > 10000
+    assert vehicle_fitment.selection({'car_make': 'BMW', 'car_year': '2020', 'car_model': 'missing', 'car_variant': '0'})['variant'] is None
+    assert vehicle_fitment.bolt_pattern(('A', 'invalid', '', '')) is None

@@ -5,3 +5,12 @@
 .wheel-more,.wheel-footer{grid-column:1;grid-row:3}.wheel-footer{border:0;padding-top:16px;align-self:start;justify-content:flex-end;pointer-events:none}.wheel-footer a,.wheel-footer button{pointer-events:auto}.wheel-more summary{list-style:none}.wheel-more summary::-webkit-details-marker{display:none}
 
 .wheel-items .t-namecol{max-width:none;min-width:220px}.wheel-items td{vertical-align:middle}.wheel-preview{display:inline;position:relative}.wheel-preview summary{display:inline;cursor:pointer;color:var(--primary-600)}.wheel-preview-body{padding:8px;margin-top:4px;border:1px solid var(--gray-200);background:var(--gray-0);border-radius:6px;white-space:normal}
+
+/* Layout follows the supplier filter panel; no unsupported filters are applied. */
+.wheel-reference-panel{grid-template-areas:"car" "parameters" "secondary" "actions"}
+.wheel-car-panel{grid-area:car;display:flex;align-items:center;flex-wrap:wrap;gap:16px}.wheel-car-panel[hidden]{display:none}.wheel-car-panel .select{min-width:160px}
+.wheel-parameters{grid-area:parameters}.wheel-secondary{grid-area:secondary;grid-template-columns:minmax(160px,1.1fr) minmax(140px,1fr) minmax(180px,1fr) minmax(280px,1.3fr) minmax(100px,.5fr)}
+.wheel-precise{white-space:nowrap;color:var(--gray-400);display:flex;gap:8px;align-items:center;min-height:40px}.wheel-precise input{appearance:none;width:36px;height:20px;border-radius:12px;background:var(--gray-200);margin:0}.wheel-precise input:before{content:"";display:block;width:18px;height:18px;border-radius:50%;background:var(--gray-0);box-shadow:0 1px 3px #0003}
+.wheel-more,.wheel-footer{grid-area:actions}.wheel-footer{justify-content:space-between}.wheel-car-toggle{pointer-events:auto;display:inline-flex;gap:8px;align-items:center;border:0;background:transparent;color:var(--primary-600);font:inherit;font-weight:600;cursor:pointer}.wheel-car-toggle svg{width:18px;height:18px}
+@media(max-width:1100px){.wheel-secondary{grid-template-columns:repeat(2,minmax(0,1fr))}.wheel-origin{grid-column:auto}}
+@media(max-width:600px){.wheel-secondary{grid-template-columns:1fr}.wheel-footer{position:relative;z-index:1}.wheel-car-toggle,.wheel-reset{font-size:12px}.wheel-more summary{padding-top:34px}}
