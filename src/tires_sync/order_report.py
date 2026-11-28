@@ -11,6 +11,7 @@ The purchase of an order paired with an order of WebMIM (server prod) is counted
 written anywhere. No pair, no price, the test server, an earlier sale: the sale as written."""
 from __future__ import annotations
 
+import calendar
 import json
 import math
 import re
@@ -636,10 +637,59 @@ def _kpi(conn, handed: dict, rates: List[dict], by_point: Dict[int, List[dict]],
                     count["cycles"] += 1
                     if bonus and (not start or entry["day"] >= start):
                         premiums.setdefault(to, []).append({"month": month, "cycle": count["cycles"], "day": entry["day"], "fee": bonus,
-                                                            "item": kpi_item(month, count["cycles"])})
+                                                            "item": kpi_item(month, count["cycles"]), "order": entry["order"]})
             count["fee"] = round(count["cycles"] * bonus, 2)
             progress.setdefault(to, {})[month] = count
     return premiums, progress
+
+
+def order_kpi(conn, order_id: int, day: str, handed: dict, rates: List[dict], by_point: Dict[int, List[dict]], fixed: dict) -> float:
+    """The KPI premiums this order closes (the premium is the point's on the day of the order that closes it), with the sums the office
+    set (point_item_fix «kpi»), counted as `build` counts the month of `day` (_kpi): 0 for an order of a client nobody handed over."""
+    to = handed.get(order_id)
+    if to is None or not day:
+        return 0.0
+    first = day[:8] + "01"
+    last = "%s-%02d" % (day[:7], calendar.monthrange(int(day[:4]), int(day[5:7]))[1])
+    found, _progress = _kpi(conn, {o: t for o, t in handed.items() if t == to}, rates, by_point, first, last)
+    total = 0.0
+    for premium in found.get(to, []):
+        if premium["order"] != order_id:
+            continue
+        premium["kpi"] = premium["fee"]
+        _fix(premium, fixed.get((to[1], premium["item"])) if to[0] == "id" else None, ("kpi",))
+        total += premium["kpi"]
+    return round(total, 2)
+
+
+def order_fee(conn, order_id: int, counted: List[dict], keeps_before: str = "") -> float:
+    """What the points get for one sold order (the owner 2026-11-28: the profit of the Google table's rows takes off what the report does,
+    one count): the fee of the issue, the bonus of a handed-over client and of the tyres sold from «На ОТХ» (fee_parts), the sums the office
+    set (fixes) and the KPI premiums the order closes (order_kpi). `counted`: the order's sales as _counted gives them. An order sold before
+    `keeps_before` with no sum set by the office keeps the bonuses it was written with (legacy_fee; order_sheet.KEEPS_BEFORE).
+    The office's «Корректировка» (point_adjust) is a sum of a point and a day, of no order: it is in the report, not here."""
+    rates, day = list_rates(conn), min(r["day"] for r in counted)
+    by_point = _by_point(list_point_rates(conn))                                  # a point's own rates (ТЗ 95)
+    issued = next((r["point_id"] for r in counted if r.get("point_id") is not None), None)
+    pieces = sum(r["pieces"] for r in counted)
+    handed, _names = handed_points(conn)                                          # «чей клиент»: the report's one rule
+    key = ("id", issued) if issued is not None else ("name", "")
+    whole, taken = oth_pieces(conn, [order_id])
+    got = fee_parts(rates, by_point, key, day, pieces, order_id in handed, handed.get(order_id), bool(oth_sold_orders(conn, [order_id])),
+                    from_oth(order_id, key, pieces, whole, taken))
+    fixed = fixes(conn)
+    item = "order:%d" % order_id
+    theirs = got["handoff_to"][1] if got["handoff_to"] is not None and got["handoff_to"][0] == "id" else None
+    if keeps_before and day < keeps_before and not fixed.get((issued, item)) and not fixed.get((theirs, item)):
+        fee = legacy_fee(rates, by_point, key, day, pieces, order_id in handed, handed.get(order_id),
+                         bool(oth_sold_orders(conn, [order_id], acting=True)))   # the bonus as it was written
+    else:
+        mine = _fix(dict(got), fixed.get((issued, item)), ("issue", "oth"))
+        fee = got["issue"] + got["oth"] + sum(mine.values())
+        if got["handoff_to"] is not None:
+            fee += got["handoff"] + sum(_fix(dict(got), fixed.get((theirs, item)), ("handoff",)).values())
+    fee += order_kpi(conn, order_id, day, handed, rates, by_point, fixed)
+    return round(fee, 2)
 
 
 def _payout(payouts: Dict[tuple, Dict[str, dict]], key: tuple, note: str, day: str, order: Optional[int] = None, item: str = "") -> dict:

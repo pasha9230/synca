@@ -223,6 +223,11 @@ def no_status_move(conn, order_id: int, was_code: str, code: str, kind: str, rea
     return conn.execute("SELECT 1 FROM app_state WHERE key = ?", (NO_STATUS_KEY % int(order_id),)).fetchone() is not None
 
 
+def marked_no_status(conn, order_id: int) -> bool:
+    """The order holds the mark «точка не передала статус» (set by the reason of the move, no_status_move)."""
+    return conn.execute("SELECT 1 FROM app_state WHERE key = ?", (NO_STATUS_KEY % int(order_id),)).fetchone() is not None
+
+
 def no_status(conn) -> set:
     """The orders cancelled with «точка не передала статус» (the owner 2026-11-27, orders.NO_STATUS: the tyres came, the point did not
     pass the status, the client cancelled after waiting): their arrival pays nothing — not «к начислению», not in the sums, nor a return of

@@ -43,6 +43,22 @@ RENAMED_KEY = "stage_names_2026_11_03"          # app_state: the renaming was do
 NO_STATUS = "точка не передала статус"
 CANCEL_KINDS = ("отменил клиент", "не выкупил", "отказ клиента", NO_STATUS, "другое")     # «отказ клиента»: the tyres went to «На ОТХ» (oth_storage, 2026-11-10)
 NOT_BOUGHT = "не выкупил"
+# the panel's own cancels, no refusal of the client (a merge, its undoing, the tyres back to an order, «Нет» of the waiting list)
+_OWN_CANCELS = ("другое: объединён в заказ", "другое: разъединён на заказы", "другое: возвращено в заказ", "другое: клиент отказался от ожидания")
+
+
+def _closes_not_bought(conn, card: dict, code: str, reason) -> bool:
+    """The move closes the order as «Н» of the Google table (the owner 2026-11-28: «Неблагонадёжный» for «Н», never for «О»): to «На ОТХ»,
+    or to «Отмена» with the tyres come (order_sheet.tyres_came) — from a stage before both, not by the panel's own cancels."""
+    was = card["stage"].get("code")
+    if was == "cancel" or was in RETURN_STAGES or code not in ("cancel", "oth"):
+        return False
+    if " ".join(str(reason or "").split()).casefold().startswith(_OWN_CANCELS):
+        return False
+    from . import order_sheet
+    return code == "oth" or order_sheet.tyres_came(conn, int(card["id"]))
+
+
 OLD_CANCEL_NAME = "Отмена"                      # the name of «cancel» before the merge: renamed only while the owner kept it
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 STAGE_FIELDS = "id, code, name, color, position, kind, hint, limit_hours, on_board"
@@ -1197,16 +1213,16 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         raise _refuse_move(conn, card_id, now, author, "По заказу записана продажа: сначала сторнируйте её, потом переносите заказ.", journal)
     requested_stage = stage["code"]
     reason = (changes or {}).get("cancel_reason") or card.get("cancel_reason") or ""
-    refusal_kind = str(reason).partition(":")[0].strip().casefold()
     from . import point_arrival
     # «точка не передала статус» (the owner 2026-11-27): a mark of its own, set by the reason given with this move (never found in an old
     # text), kept while the tyres wait (cancel, «На ОТХ», the return), taken off when the order is back in work (the review 2026-11-27)
     no_status = point_arrival.no_status_move(conn, card_id, card["stage"].get("code"), stage["code"], stage["kind"],
                                              (changes or {}).get("cancel_reason"))
-    if requested_stage in ("cancel", "oth") and refusal_kind in ("отменил клиент", "отказ клиента", "отказ клиента на точке") \
-            and not no_status:                                              # the point's fault, not the client's
-        from . import clients
-        clients.mark_order_refusal(conn, card_id, now, author)
+    from . import clients
+    if not no_status and _closes_not_bought(conn, card, requested_stage, reason):   # «точка не передала статус»: the point's fault
+        clients.mark_order_refusal(conn, card_id, now, author, track=True)
+    elif stage["kind"] == "open" and requested_stage not in point_arrival.NO_STATUS_STAGES:
+        clients.unmark_order_refusal(conn, card_id, now, author)             # back in work from «Н» (the owner 2026-11-28, an assumption)
     stored = None                                                           # the record of storage this move makes (the owner 2026-11-10)
     try:
         if oth_split and stage["code"] == "oth" and card["stage"].get("code") not in RETURN_STAGES and oth_storage.splits(conn, card):

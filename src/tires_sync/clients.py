@@ -909,10 +909,37 @@ def set_tag(conn, client_id, tag: str, on: bool, now: str, author: str) -> None:
 REFUSED_ORDER_TAG = "Неблагонадёжный"
 
 
-def mark_order_refusal(conn, order_id, now: str, author: str) -> None:
+# the owner 2026-11-28: «Неблагонадёжный» for an order closed as «Н» (the tyres came, the client did not buy); the order back in work
+# takes it off — only the tag such an order put (REFUSAL_AUTO: the client had none), while no other order of the client is «Н»
+REFUSAL_ORDER = "refusal_tag:%d"            # app_state: the order closed as «Н» → its client's id
+REFUSAL_AUTO = "refusal_tag_auto:%d"        # app_state: the client's tag was put by such an order, not by hand
+
+
+def mark_order_refusal(conn, order_id, now: str, author: str, track: bool = False) -> None:
+    """`track` (orders.move_card, the order closed as «Н»): the order and an automatic tag are remembered for unmark_order_refusal."""
     client = client_of_order(conn, order_id)
-    if client is not None:
-        set_tag(conn, client["id"], REFUSED_ORDER_TAG, True, now, author)
+    if client is None:
+        return
+    if track:
+        had = any(t.casefold() == REFUSED_ORDER_TAG.casefold() for t in tags_of(conn, client["id"]))
+        conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, ?)", (REFUSAL_ORDER % int(order_id), str(client["id"])))
+        if not had:
+            conn.execute("INSERT OR REPLACE INTO app_state VALUES (?, '1')", (REFUSAL_AUTO % client["id"],))
+    set_tag(conn, client["id"], REFUSED_ORDER_TAG, True, now, author)
+
+
+def unmark_order_refusal(conn, order_id, now: str, author: str) -> None:
+    """The order closed as «Н» is back in work: its mark goes; the tag goes too if that order's kind put it (not typed by hand) and no other
+    order of the client stays «Н». No commit."""
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (REFUSAL_ORDER % int(order_id),)).fetchone()
+    if row is None:
+        return
+    conn.execute("DELETE FROM app_state WHERE key = ?", (REFUSAL_ORDER % int(order_id),))
+    client_id = int(row[0])                                                 # the client who refused, whoever the order's client is now
+    if conn.execute("SELECT 1 FROM app_state WHERE key LIKE 'refusal_tag:%' AND value = ?", (str(client_id),)).fetchone():
+        return
+    if conn.execute("DELETE FROM app_state WHERE key = ?", (REFUSAL_AUTO % client_id,)).rowcount:
+        set_tag(conn, client_id, REFUSED_ORDER_TAG, False, now, author)
 
 
 def _not_same(conn, one: int, two: int, now: str, author: str) -> None:
