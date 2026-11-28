@@ -1219,10 +1219,12 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     no_status = point_arrival.no_status_move(conn, card_id, card["stage"].get("code"), stage["code"], stage["kind"],
                                              (changes or {}).get("cancel_reason"))
     from . import clients
+    # «Неблагонадёжный» (the owner 2026-11-28): decided now (the way to «На ОТХ» unlinks the client), written only once the move is made
+    refusal = None
     if not no_status and _closes_not_bought(conn, card, requested_stage, reason):   # «точка не передала статус»: the point's fault
-        clients.mark_order_refusal(conn, card_id, now, author, track=True)
+        refusal = ("mark", clients.client_of_order(conn, card_id))
     elif stage["kind"] == "open" and requested_stage not in point_arrival.NO_STATUS_STAGES:
-        clients.unmark_order_refusal(conn, card_id, now, author)             # back in work from «Н» (the owner 2026-11-28, an assumption)
+        refusal = ("unmark", None)                                           # back in work from «Н» (an assumption)
     stored = None                                                           # the record of storage this move makes (the owner 2026-11-10)
     try:
         if oth_split and stage["code"] == "oth" and card["stage"].get("code") not in RETURN_STAGES and oth_storage.splits(conn, card):
@@ -1256,6 +1258,10 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         conn.rollback()
         return False
     add_event(conn, card_id, now, author, "stage", "Этап: «%s» → «%s»" % (card["stage"]["name"], stage["name"]))
+    if refusal and refusal[0] == "mark":
+        clients.mark_order_refusal(conn, card_id, now, author, track=True, client=refusal[1])
+    elif refusal:
+        clients.unmark_order_refusal(conn, card_id, now, author)
     from . import point_arrival
     point_arrival.moved(conn, card_id, card["stage"].get("code"), stage["code"], now, author, stage["kind"])   # the tyres the point got (2026-11-25)
     for (refused,) in conn.execute("SELECT e.id FROM order_event e WHERE e.order_id = ? AND e.kind = 'refused' AND e.level = 'red' AND NOT EXISTS ("

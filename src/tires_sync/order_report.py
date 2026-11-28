@@ -15,6 +15,8 @@ import calendar
 import json
 import math
 import re
+import threading
+from contextlib import contextmanager
 from datetime import date
 from typing import Dict, List, Optional
 
@@ -643,6 +645,21 @@ def _kpi(conn, handed: dict, rates: List[dict], by_point: Dict[int, List[dict]],
     return premiums, progress
 
 
+_PASS = threading.local()                    # kpi_pass: the premiums of a month counted once for a whole pass (the review 2026-11-28)
+
+
+@contextmanager
+def kpi_pass():
+    """One pass over many orders (order_sheet.flush): the premiums of a point's month are counted once, not for every row. The sales do
+    not change within the pass (the table writes none)."""
+    outer = getattr(_PASS, "cache", None)
+    _PASS.cache = {} if outer is None else outer
+    try:
+        yield
+    finally:
+        _PASS.cache = outer
+
+
 def order_kpi(conn, order_id: int, day: str, handed: dict, rates: List[dict], by_point: Dict[int, List[dict]], fixed: dict) -> float:
     """The KPI premiums this order closes (the premium is the point's on the day of the order that closes it), with the sums the office
     set (point_item_fix «kpi»), counted as `build` counts the month of `day` (_kpi): 0 for an order of a client nobody handed over."""
@@ -650,12 +667,18 @@ def order_kpi(conn, order_id: int, day: str, handed: dict, rates: List[dict], by
     if to is None or not day:
         return 0.0
     first = day[:8] + "01"
-    last = "%s-%02d" % (day[:7], calendar.monthrange(int(day[:4]), int(day[5:7]))[1])
-    found, _progress = _kpi(conn, {o: t for o, t in handed.items() if t == to}, rates, by_point, first, last)
+    cache = getattr(_PASS, "cache", None)
+    found = cache.get((to, first)) if cache is not None else None
+    if found is None:
+        last = "%s-%02d" % (day[:7], calendar.monthrange(int(day[:4]), int(day[5:7]))[1])
+        found = _kpi(conn, {o: t for o, t in handed.items() if t == to}, rates, by_point, first, last)[0].get(to, [])
+        if cache is not None:
+            cache[(to, first)] = found
     total = 0.0
-    for premium in found.get(to, []):
+    for premium in found:
         if premium["order"] != order_id:
             continue
+        premium = dict(premium)                                                 # the cached one stays as counted
         premium["kpi"] = premium["fee"]
         _fix(premium, fixed.get((to[1], premium["item"])) if to[0] == "id" else None, ("kpi",))
         total += premium["kpi"]

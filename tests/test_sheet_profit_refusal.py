@@ -10,6 +10,7 @@ from test_point_kpi import NOW, clients as handed_orders
 from tires_sync import clients, order_report, order_sheet, orders, point_payouts, sales
 
 START, END = "2026-12-01", "2026-12-31"
+OTH_SPLIT = True                     # as the server: «На ОТХ» splits into a record of storage (HANDOFF §7)
 
 
 def _fee(conn, order_id):
@@ -104,3 +105,54 @@ def test_no_mark_for_the_point_that_did_not_pass_the_status(tmp_path):
                             oth_split=False)
     conn.commit()
     assert order_sheet.realization(orders.get_card(conn, cid), conn) == order_sheet.NOT_BOUGHT and not _tagged(conn, cid)
+
+
+def test_a_refused_move_puts_no_mark(tmp_path, monkeypatch):
+    from tires_sync import oth_sale
+    conn = order_db(tmp_path)
+    a = point(conn, "Альфа")
+    cid = card(conn, a)
+    go(conn, cid, "placed", "moving", "at_point")
+    conn.commit()
+    monkeypatch.setattr(oth_sale, "holds", lambda conn, order_id: [{"order": 1}])        # tyres held: «Отмена» refused after the checks
+    monkeypatch.setattr(oth_sale, "holds_text", lambda held, can: "шины придержаны")
+    try:
+        orders.move_card(conn, cid, stage(conn, "cancel"), DAY, "o", {"cancel_reason": orders.cancel_reason_of("другое", "передумал")},
+                         oth_split=False)
+    except orders.OrderError:
+        pass
+    assert orders.get_card(conn, cid)["stage"]["code"] == "at_point"
+    assert not _tagged(conn, cid)
+    assert conn.execute("SELECT 1 FROM app_state WHERE key = ?", (clients.REFUSAL_ORDER % cid,)).fetchone() is None
+
+
+def test_a_refused_way_back_keeps_the_mark(tmp_path):
+    import pytest
+    from test_oth_storage import split
+    conn = order_db(tmp_path)
+    cid, _record = split(conn, reason="Отказ клиента на точке: не подошли")      # «На ОТХ» with the split: the order cancelled, «Н»
+    conn.commit()
+    key = conn.execute("SELECT value FROM app_state WHERE key = ?", (clients.REFUSAL_ORDER % cid,)).fetchone()
+    assert key is not None and clients.REFUSED_ORDER_TAG in clients.tags_of(conn, int(key[0]))
+    with pytest.raises(orders.OrderError):                                       # back only to «На точке»: refused
+        orders.move_card(conn, cid, stage(conn, "moving"), "2026-10-22T10:00:00", "o")
+    assert conn.execute("SELECT 1 FROM app_state WHERE key = ?", (clients.REFUSAL_ORDER % cid,)).fetchone() is not None
+    assert clients.REFUSED_ORDER_TAG in clients.tags_of(conn, int(key[0]))
+    assert orders.move_card(conn, cid, stage(conn, "at_point"), "2026-10-22T10:00:00", "o")    # the client is back: in work
+    conn.commit()
+    assert clients.REFUSED_ORDER_TAG not in clients.tags_of(conn, int(key[0]))
+
+
+def test_the_kpi_of_a_month_is_counted_once_for_a_pass(tmp_path, monkeypatch):
+    conn = db(tmp_path)
+    a, b = point(conn, "Альфа"), point(conn, "Бета")
+    handed_orders(conn, a, 10, pieces=4, day="2026-12-05", issued=b)
+    calls = []
+    real = order_report._kpi
+    monkeypatch.setattr(order_report, "_kpi", lambda *args: calls.append(1) or real(*args))
+    alone = [_fee(conn, o) for o in range(1, 11)]
+    assert len(calls) == 10
+    calls.clear()
+    with order_report.kpi_pass():
+        once = [_fee(conn, o) for o in range(1, 11)]
+    assert len(calls) == 1 and once == alone

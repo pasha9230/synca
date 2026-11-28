@@ -915,9 +915,10 @@ REFUSAL_ORDER = "refusal_tag:%d"            # app_state: the order closed as «�
 REFUSAL_AUTO = "refusal_tag_auto:%d"        # app_state: the client's tag was put by such an order, not by hand
 
 
-def mark_order_refusal(conn, order_id, now: str, author: str, track: bool = False) -> None:
-    """`track` (orders.move_card, the order closed as «Н»): the order and an automatic tag are remembered for unmark_order_refusal."""
-    client = client_of_order(conn, order_id)
+def mark_order_refusal(conn, order_id, now: str, author: str, track: bool = False, client: Optional[dict] = None) -> None:
+    """`track` (orders.move_card, the order closed as «Н»): the order and an automatic tag are remembered for unmark_order_refusal.
+    `client`: the order's client found before the move (the way to «На ОТХ» unlinks it)."""
+    client = client or client_of_order(conn, order_id)
     if client is None:
         return
     if track:

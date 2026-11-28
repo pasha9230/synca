@@ -949,17 +949,18 @@ def flush(conn, box, http: Transport, now: str, full: bool = False, limit: Optio
         return {}
     client_baseline(conn, now)                                             # once: the names and phones changed before ТЗ №88 stay
     done: Dict[int, str] = {}
-    for card_id in _due(conn, now, full, limit):
-        if not _claim(conn, card_id, now):
-            continue
-        try:
-            done[card_id] = send_order(conn, card_id, s["url"], secret, http, now)
-        except Exception as err:                                           # one broken order never stops the others behind it
-            conn.rollback()
-            log.exception("the Google table: order %s", card_id)
-            row = conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()
-            done[card_id] = _failed(conn, card_id, row[0] if row else 0, "сбой панели (%s): сообщите разработчику." % type(err).__name__, now,
-                                    _last_event(conn, card_id))
+    with order_report.kpi_pass():                                          # the KPI of a month counted once for the pass
+        for card_id in _due(conn, now, full, limit):
+            if not _claim(conn, card_id, now):
+                continue
+            try:
+                done[card_id] = send_order(conn, card_id, s["url"], secret, http, now)
+            except Exception as err:                                       # one broken order never stops the others behind it
+                conn.rollback()
+                log.exception("the Google table: order %s", card_id)
+                row = conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()
+                done[card_id] = _failed(conn, card_id, row[0] if row else 0, "сбой панели (%s): сообщите разработчику." % type(err).__name__,
+                                        now, _last_event(conn, card_id))
     return done
 
 
