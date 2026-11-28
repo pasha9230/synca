@@ -26,7 +26,7 @@ from ..webmim import ParseResult, brand_key
 from ..settings_store import active_settings
 from .routes_main import context
 from .routes_orders import local_iso
-from . import client_catalog, routes_market, service, wheel_catalog
+from . import client_catalog, routes_market, service, wheel_catalog, vehicle_fitment
 
 
 def _num(args, name):
@@ -622,6 +622,13 @@ def register(app) -> None:
             rules = effective.get("wheel_pricing", {})
             current_overrides, overrides = raw.get("price_overrides", {}), effective.get("price_overrides", {})
             rows, filters, filters_active = wheel_catalog.filtered(wheels, request.args, lambda w: wheel_price(w, rules, overrides))
+            car = vehicle_fitment.selection(request.args)
+            pattern = vehicle_fitment.bolt_pattern(car['variant'])
+            if pattern:
+                holes, pcd = map(wheel_catalog.number, pattern)
+                rows = [row for row in rows if wheel_catalog.number(row['wheel'].holes) == holes
+                        and wheel_catalog.number(row['wheel'].pcd) == pcd]
+            filters_active = filters_active or bool(car['make'])
             published = None
             account = connections.get_account(conn, connections.PRIMARY_ACCOUNT)
             if account and app.config.get("FEED_ROOT"):
@@ -666,7 +673,7 @@ def register(app) -> None:
                 fetched_at = str(metadata.get("fetched_at") or "")[:40]
             except (OSError, ValueError, AttributeError):
                 fetched_at = ""
-            return render_template("catalog_wheels.html", wheels=rows, supplier_tabs=tabs, filters=filters, options=options,
+            return render_template("catalog_wheels.html", wheels=rows, supplier_tabs=tabs, filters=filters, options=options, car=car,
                                    filters_active=filters_active, more=(request.args.get("more") == "1" if "more" in request.args else bool(filters['pf'] or filters['pt'])),
                                    available=bool(wheels) or snapshot is not None, fetched_at=fetched_at, wheel_next=request.full_path.rstrip("?"))
         args = request.args                                                    # «Недавние» of the person (the owner 2026-11-09): the sizes searched
