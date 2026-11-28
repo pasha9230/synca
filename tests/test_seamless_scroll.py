@@ -1,5 +1,5 @@
 """Бесшовность (the owner 2026-11-28): the pages keep where one was and what one did. «Рабочее место» keeps its place after «Принял/Выдал»
-(app.js 13d) and after its quiet refresh on a computer, where .main scrolls and not the window (notify.js); a press there comes back with
+(app.js 13d) and after its quiet refresh, on the window (one scroll since 2026-11-28; notify.js); a press there comes back with
 the tab and the search; the board of orders keeps its columns after a move; <details data-remember> stays open or folded; the reply typed
 in a chat comes back after a reload and goes away after «Отправить» (app.js 13f). The scripts run in node where it is installed."""
 from __future__ import annotations
@@ -30,7 +30,7 @@ def block(start, end):
     return APP_JS[APP_JS.index(start):APP_JS.index(end, APP_JS.index(start))]
 
 
-# --- notify.js: the quiet refresh of «Рабочее место» keeps the place of .main on a computer -------------------------------------------
+# --- notify.js: the quiet refresh of «Рабочее место» keeps the place of the window -------------------------------------------
 
 NOTIFY_HARNESS = r"""
 const vm = require("vm"), fs = require("fs");
@@ -74,26 +74,23 @@ def run_notify(tmp_path, how, kept=""):
     return json.loads(out.stdout)
 
 
-def test_the_refresh_keeps_the_place_of_the_main_box_on_a_computer(tmp_path):
+def test_the_refresh_keeps_the_place_of_the_window(tmp_path):
+    # one scroll (the owner 2026-11-28): .main no longer scrolls, the window keeps the place on a computer and a phone
     js = NOTIFY_JS.read_text(encoding="utf-8")
-    assert "function mainBox()" in js and "box ? box.scrollTop : (window.scrollY" in js
-    got = run_notify(tmp_path, "main", json.dumps({"url": "https://example.com/my-point?tab=here", "y": 900, "main": True}))
-    assert got["restored"] == {"main": 900, "window": None}                    # .main put back, the window left alone
-    got = run_notify(tmp_path, "phone", json.dumps({"url": "https://example.com/my-point?tab=here", "y": 640, "main": False}))
-    assert got["restored"] == {"main": 0, "window": 640}                       # a phone: the window, as before
-    got = run_notify(tmp_path, "main", json.dumps({"url": "https://example.com/my-point?tab=here", "y": 500, "main": True}))
-    assert got["restored"]["main"] == 500
+    assert "function mainBox()" not in js and "y: window.scrollY || window.pageYOffset || 0" in js
+    got = run_notify(tmp_path, "phone", json.dumps({"url": "https://example.com/my-point?tab=here", "y": 640}))
+    assert got["restored"] == {"main": 0, "window": 640}
+    got = run_notify(tmp_path, "main", json.dumps({"url": "https://example.com/my-point?tab=here", "y": 500}))
+    assert got["restored"] == {"main": 0, "window": 500}                       # .main is never moved
 
 
-def test_the_refresh_saves_the_place_of_main_and_of_the_window(tmp_path):
-    got = run_notify(tmp_path, "save")
-    assert got["replaced"] == 1 and json.loads(got["scroll"])["y"] == 900 and json.loads(got["scroll"])["main"] is True
+def test_the_refresh_saves_the_place_of_the_window(tmp_path):
     got = run_notify(tmp_path, "phone")
-    assert got["replaced"] == 1 and json.loads(got["scroll"])["y"] == 640 and json.loads(got["scroll"])["main"] is False
+    assert got["replaced"] == 1 and json.loads(got["scroll"])["y"] == 640
 
 
-def test_a_saved_place_of_main_is_put_on_the_window_when_main_no_longer_scrolls(tmp_path):
-    got = run_notify(tmp_path, "phone", json.dumps({"url": "https://example.com/my-point?tab=here", "y": 700, "main": True}))
+def test_a_place_kept_by_the_old_panel_on_main_goes_on_the_window(tmp_path):
+    got = run_notify(tmp_path, "main", json.dumps({"url": "https://example.com/my-point?tab=here", "y": 700, "main": True}))
     assert got["restored"] == {"main": 0, "window": 700}
 
 

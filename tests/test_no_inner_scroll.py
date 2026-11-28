@@ -2,7 +2,7 @@
 
 Блоки страницы (окно заказа «Нового вида», чаты обоих видов, массовые действия, шаблоны сообщений, фильтры магазина,
 таблицы брендов) не имеют своей высоты с прокруткой внутри. Выпадающие окна, модальные окна и каркас страницы
-(.sidebar, .main) прокручиваются как раньше; прокрутка таблиц вбок (overflow-x) остаётся.
+(.sidebar) прокручиваются как раньше; прокрутка таблиц вбок (overflow-x) остаётся.
 Исключение (слово владельца 2026-11-13: «Нужно чтобы чат отдельно скролился и была зафиксирована информация в шапке страницы»):
 на широком экране лента открытого чата (.chat-box) прокручивается сама, шапка чата и поле ответа стоят на месте; на телефоне — как было."""
 import re
@@ -104,7 +104,6 @@ def test_brand_tables_in_templates_have_no_height_of_their_own():
 def test_popups_modals_and_the_frame_keep_their_scroll():
     panel = css("panel.css")
     assert any("overflow-y:auto" in b for b in rules(panel, ".sidebar"))
-    assert any("overflow-y:auto" in b for b in rules(panel, ".main"))
     assert any("overflow:auto" in b for b in rules(panel, ".modal-backdrop"))
     assert any("overflow-y:auto" in b for b in rules(panel, ".suggest"))
     assert any("overflow-y:auto" in b for b in rules(css("bell.css"), ".bell-list"))
@@ -124,3 +123,22 @@ def test_the_chat_opens_at_the_last_message():
     assert "data-open-end" not in js and "data-open-end" not in (PANEL / "templates" / "_order_chat.html").read_text(encoding="utf-8")
     assert 'img.addEventListener("load", function () { if (!chatMoved) chatToEnd(); });' in js   # фото грузятся позже
     assert "thread.scrollTop" not in js          # лента без своей прокрутки: новое сообщение показывает страница
+
+
+def test_one_scroll_the_window_scrolls_the_page():
+    # слово владельца 2026-11-28: одна прокрутка — окна; у .main нет своей, каркас растёт со страницей, меню стоит на месте
+    panel = css("panel.css")
+    main = rules(panel, ".main")
+    assert main and not any(scrolls(b) for b in main)
+    app = rules(panel, ".app")
+    assert app and not any(re.search(r"(^|;)height:", b) for b in app) and any("min-height:100vh" in b for b in app)
+    side = rules(panel, ".sidebar")
+    assert any("position:sticky" in b and "top:0" in b and "height:100vh" in b for b in side)
+    for name in ("panel.css", "office-mobile.css", "point.css", "point2.css", "office2.css", "mypoint.css", "topbar.css", "bell.css"):
+        text = re.sub(r"/\*.*?\*/", "", css(name), flags=re.S)
+        for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", text):
+            if any(s.strip().endswith((".main", ".app")) for s in sel.split(",")):
+                assert not re.search(r"overflow(-y)?:(auto|scroll)", body), (name, sel)
+    js = (STATIC / "app.js").read_text(encoding="utf-8") + (STATIC / "notify.js").read_text(encoding="utf-8")
+    assert "/(auto|scroll)/.test(getComputedStyle(main)" not in js and "function mainBox()" not in js
+    assert 'window.addEventListener("scroll", headsLater' in js               # шапки таблиц следят за прокруткой окна

@@ -718,7 +718,7 @@
     window.addEventListener("resize", fit);
     document.addEventListener("scroll", fit, {capture: true, passive: true});
   })();
-  function chatScroller(el) {                         // the box that scrolls the thread: the thread itself on a wide screen ([data-chat-box]), else .main of the panel, else the document
+  function chatScroller(el) {                         // the box that scrolls the thread: the thread itself on a wide screen ([data-chat-box]), else the document (one scroll, 2026-11-28)
     for (var n = el; n; n = n.parentElement) {
       var y = getComputedStyle(n).overflowY;
       if ((y === "auto" || y === "scroll") && n.scrollHeight > n.clientHeight) return n;
@@ -748,12 +748,12 @@
     if (!list || !live) return;
     var KEY = "chats-list-place", place = live.dataset.place || "";    // the list as the server reads it: state, account, search (not the address as typed)
     function active() { return list.querySelector(".chat-row.is-active"); }
-    // ТЗ №87: the list of «Новый вид» (and the old one on a middle screen) has no scroll of its own, it moves with .main of the panel or the page;
+    // ТЗ №87: the list of «Новый вид» (and the old one on a middle screen) has no scroll of its own, it moves with the page;
     // its place is the place of that box. A narrow screen with the list and the chat one under the other in that box: the chat's last message wins (as before).
     var visible = !!list.getClientRects().length, box = visible ? chatScroller(list) : list, thread = document.querySelector(".chat-thread");
     var lr = list.getBoundingClientRect(), tr = thread && thread.getClientRects().length ? thread.getBoundingClientRect() : null;
     var shared = box !== list && !!tr && chatScroller(thread) === box && lr.left < tr.right && tr.left < lr.right;
-    function reveal() {                              // the open chat's row in sight, moving the box of the list (the list, or .main beside the chat); a stacked chat: nothing moves
+    function reveal() {                              // the open chat's row in sight, moving the box of the list (the list, or the page beside the chat); a stacked chat: nothing moves
       var row = active();
       if (!row || shared) return;
       var page = box === document.scrollingElement || box === document.documentElement;
@@ -1275,9 +1275,7 @@
       try { sessionStorage.removeItem(KEY); } catch (e) { /* no storage: nothing kept */ }
       return;
     }
-    function pageBox() {                                    // .main of the panel scrolls on a computer; a phone scrolls the page itself
-      var main = document.querySelector(".main");
-      if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
+    function pageBox() {                                    // one scroll (the owner 2026-11-28): the window scrolls the page, on a computer and a phone
       return document.scrollingElement || document.documentElement;
     }
     var mark = null, moved = false, nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
@@ -1320,9 +1318,7 @@
     if (document.querySelector("[data-keep-place], [data-no-keep-place], .chats-list")) return;
     // «Рабочее место» (2026-11-28): after «Принял», «Выдал» and its other presses it stays where it was, as every list; its quiet refresh
     // (notify.js, location.replace: not a press, not F5) puts its own place back (tires.mypoint.scroll), this block leaves it alone
-    function pageBox() {                                    // the same box as 13c: .main of the panel on a computer, the page on a phone
-      var main = document.querySelector(".main");
-      if (main && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
+    function pageBox() {                                    // the same box as 13c: the window (one scroll, 2026-11-28)
       return document.scrollingElement || document.documentElement;
     }
     function samePage(a) {                                  // a link to this very page: another filter or tab, not another page of the list (nav.pager),
@@ -1641,7 +1637,7 @@
   // сдвигаем вниз сами, пока таблица проходит под верхним краем (ниже закреплённой панели .stickybar, если она видна).
   // Без скрипта шапка просто не липнет; таблицы без обёртки и .table--plain не трогаем.
   var main = document.querySelector(".main");
-  var pageScrolled = new WeakMap();            // обёртка → листает ли её именно .main (а не своя прокрутка внутри)
+  var pageScrolled = new WeakMap();            // обёртка → листает ли её именно страница (а не своя прокрутка внутри)
   function byPage(wrap) {
     if (!pageScrolled.has(wrap)) {
       var ok = getComputedStyle(wrap).maxHeight === "none";          // a wrap with its own height scrolls itself: not ours
@@ -1658,7 +1654,7 @@
     var wraps = main.querySelectorAll(".table-wrap");
     if (!wraps.length) return;                                         // no wrapped table on the page: nothing to read
     var line = Math.max(0, main.getBoundingClientRect().top);
-    document.querySelectorAll(".stickybar").forEach(function (bar) {
+    document.querySelectorAll(".stickybar, .main > .topbar").forEach(function (bar) {   // the top bar sticks on a phone (its bottom is above the screen otherwise)
       if (bar.getClientRects().length) line = Math.max(line, bar.getBoundingClientRect().bottom);
     });
     wraps.forEach(function (wrap) {
@@ -1671,7 +1667,7 @@
   }
   function headsLater() { if (!headFrame) headFrame = requestAnimationFrame(placeHeads); }
   if (main) {
-    main.addEventListener("scroll", headsLater, {passive: true});
+    window.addEventListener("scroll", headsLater, {passive: true});    // one scroll (2026-11-28): the window moves the page, .main no longer scrolls
     window.addEventListener("resize", function () { pageScrolled = new WeakMap(); headsLater(); });
     document.addEventListener("tires:table-loaded", headsLater);        // the catalog table is swapped in place (may appear only then)
     var barWatch = new MutationObserver(headsLater);                    // a draft bar shown or hidden moves the line and the table
