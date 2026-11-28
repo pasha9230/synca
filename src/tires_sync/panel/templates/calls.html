@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% import "_inquiry.html" as inq_ui %}
 {% from "_handoff_dialog.html" import handoff_window with context %}
+{# the old view of a point on a phone (the owner 2026-11-28): its own frame and the sections at the bottom, as «Уведомления»; the office as before #}
+{% block viewport %}width=device-width, initial-scale=1{% endblock %}
+{% block body_class %}{% if session.get("user") and current_user().role == "point" %}pt-ui pt-plain-page{% endif %}{% endblock %}
+{% block head %}{% if session.get("user") and current_user().role == "point" %}<link rel="stylesheet" href="{{ url_for('static', filename='mypoint.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point.css') }}">{% endif %}{% endblock %}
 {% block title %}Звонки · Tires Sync{% endblock %}
 {% block content %}
 <header class="page-head"><div><h1>Звонки<span class="help-q" tabindex="0" data-tip="Звонки через подменные номера Авито{% if mine %} аккаунта вашей точки{% endif %}. Запись разговора появляется до 30 минут после звонка и хранится 7 дней.">?</span></h1></div></header>
@@ -10,7 +14,7 @@
 <label class="field grow"><span class="label">Телефон</span><input class="input" type="search" name="q" value="{{ q }}" inputmode="numeric"></label>
 <label class="row" style="gap:var(--s-2);align-items:center"><input type="checkbox" name="missed" value="1"{% if missed %} checked{% endif %}> Только пропущенные</label>
 <button class="btn btn--primary">Показать</button></form>
-<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table calls-table"><thead><tr><th>Когда</th><th>Аккаунт / точка</th><th>Клиент</th><th>Итог</th><th>Запись</th><th></th></tr></thead><tbody>
+<section class="card"><div class="card-body" style="overflow-x:auto"><table class="table calls-table" data-m-cards><thead><tr><th>Когда</th><th>Аккаунт / точка</th><th>Клиент</th><th>Итог</th><th>Запись</th><th></th></tr></thead><tbody>
 {% set inq = inquiry_calls(rows|map(attribute="id")|list) %}{% for c in rows %}<tr id="call-{{ c.id }}"{% if not c.answered %} class="is-missed"{% endif %}>
 <td data-label="Когда"><time title="{{ c.call_at|dt }}">{{ c.call_at|short_dt }}</time></td>
 <td data-label="Аккаунт">{{ c.account_name }}{% if c.point_name and c.point_name != c.account_name %}{% if c.account_name %} · {% endif %}{{ c.point_name }}{% endif %}</td>{# the point once (п. 17) #}
@@ -24,6 +28,7 @@
 </tr>
 {% else %}<tr><td colspan="6" class="muted">{% if no_account %}К вашей точке не привязан аккаунт Авито: звонков нет.{% else %}Звонков за этот период нет.{% endif %}</td></tr>{% endfor %}
 </tbody></table>{% if rows|length >= 300 %}<p class="muted">Показаны последние 300 звонков: сузьте период или фильтр.</p>{% endif %}</div></section>
+{% if session.get("user") and current_user().role == "point" %}{% with section="calls" %}{% include "_point_nav.html" %}{% endwith %}{% endif %}
 {{ handoff_window(handoff) }}
 {% if handoff %}<script src="{{ url_for('static', filename='handoff.js') }}"></script>{% endif %}
 {% endblock %}

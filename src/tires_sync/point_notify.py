@@ -41,11 +41,14 @@ def _line(text, limit: int) -> str:
 # ---- on / off ----------------------------------------------------------------------------------------------------------------------------
 
 def state(conn, point_id) -> dict:
-    """{"enabled", "at", "author", "who", "reason"} of the point; no row: on, never switched."""
+    """{"enabled", "at", "author", "who", "reason", "task_sound"} of the point; no row: on, never switched. `task_sound`: the point's own
+    switch of the sound of the office's tasks (task_sound, the owner 2026-11-28)."""
+    from . import task_sound
     row = conn.execute("SELECT enabled, at, author, who, reason FROM point_notify WHERE point_id = ?", (point_id,)).fetchone()
+    sound = task_sound.point_on(conn, point_id)
     if row is None:
-        return {"enabled": True, "at": "", "author": "", "who": "", "reason": ""}
-    return {"enabled": bool(row[0]), "at": row[1], "author": row[2], "who": row[3], "reason": row[4]}
+        return {"enabled": True, "at": "", "author": "", "who": "", "reason": "", "task_sound": sound}
+    return {"enabled": bool(row[0]), "at": row[1], "author": row[2], "who": row[3], "reason": row[4], "task_sound": sound}
 
 
 def enabled(conn, point_id) -> bool:

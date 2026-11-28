@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='audit.css') }}">
 {% if session.get("user") %}<script src="{{ url_for('static', filename='navfold.js') }}"></script>{% endif %}{# before the body: folded sections are hidden before paint #}
 {% block head %}{% endblock %}
-<link rel="stylesheet" href="{{ url_for('static', filename='office-mobile.css') }}">{# after the page's own: only @media for a narrow screen, the computer sees nothing of it #}
+<link rel="stylesheet" href="{{ url_for('static', filename='office-mobile.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='point-mobile.css') }}">{# the same for a point (body.pt-ui): fields 16 px, fingers 44 px #}{# after the page's own: only @media for a narrow screen, the computer sees nothing of it #}
 </head>
 <body class="{% block body_class %}{% endblock %}{% if session.get("user") and ui_new() %} ui-new{% endif %}{% if not session.get("user") or current_user().role != "point" %} ofc{% endif %}">{# «Новый вид» (routes_design) #}
 {% if session.get("user") %}

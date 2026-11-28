@@ -8,7 +8,7 @@
 {% if chain %}<form id="ow-chain-unlink" method="post" action="/orders/{{ c.id }}/chain-unlink" data-once data-confirm-title="Отвязать этот заказ?" data-confirm="Заказ перестанет показывать номера других заказов клиента. Сами заказы не меняются." data-confirm-ok="Отвязать"><input type="hidden" name="csrf" value="{{ csrf_token() }}"></form>{% endif %}
 {% endif %}
 {% elif chain or chain_edit %}
-<details class="owin-extra" data-chain aria-labelledby="chain-h">
+<details class="owin-extra" data-chain data-remember="order-chain" aria-labelledby="chain-h">
 <summary id="chain-h">Другие заказы клиента{% if chain %} <span class="badge badge--neutral">{{ chain|length }}</span>{% endif %}</summary>
 <div class="owin-grid">
 <div class="stack is-wide" style="gap:var(--s-2)">
