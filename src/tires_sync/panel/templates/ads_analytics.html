@@ -79,6 +79,7 @@ tr.ads-group>td{font-weight:500}tr.ads-group.d0>td{background:var(--gray-50)}tr.
 </div>
 </div>
 <div class="card-head"><div>
+{% if data.comparison_incomplete %}<p class="small muted">Данные за выбранный или предыдущий период неполные; сравнение может быть неточным.</p>{% endif %}
 {% for acc in data.accounts %}<p class="small muted"><b>{{ acc.name }}</b>. Расходы загружены за {{ acc.covered }} из {{ data.days }} дн{% if acc.covered < data.days %}. — период неполный, суммы меньше настоящих{% endif %}.{% if acc.error %} Последний сбор не удался: {{ acc.error }}{% endif %}{% if acc.bids_of %} Цена просмотра прочитана у {{ acc.bids_read }} из {{ acc.bids_of }} объявлений{% if acc.bids_read < acc.bids_of %}, остальные дочитываются{% endif %}.{% endif %}</p>{% endfor %}
 </div></div>
 {% if data.rows %}

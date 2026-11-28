@@ -229,6 +229,7 @@ def test_custom_period_is_saved_per_user_and_previous_period_is_aligned(tmp_path
     assert 'С 2026-11-07 по 2026-11-09' in page
     assert 'с 2026-11-04 по 2026-11-06' in page
     assert '1 234 ₽' in page
+    assert 'сравнение может быть неточным' in page
     page = owner.get('/economics/ads').get_data(as_text=True)
     assert 'С 2026-11-07 по 2026-11-09' in page
     assert 'start=2026-11-07&amp;end=2026-11-09' in page
@@ -241,3 +242,9 @@ def test_invalid_date_range_is_not_saved(tmp_path):
     owner.get('/economics/ads?start=2026-11-07&end=2026-11-09')
     owner.get('/economics/ads?start=2026-11-09&end=2026-11-07')
     assert 'С 2026-11-07 по 2026-11-09' in owner.get('/economics/ads').get_data(as_text=True)
+
+
+def test_very_early_custom_date_does_not_overflow(tmp_path):
+    owner, conn = two_accounts(tmp_path)
+    assert owner.get('/economics/ads?start=0001-01-01&end=0001-01-02').status_code == 400
+    assert owner.get('/economics/ads?start=2020-01-01&end=2026-11-09').status_code == 400

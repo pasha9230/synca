@@ -32,17 +32,17 @@
     var value = e.target.dataset.date; if (!value) return;
     if (!choosingEnd || value < start.value) { start.value = value; end.value = value; choosingEnd = true; }
     else { end.value = value; choosingEnd = false; }
-    render();
+    end.setCustomValidity(''); render();
   });
   form.addEventListener('click', function (e) {
     var change = e.target.dataset.month;
     if (change) { month.setMonth(month.getMonth() + Number(change)); render(); }
     var preset = Number(e.target.dataset.preset);
-    if (preset) { var d = date(today); end.value = iso(d); d.setDate(d.getDate() - preset + 1); start.value = iso(d); month = date(today); month.setDate(1); choosingEnd = false; render(); }
-    if (e.target.hasAttribute('data-clear')) { start.value = ''; end.value = ''; choosingEnd = false; render(); }
+    if (preset) { end.setCustomValidity(''); var d = date(today); end.value = iso(d); d.setDate(d.getDate() - preset + 1); start.value = iso(d); month = date(today); month.setDate(1); choosingEnd = false; render(); }
+    if (e.target.hasAttribute('data-clear')) { end.setCustomValidity(''); start.value = ''; end.value = ''; choosingEnd = false; render(); }
   });
-  form.addEventListener('change', function () { if (end.value) { month = date(end.value); month.setDate(1); } render(); });
-  form.addEventListener('submit', function (e) { if (start.value > end.value) { e.preventDefault(); end.setCustomValidity('Конец периода должен быть не раньше начала'); end.reportValidity(); } else end.setCustomValidity(''); });
-  end.addEventListener('input', function () { end.setCustomValidity(''); });
+  form.addEventListener('change', function () { end.setCustomValidity(''); if (end.value) { month = date(end.value); month.setDate(1); } render(); });
+  form.addEventListener('submit', function (e) { var days = (date(end.value) - date(start.value)) / 86400000; if (start.value > end.value || days >= 400) { e.preventDefault(); end.setCustomValidity('Проверьте даты: период должен быть не более 400 дней'); end.reportValidity(); } else end.setCustomValidity(''); });
+  [start, end].forEach(function (field) { field.addEventListener('input', function () { end.setCustomValidity(''); }); });
   render();
 }());

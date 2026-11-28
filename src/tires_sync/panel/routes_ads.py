@@ -49,11 +49,13 @@ def register(app) -> None:
         valid_range = False
         try:
             start, end = date.fromisoformat(start_raw), date.fromisoformat(end_raw)
-            if start > end or end > today or (end - start).days >= ads_spend.KEEP_DAYS:
+            if start > end or end > today or (end - start).days >= ads_spend.KEEP_DAYS or start.toordinal() <= (end - start).days + 1:
                 raise ValueError("invalid range")
             days = (end - start).days + 1
             valid_range = True
         except (ValueError, TypeError):
+            if explicit:
+                abort(400, "Проверьте даты: начало не позже конца, окончание не позднее сегодня, период не более 400 дней.")
             end = today - timedelta(days=1)
             start = end - timedelta(days=days - 1)
         start_raw, end_raw = start.isoformat(), end.isoformat()
@@ -68,7 +70,7 @@ def register(app) -> None:
         sort = request.args.get("s", "")
         desc = request.args.get("d", "") != "asc"
         only = request.args.get("f", "")
-        data = ads_tree.build(conn, end + timedelta(days=1), days, levels, sort, desc, only, custom=True)
+        data = ads_tree.build(conn, end + timedelta(days=1), days, levels, sort, desc, only, custom=True, reference_today=today)
         hidden = set(ads_tree.hidden_columns(conn, login))
         shown = [c for c in ads_tree.COLUMNS if c[0] not in hidden and c[0] in data["filled"] | {"spend"}]
         state = {"p": data["days"], "g": data["levels"], "s": data["sort"], "d": "" if data["desc"] else "asc", "f": data["only"], "start": start_raw if explicit or saved else "", "end": end_raw if explicit or saved else ""}
