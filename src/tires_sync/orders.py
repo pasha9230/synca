@@ -47,16 +47,27 @@ NOT_BOUGHT = "не выкупил"
 _OWN_CANCELS = ("другое: объединён в заказ", "другое: разъединён на заказы", "другое: возвращено в заказ", "другое: клиент отказался от ожидания")
 
 
+REFUSED_KINDS = ("отказ клиента", NOT_BOUGHT)
+
+
+def client_refused(reason) -> bool:
+    """The reasons «отказ клиента» (also «Отказ клиента на точке: …» of a record of storage) and «не выкупил», marked by the office or the
+    point: the owner 2026-11-28 — the client refused the tyres already ordered, «Н» of the Google table and «Неблагонадёжный» always,
+    whether the tyres came or not. Only the mark: no money."""
+    return " ".join(str(reason or "").split()).casefold().startswith(REFUSED_KINDS)
+
+
 def _closes_not_bought(conn, card: dict, code: str, reason) -> bool:
     """The move closes the order as «Н» of the Google table (the owner 2026-11-28: «Неблагонадёжный» for «Н», never for «О»): to «На ОТХ»,
-    or to «Отмена» with the tyres come (order_sheet.tyres_came) — from a stage before both, not by the panel's own cancels."""
+    or to «Отмена» with the tyres come (order_sheet.tyres_came) or with the reason «отказ клиента» (client_refused) — from a stage before
+    both, not by the panel's own cancels."""
     was = card["stage"].get("code")
     if was == "cancel" or was in RETURN_STAGES or code not in ("cancel", "oth"):
         return False
     if " ".join(str(reason or "").split()).casefold().startswith(_OWN_CANCELS):
         return False
     from . import order_sheet
-    return code == "oth" or order_sheet.tyres_came(conn, int(card["id"]))
+    return code == "oth" or client_refused(reason) or order_sheet.tyres_came(conn, int(card["id"]))
 
 
 OLD_CANCEL_NAME = "Отмена"                      # the name of «cancel» before the merge: renamed only while the owner kept it
@@ -1284,12 +1295,11 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     no_status = point_arrival.no_status_move(conn, card_id, card["stage"].get("code"), stage["code"], stage["kind"],
                                              (changes or {}).get("cancel_reason"))
     from . import clients
-    # «Неблагонадёжный» (the owner 2026-11-28): decided now (the way to «На ОТХ» unlinks the client), written only once the move is made
-    refusal = None
-    if not no_status and _closes_not_bought(conn, card, requested_stage, reason):   # «точка не передала статус»: the point's fault
-        refusal = ("mark", clients.client_of_order(conn, card_id))
-    elif stage["kind"] == "open" and requested_stage not in point_arrival.NO_STATUS_STAGES:
-        refusal = ("unmark", None)                                           # back in work from «Н» (an assumption)
+    # «Неблагонадёжный» (the owner 2026-11-28): decided now (the way to «На ОТХ» unlinks the client), written only once the move is made;
+    # never taken off when the order is back in work (the owner 2026-11-28: a person takes the tag off by hand)
+    # «точка не передала статус» to «Отмена»: the point's fault, no mark; the tyres to «На ОТХ» (the owner 2026-11-28): the client did not buy, the mark
+    refusal = (not no_status or requested_stage == "oth") and _closes_not_bought(conn, card, requested_stage, reason)
+    refused_client = clients.client_of_order(conn, card_id) if refusal else None
     stored = None                                                           # the record of storage this move makes (the owner 2026-11-10)
     try:
         if oth_split and stage["code"] == "oth" and card["stage"].get("code") not in RETURN_STAGES and oth_storage.splits(conn, card):
@@ -1327,10 +1337,8 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         add_event(conn, card_id, now, author, "field", UNAGREED_LINE % exception, level="yellow")
         conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, author, "return_unagreed", json.dumps(
             {"order": int(card_id), "from": card["stage"].get("name") or "", "reason": exception}, ensure_ascii=False)))
-    if refusal and refusal[0] == "mark":                                    # «Неблагонадёжный»: only once the move is made (the review #102)
-        clients.mark_order_refusal(conn, card_id, now, author, track=True, client=refusal[1])
-    elif refusal:
-        clients.unmark_order_refusal(conn, card_id, now, author)
+    if refusal and refused_client is not None:                              # «Неблагонадёжный»: only once the move is made (the review #102)
+        clients.mark_order_refusal(conn, card_id, now, author, client=refused_client)
     from . import point_arrival
     point_arrival.moved(conn, card_id, card["stage"].get("code"), stage["code"], now, author, stage["kind"])   # the tyres the point got (2026-11-25)
     for (refused,) in conn.execute("SELECT e.id FROM order_event e WHERE e.order_id = ? AND e.kind = 'refused' AND e.level = 'red' AND NOT EXISTS ("

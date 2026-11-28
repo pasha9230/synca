@@ -244,8 +244,8 @@ def realization(card: dict, conn=None, came: Optional[bool] = None) -> str:
     if code == "cancel" and conn is not None:
         merged = conn.execute("SELECT 1 FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.order_id = ? "
                               "AND m.undone_at = '' AND s.ref = 0", (int(card["id"]),)).fetchone()
-        if not merged:
-            return NOT_BOUGHT if came or tyres_came(conn, int(card["id"])) else CANCELLED
+        if not merged:                               # «отказ клиента»: «Н» whether the tyres came or not (the owner 2026-11-28)
+            return NOT_BOUGHT if came or orders.client_refused(card.get("cancel_reason")) or tyres_came(conn, int(card["id"])) else CANCELLED
     return ""
 
 

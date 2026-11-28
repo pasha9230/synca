@@ -1035,7 +1035,7 @@ def client_refused(conn, task_id, now: str, author: str) -> None:
     orders.add_event(conn, task["order_id"], now, author, "rule", "%s: Клиент отказался, шины за заказом сняты, задача закрыта." % TITLE_SILENT)
     from . import clients, order_sheet
     if order_sheet.realization(orders.get_card(conn, task["order_id"]), conn) == order_sheet.NOT_BOUGHT:
-        clients.mark_order_refusal(conn, task["order_id"], now, author, track=True)    # the owner 2026-11-28: the tag for «Н» only
+        clients.mark_order_refusal(conn, task["order_id"], now, author)    # the owner 2026-11-28: the tag for «Н» only
     conn.commit()
 
 

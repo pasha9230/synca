@@ -214,8 +214,10 @@ def test_the_end_of_storage_tomorrow_a_mark_and_one_task_that_closes_itself(tmp_
     monkeypatch.setattr(routes_orders, "local_iso", lambda: "2026-11-26T09:00:00")
     page = owner.get("/oth").get_data(as_text=True)
     assert page.count("data-oth-ends") == 1 and "Срок хранения истекает завтра" in page
-    order_oth.ask_seventh_day(conn, "2026-11-27T12:30:00")                         # on «На возврат» by itself
-    assert orders.get_card(conn, ends)["stage"]["code"] != "oth"
+    note = conn.execute("SELECT note FROM callback_task WHERE order_id = ?", (ends,)).fetchone()[0]
+    assert "«Согласование возврата»" in note and "«На возврат»" not in note       # the owner 2026-11-28: the agreement, not «На возврат»
+    order_oth.ask_seventh_day(conn, "2026-11-27T12:30:00")                         # on «Согласование возврата» by itself
+    assert orders.get_card(conn, ends)["stage"]["code"] == orders.RETURN_AGREE
     assert oth_expiry.tick(conn, "2026-11-27T12:31:00") == 1                       # the other one's day before
     assert not [t for t in open_tasks(conn, ends) if t.startswith(oth_expiry.TASK_TITLE)] and len(open_tasks(conn, later)) == 1
     assert "data-oth-ends" not in mine.get("/oth").get_data(as_text=True)          # the point never sees the page's mark

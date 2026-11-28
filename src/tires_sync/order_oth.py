@@ -1347,7 +1347,7 @@ def task_closed(conn, task: dict, how: str, result: str, who: str, now: str) -> 
         if conn.execute("INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)", (NO_RETURN_KEY % (card["id"], re.sub(r"\D", "", card["entered_at"] or "")),
                                                                                       json.dumps({"at": now, "by": who, "task": task["id"]}))).rowcount == 1:
             orders.add_event(conn, card["id"], now, who, "field", "Задача возврата закрыта «не возвращаем»: на 7-й день заказ не перейдёт на «%s»"
-                             % orders.stage_name(conn, orders.RETURN_GIVEN), level="grey")
+                             % orders.stage_name(conn, orders.RETURN_AGREE), level="grey")
         _back_on_sale(conn, card, now, who)
     elif card["stage"]["code"] in (orders.RETURN_AGREE, orders.RETURN_GIVEN):
         _back_to_oth(conn, card, task, now, who)
@@ -1403,7 +1403,7 @@ def _back_to_oth(conn, card: dict, task: dict, now: str, who: str) -> None:
             moved, why = False, str(err)
         if moved:
             orders.add_event(conn, card["id"], now, who, "field", "%s: задача возврата закрыта «не возвращаем», заказ снова на «%s»; на 7-й день не перейдёт на «%s»"
-                             % (BACK, oth["name"], card["stage"]["name"]))
+                             % (BACK, oth["name"], orders.stage_name(conn, orders.RETURN_AGREE)))
             _audit(conn, now, who, "oth_back_on_sale", {"order": card["id"], "from": orders.RETURN_GIVEN})
             return
         if not why:

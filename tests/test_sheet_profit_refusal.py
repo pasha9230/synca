@@ -1,5 +1,6 @@
 """The owner 2026-11-28: the profit of the Google table's rows takes off what the report does (one count, the KPI and the sums the office
-set); «О» / «Н» go by the fact the tyres came; «Неблагонадёжный» for an order closed as «Н», taken off when it is back in work."""
+set); «О» / «Н» go by the fact the tyres came («отказ клиента»: «Н» always); «Неблагонадёжный» for an order closed as «Н», kept when it
+is back in work (the owner 2026-11-28)."""
 from __future__ import annotations
 
 from test_order_reserve import db as order_db, stage
@@ -58,7 +59,7 @@ def _tagged(conn, cid):
     return clients.REFUSED_ORDER_TAG in clients.tags_of(conn, client["id"])
 
 
-def test_the_mark_is_for_n_only_and_goes_when_the_order_is_back_in_work(tmp_path):
+def test_the_mark_is_for_n_only_and_stays_when_the_order_is_back_in_work(tmp_path):
     conn = order_db(tmp_path)
     a = point(conn, "Альфа")
     early = card(conn, a, phone="+7 900 000 00 01")
@@ -71,29 +72,25 @@ def test_the_mark_is_for_n_only_and_goes_when_the_order_is_back_in_work(tmp_path
                             oth_split=False)                                    # «Н»: the mark, whatever the reason
     conn.commit()
     assert _tagged(conn, cid)
-    assert orders.move_card(conn, cid, stage(conn, "at_point"), "2026-12-11T10:00:00", "o")       # back in work: the mark goes
+    assert orders.move_card(conn, cid, stage(conn, "at_point"), "2026-12-11T10:00:00", "o")       # back in work: the mark stays (the owner 2026-11-28)
     conn.commit()
-    assert not _tagged(conn, cid)
+    assert _tagged(conn, cid)
 
 
-def test_a_mark_typed_by_hand_or_of_another_n_order_stays(tmp_path):
+def test_the_refusal_of_the_client_is_n_and_the_mark_even_before_the_tyres_came(tmp_path):
     conn = order_db(tmp_path)
     a = point(conn, "Альфа")
-    one = card(conn, a, phone="+7 900 000 00 05")
-    two = card(conn, a, phone="+7 900 000 00 05")                               # the same client
-    for cid in (one, two):
-        go(conn, cid, "placed", "moving", "at_point", "cancel")
+    refused = card(conn, a, phone="+7 900 000 00 07")
+    go(conn, refused, "placed", "moving")                                       # the tyres never came
+    assert orders.move_card(conn, refused, stage(conn, "cancel"), DAY, "o", {"cancel_reason": orders.cancel_reason_of("отказ клиента", "")},
+                            oth_split=False)
+    other = card(conn, a, phone="+7 900 000 00 08")
+    go(conn, other, "placed", "moving")
+    assert orders.move_card(conn, other, stage(conn, "cancel"), DAY, "o", {"cancel_reason": orders.cancel_reason_of("другое", "передумал")},
+                            oth_split=False)                                    # any other reason before the tyres came: «О», as before
     conn.commit()
-    assert _tagged(conn, one)
-    assert orders.move_card(conn, one, stage(conn, "at_point"), "2026-12-11T10:00:00", "o")
-    conn.commit()
-    assert _tagged(conn, one)                                                    # the other order is still «Н»
-    hand = card(conn, a, phone="+7 900 000 00 06")
-    clients.set_tag(conn, clients.client_of_order(conn, hand)["id"], clients.REFUSED_ORDER_TAG, True, NOW, "owner")
-    go(conn, hand, "placed", "moving", "at_point", "cancel")
-    assert orders.move_card(conn, hand, stage(conn, "at_point"), "2026-12-11T10:00:00", "o")
-    conn.commit()
-    assert _tagged(conn, hand)                                                   # typed by hand: stays
+    assert order_sheet.realization(orders.get_card(conn, refused), conn) == order_sheet.NOT_BOUGHT and _tagged(conn, refused)
+    assert order_sheet.realization(orders.get_card(conn, other), conn) == order_sheet.CANCELLED and not _tagged(conn, other)
 
 
 def test_no_mark_for_the_point_that_did_not_pass_the_status(tmp_path):
@@ -123,24 +120,31 @@ def test_a_refused_move_puts_no_mark(tmp_path, monkeypatch):
         pass
     assert orders.get_card(conn, cid)["stage"]["code"] == "at_point"
     assert not _tagged(conn, cid)
-    assert conn.execute("SELECT 1 FROM app_state WHERE key = ?", (clients.REFUSAL_ORDER % cid,)).fetchone() is None
 
 
-def test_a_refused_way_back_keeps_the_mark(tmp_path):
+def test_the_tyres_to_the_storage_mark_the_client_even_when_the_point_did_not_pass_the_status(tmp_path):
+    from test_oth_storage import split
+    conn = order_db(tmp_path)
+    cid, _record = split(conn, reason=orders.cancel_reason_of(orders.NO_STATUS, ""))     # the owner 2026-11-28: on «На ОТХ» — «Н» and the mark
+    conn.commit()
+    tagged = [r[0] for r in conn.execute("SELECT id FROM client").fetchall() if clients.REFUSED_ORDER_TAG in clients.tags_of(conn, r[0])]
+    assert len(tagged) == 1 and order_sheet.realization(orders.get_card(conn, cid), conn) == order_sheet.NOT_BOUGHT
+
+
+def test_the_way_back_from_the_storage_keeps_the_mark(tmp_path):
     import pytest
     from test_oth_storage import split
     conn = order_db(tmp_path)
     cid, _record = split(conn, reason="Отказ клиента на точке: не подошли")      # «На ОТХ» with the split: the order cancelled, «Н»
     conn.commit()
-    key = conn.execute("SELECT value FROM app_state WHERE key = ?", (clients.REFUSAL_ORDER % cid,)).fetchone()
-    assert key is not None and clients.REFUSED_ORDER_TAG in clients.tags_of(conn, int(key[0]))
+    tagged = [r[0] for r in conn.execute("SELECT id FROM client").fetchall() if clients.REFUSED_ORDER_TAG in clients.tags_of(conn, r[0])]
+    assert len(tagged) == 1
     with pytest.raises(orders.OrderError):                                       # back only to «На точке»: refused
         orders.move_card(conn, cid, stage(conn, "moving"), "2026-10-22T10:00:00", "o")
-    assert conn.execute("SELECT 1 FROM app_state WHERE key = ?", (clients.REFUSAL_ORDER % cid,)).fetchone() is not None
-    assert clients.REFUSED_ORDER_TAG in clients.tags_of(conn, int(key[0]))
+    assert clients.REFUSED_ORDER_TAG in clients.tags_of(conn, tagged[0])
     assert orders.move_card(conn, cid, stage(conn, "at_point"), "2026-10-22T10:00:00", "o")    # the client is back: in work
     conn.commit()
-    assert clients.REFUSED_ORDER_TAG not in clients.tags_of(conn, int(key[0]))
+    assert clients.REFUSED_ORDER_TAG in clients.tags_of(conn, tagged[0])          # the owner 2026-11-28: the mark stays
 
 
 def test_the_kpi_of_a_month_is_counted_once_for_a_pass(tmp_path, monkeypatch):
