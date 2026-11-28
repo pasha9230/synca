@@ -14,6 +14,7 @@ from .connections import PRIMARY_ACCOUNT
 from .feed import clean_title
 from .webmim import brand_key
 from .wheel_pricing import price_for
+from . import wheel_templates
 
 
 def ad_id(goods_id: str, account_id: int, address_id: str) -> str:
@@ -23,7 +24,7 @@ def ad_id(goods_id: str, account_id: int, address_id: str) -> str:
 
 
 def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, category, product_type, rim_types,
-              photo_for=None, photo_prefix="", address_text="", overrides=None):
+              photo_for=None, photo_prefix="", address_text="", overrides=None, publication_overrides=None, templates=None):
     """Build only ads with approved account photo URLs; supplier URLs are not published."""
     if account_id != PRIMARY_ACCOUNT or not str(address_id).strip():
         raise ValueError('Укажите аккаунт и адрес для дисков.')
@@ -36,15 +37,18 @@ def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, c
         # become two live listings with different supplier IDs.
         return tuple(' '.join(str(value or '').casefold().replace(',', '.').split()) for value in (
             w.brand, w.model, w.diameter, w.width, w.holes, w.pcd, w.offset, w.center_bore, w.wheel_type, w.color))
+    def allowed(w):
+        mode = (publication_overrides or {}).get('1:w-' + w.goods_id)
+        return mode != 'off' and (mode == 'on' or (brand_key(w.brand) in enabled_brands and rules.get(brand_key(w.brand), {}).get('enabled') is True))
     groups = {}
     for w in wheels:
         key = brand_key(w.brand)
-        if key in enabled_brands and rules.get(key, {}).get('enabled') is True:
+        if allowed(w):
             groups.setdefault(identity(w), []).append(w.goods_id)
     duplicates = {gid for ids in groups.values() if len(ids) > 1 for gid in ids}
     for w in wheels:
         key = brand_key(w.brand)
-        if key not in enabled_brands or rules.get(key, {}).get('enabled') is not True:
+        if not allowed(w):
             continue
         if w.goods_id in duplicates:
             rejected[w.goods_id] = ['duplicate']
@@ -66,8 +70,10 @@ def build_ads(wheels, rules, enabled_brands, *, account_id, address_id, phone, c
         ad = ET.Element('Ad')
         fields = {'Id': ad_id(w.goods_id, account_id, address_id), 'Category': category,
                   'GoodsType': 'Шины, диски и колёса', 'AdType': 'Товар приобретен на продажу',
-                  'ProductType': product_type, 'Condition': 'Новое', 'Title': clean_title(w.name),
-                  'Description': w.name, 'Price': str(price), 'RimBrand': w.brand, 'RimModel': w.model,
+                  'ProductType': product_type, 'Condition': 'Новое',
+                  'Title': clean_title(wheel_templates.render(templates['title'], w, price, title=True) if templates and 'title' in templates else w.name),
+                  'Description': wheel_templates.render(templates['description'], w, price) if templates and 'description' in templates else w.name,
+                  'Price': str(price), 'RimBrand': w.brand, 'RimModel': w.model,
                   'RimDiameter': w.diameter, 'RimBolts': w.holes, 'RimBoltsDiameter': w.pcd,
                   'RimType': rim_type, 'RimDIA': w.center_bore, 'RimOffset': w.offset, 'RimWidth': w.width,
                   'Quantity': str(w.stock), 'ContactPhone': str(phone)}

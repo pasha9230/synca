@@ -18,4 +18,11 @@
 {% for address in account.addresses if address.address_id %}<label class="check"><input type="checkbox" name="address" value="{{ address.address_id }}"{% if address.address_id in account.selected %} checked{% endif %}> {{ address.name or address.address_text or address.address_id }}</label>{% else %}<p class="muted">Нет адресов с идентификатором Авито.</p>{% endfor %}
 {% if can_post("settings_pricing") %}<button class="btn btn--secondary btn--xs">В черновик</button></form>{% else %}</div>{% endif %}{% else %}<p class="muted">Нет подключённых аккаунтов с фидом.</p>{% endfor %}
 </div></section>
+<section class="card" id="templates-wheels"><div class="card-head"><h3>Диски: название и описание для Авито</h3></div>
+<div class="card-body"><p class="muted">Шаблоны применяются только к дискам основного аккаунта. Изменения сохраняются в черновик и вступают в силу после его применения.</p>
+{% if can_post("settings_pricing") %}<form method="post" action="/settings/pricing" class="stack"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="wheel_templates"><input type="hidden" name="rev" value="{{ wheel_rev }}">{% else %}<fieldset disabled class="stack">{% endif %}
+<label class="field"><span class="label">Название объявления</span><input class="input" name="title" maxlength="200" required value="{{ wheel_templates.get('title', wheel_default_title) }}"></label>
+<label class="field"><span class="label">Описание объявления</span><textarea class="textarea textarea--code" name="description" maxlength="6000" required rows="10">{{ wheel_templates.get('description', wheel_default_description) }}</textarea></label>
+<details><summary>Доступные подстановки</summary><ul>{% for name, help in wheel_template_help.items() %}<li><code>{{ '{' ~ name ~ '}' }}</code> — {{ help }}</li>{% endfor %}</ul><p class="muted">Строка с отсутствующим значением не выводится.</p></details>
+{% if can_post("settings_pricing") %}<button class="btn btn--secondary">В черновик</button></form>{% else %}</fieldset>{% endif %}</div></section>
 {% endblock %}

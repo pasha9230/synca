@@ -199,7 +199,7 @@ def test_legacy_manifest_stock_only_pass_removes_tire_without_blocking(tmp_path)
     from tires_sync.webmim import parse_unload as parse_tires
     from tires_sync.wheel_runtime import _legacy_config_digest
     conn = store.connect(tmp_path / 't.db')
-    init_settings(conn, settings_dict(wheel_pricing={'BRAND': {'pct_small': 10, 'pct_large': 15, 'enabled': True}}, wheel_accounts={'1': ['101']}), T)
+    init_settings(conn, settings_dict(wheel_pricing={'BRAND': {'pct_small': 10, 'pct_large': 15, 'enabled': True}}, wheel_accounts={'1': ['101']}, overrides={'1:999999': 'off'}), T)
     aid = connections.create_account(conn, 'Основной', T, 'owner')
     connections.set_live(conn, aid, True, T, 'owner')
     connections.save_addresses(conn, aid, 'percent', None, [{'name': 'Точка', 'address_id': '101', 'enabled': True, 'share': 100, 'address_text': 'СПб, Тестовая 1'}], T, 'owner', address_mode='text')
@@ -221,3 +221,29 @@ def test_legacy_manifest_stock_only_pass_removes_tire_without_blocking(tmp_path)
     assert result and result[0].ok, result[0].error if result else 'нет результата'
     result = publishing.publish_live_accounts(conn, root)
     assert result[0]['ok'], result[0]['message']
+
+
+def test_wheel_manual_feed_actions_are_staged_and_separate_from_tires(tmp_path):
+    from test_catalog_filters import as_user
+    app, client, conn, _, _ = setup_world(tmp_path)
+    data = {'csrf': 'tok', 'g': '41', 'mode': 'on', 'next': '/catalog?category=wheels'}
+    viewer = as_user(app, conn, 'wheel_feed_viewer', 'viewer')
+    assert viewer.post('/catalog/wheels/feed', data=data).status_code == 403
+    assert client.post('/catalog/wheels/feed', data=data).status_code == 302
+    assert staging.effective_raw(conn)['overrides']['1:w-41'] == 'on'
+    assert '1:w-41' not in get_active(conn)[1].get('overrides', {})
+    data['mode'] = 'off'
+    assert client.post('/catalog/wheels/feed', data=data).status_code == 302
+    assert staging.effective_raw(conn)['overrides']['1:w-41'] == 'off'
+
+
+def test_wheel_columns_preference_does_not_reveal_supplier_price(tmp_path):
+    from test_catalog_filters import as_user
+    app, client, conn, _, _ = setup_world(tmp_path)
+    assert client.post('/catalog/wheels/columns', data={'csrf': 'tok', 'show': ['name'], 'next': '/catalog?category=wheels'}).status_code == 302
+    page = client.get('/catalog?category=wheels').get_data(as_text=True)
+    assert '<th>Название · код</th>' in page
+    assert '<th>Бренд</th>' not in page
+    viewer = as_user(app, conn, 'wheel_columns_viewer', 'viewer')
+    page = viewer.get('/catalog?category=wheels').get_data(as_text=True)
+    assert '<th>Цена поставщика</th>' not in page

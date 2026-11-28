@@ -29,7 +29,7 @@ ALLOWED_KEYS = frozenset({
     "territory_rn", "min_stock", "hysteresis", "min_diameter", "portion_limit", "stale_days",
     "price_jump_limit", "guard_min", "guard_fraction", "allow_mass_removal", "pct_limit", "date_end_days",
     "date_end_renew_days", "contact_phone", "point_mode", "point_values", "point_rest", "enabled", "pricing", "pack4", "pack4_rules", "overrides", "excluded_brands", "excluded_sizes",
-    "price_overrides", "wheel_pricing", "wheel_accounts",
+    "price_overrides", "wheel_pricing", "wheel_accounts", "wheel_templates",
 })
 
 

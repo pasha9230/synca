@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request
 from werkzeug.datastructures import MultiDict
 
-from .. import catalog_archive, connections, market, own_bulk, order_oth, order_points, order_wait, orders, staging, store, tochki_feed, wheel_archive, wheel_manifest
+from .. import catalog_archive, connections, market, own_bulk, order_oth, order_points, order_wait, orders, staging, store, tochki_feed, user_prefs, wheel_archive, wheel_manifest
 from ..config import own_price_value, settings_from_dict
 from ..fetcher import wheel_snapshot_path
 from ..webmim_wheels import parse_unload as parse_wheels
@@ -35,6 +35,9 @@ def _num(args, name):
 
 
 MAX_SIZE_VALUES = 20
+WHEEL_COLUMNS = (("brand", "Бренд"), ("name", "Название · код"), ("supplier", "Цена поставщика"),
+                 ("price", "Наша цена"), ("stock", "Остаток"), ("size", "Диаметр / ширина / разболтовка"),
+                 ("offset", "Вылет / DIA"), ("color", "Цвет"), ("status", "Статус"), ("actions", "Действия"))
 
 
 def _nums(args, name):
@@ -654,6 +657,8 @@ def register(app) -> None:
                 row['own'] = overrides.get(key)
                 row['pending'] = current_overrides.get(key) != overrides.get(key)
                 row['brand_enabled'] = rules.get(brand_key(wheel.brand), {}).get('enabled', False)
+                row['manual'] = effective.get('overrides', {}).get(key)
+                row['manual_pending'] = raw.get('overrides', {}).get(key) != row['manual']
 
             options = {key: wheel_catalog.choices(wheels, attr) for key, (attr, _) in wheel_catalog.PARAMETERS.items()}
             options['type'] = wheel_catalog.choices(wheels, 'wheel_type')
@@ -677,11 +682,43 @@ def register(app) -> None:
                 fetched_at = ""
             return render_template("catalog_wheels.html", wheels=rows, supplier_tabs=tabs, filters=filters, options=options, car=car,
                                    filters_active=filters_active, more=(request.args.get("more") == "1" if "more" in request.args else bool(filters['pf'] or filters['pt'])),
-                                   available=bool(wheels) or snapshot is not None, fetched_at=fetched_at, wheel_next=request.full_path.rstrip("?"))
+                                   available=bool(wheels) or snapshot is not None, fetched_at=fetched_at, wheel_next=request.full_path.rstrip("?"),
+                                   wheel_columns=WHEEL_COLUMNS, hidden_columns=user_prefs.get(conn, current_user()['login'], 'wheel.columns', []))
         args = request.args                                                    # «Недавние» of the person (the owner 2026-11-09): the sizes searched
         client_catalog.remember_sizes(get_conn(), current_user()["login"], client_catalog.searched_sizes(
             _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), _view_filters(args)["sizes"]), now_iso())
         return catalog_page(args)
+
+    @app.route('/catalog/wheels/columns', methods=['POST'])
+    @login_required
+    def wheel_columns():
+        allowed = {key for key, _ in WHEEL_COLUMNS}
+        hidden = sorted(allowed - set(request.form.getlist('show')))
+        user_prefs.put(get_conn(), current_user()['login'], 'wheel.columns', hidden, now_iso())
+        return redirect(_back('/catalog?category=wheels'))
+
+    @app.route('/catalog/wheels/feed', methods=['POST'])
+    @login_required
+    def wheel_feed_stage():
+        conn = get_conn()
+        back = _back('/catalog?category=wheels')
+        gid = (request.form.get('g') or '').strip()
+        mode = request.form.get('mode')
+        try:
+            if not re.fullmatch(r'[0-9]{1,40}', gid) or mode not in ('on', 'off', 'clear'):
+                raise ValueError('Неизвестная позиция или действие.')
+            territory = connections.supplier_territory(conn, 1, active_settings(conn))
+            try:
+                snapshot = parse_wheels(wheel_snapshot_path(Path(app.config['UNLOAD_PATH'])).read_bytes(), territory)
+            except (OSError, ET.ParseError):
+                snapshot = None
+            if gid not in wheel_archive.merged(conn, snapshot, territory):
+                raise ValueError('Такого диска нет в каталоге.')
+            staging.set_override(conn, 'w-' + gid, None if mode == 'clear' else mode, now_iso())
+            flash('Правило сохранено в черновике. Публикация возможна при наличии цены, остатка, адреса и данных объявления.')
+        except (StaleDraftError, ValueError) as err:
+            flash(str(err))
+        return redirect(back)
 
     @app.route("/catalog/wheels/own-price", methods=["POST"])
     @login_required

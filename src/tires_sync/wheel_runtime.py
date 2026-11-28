@@ -23,6 +23,11 @@ WHEEL_MAX_AGE = timedelta(hours=3)
 def _config_digest(raw, min_stock, wheel_ids=None):
     allowed = None if wheel_ids is None else {'1:w-' + gid for gid in wheel_ids}
     data = {'pricing': raw.get('wheel_pricing') or {}, 'accounts': raw.get('wheel_accounts') or {}, 'own': {k: v for k, v in (raw.get('price_overrides') or {}).items() if k.startswith('1:w-') and (allowed is None or k in allowed)}, 'min_stock': min_stock}
+    manual = {k: v for k, v in (raw.get('overrides') or {}).items() if k.startswith('1:w-')}
+    if manual:
+        data['manual'] = manual
+    if raw.get('wheel_templates'):
+        data['templates'] = raw['wheel_templates']
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
@@ -83,7 +88,18 @@ def append_candidate(conn, account, folder, eff, identity, wheel_path):
     selected = raw_settings.get('wheel_accounts', {}).get(str(account['id']), [])
     enabled = {key for key, rule in rules.items() if rule.get('enabled') is True}
     previous, previous_stocks, previous_codes, previous_basis = _previous(conn, account, folder)
-    if not selected or not enabled:
+    manual = raw_settings.get('overrides') or {}
+    manual_on = any(k.startswith('1:w-') and v == 'on' for k, v in manual.items())
+    snapshot = _snapshot(wheel_path, connections.supplier_territory(conn, 1, eff))
+    if previous and snapshot is None:
+        old_ids = previous_basis.get('wheel_ids')
+        matching = previous_basis.get('config_sha') == _config_digest(raw_settings, eff.min_stock, old_ids)
+        legacy = ('wheel_ids' not in previous_basis and not any(k.startswith('1:w-') for k in manual) and not raw_settings.get('wheel_templates') and
+                  not any(k.startswith('1:w-') for k in (raw_settings.get('price_overrides') or {})) and
+                  previous_basis.get('config_sha') == _legacy_config_digest(raw_settings, eff.min_stock))
+        if not (matching or legacy):
+            raise ValueError('Настройки дисков изменились, а выгрузка МИМ недоступна: прежний фид сохранён до обновления выгрузки.')
+    if not selected or (not (enabled or manual_on) and not previous):
         return {}, {}, ''
     addresses = {a['address_id']: a for a in connections.list_addresses(conn, account['id'])}
     if any(address not in addresses for address in selected):
@@ -99,11 +115,11 @@ def append_candidate(conn, account, folder, eff, identity, wheel_path):
     mode = connections.get_address_mode(conn, account['id'])
     selected_ids = set(selected) if mode != 'text' else set()
     selected_texts = {addresses[a]['address_text'] for a in selected if addresses[a]['address_text']} if mode == 'text' else set()
-    previous = [ad for ad in previous if brand_key(ad.findtext('RimBrand') or '') in enabled and
+    previous = [ad for ad in previous if manual.get('1:w-' + previous_codes.get(ad.findtext('Id'), '')[6:]) != 'off' and
+                (brand_key(ad.findtext('RimBrand') or '') in enabled or manual.get('1:w-' + previous_codes.get(ad.findtext('Id'), '')[6:]) == 'on') and
                 (((ad.findtext('SellerAddressID') or '').strip() in selected_ids) or
                  ((ad.findtext('Address') or '').strip() in selected_texts))]
     previous_stocks = {ad.findtext('Id'): previous_stocks[ad.findtext('Id')] for ad in previous}
-    snapshot = _snapshot(wheel_path, connections.supplier_territory(conn, 1, eff))
     source_path = str(Path(wheel_path).resolve()) if wheel_path is not None else ''
     try:
         source_sha = snapshot.snapshot_sha if snapshot is not None else hashlib.sha256(Path(source_path).read_bytes()).hexdigest()
@@ -155,7 +171,8 @@ def append_candidate(conn, account, folder, eff, identity, wheel_path):
             created, rejected = wheel_feed.build_ads(
                 [w for w in selected_rows if assignments[w.goods_id] == address_id], rules, enabled, account_id=account['id'], address_id=address_id,
                 address_text=text, phone=phone, category='Запчасти и аксессуары', product_type='Диски', rim_types=RIM_TYPES,
-                photo_prefix=prefix, overrides=raw_settings.get('price_overrides'), photo_for=lambda w: prefix + 'w-' + w.goods_id + '.jpg' if safe_source(w.image) and re.fullmatch(r'[0-9]{1,40}', w.goods_id) else '')
+                photo_prefix=prefix, overrides=raw_settings.get('price_overrides'), publication_overrides=manual,
+                templates=raw_settings.get('wheel_templates'), photo_for=lambda w: prefix + 'w-' + w.goods_id + '.jpg' if safe_source(w.image) and re.fullmatch(r'[0-9]{1,40}', w.goods_id) else '')
             for w in selected_rows:
                 aid = wheel_feed.ad_id(w.goods_id, account['id'], address_id)
                 if any(ad.findtext('Id') == aid for ad in created):
@@ -265,17 +282,24 @@ def check_before_publish(conn, account, feed_path, feed_root, removal_count=None
         def intentional(key):
             brand, address = key
             brand_disabled = bool(old_rules.get(brand, {}).get('enabled')) and not bool(new_rules.get(brand, {}).get('enabled'))
-            if old and brand and address and (brand_disabled or address in removed_values):
+            if old and brand and address and address in removed_values:
                 return True
             missing = [ad for ad in live_wheels if
                        (brand_key(ad.findtext('RimBrand') or ''), (ad.findtext('SellerAddressID') or ad.findtext('Address') or '').strip()) == key
                        and ad.findtext('Id') not in candidate_ids]
-            if not snapshot or not missing:
+            if not missing:
                 return False
             for ad in missing:
                 code = old_codes.get(ad.findtext('Id'), '')
                 if not code.startswith('wheel:') or not re.fullmatch(r'[0-9]{1,40}', code[6:]):
                     return False
+                manual_mode = (current.get('overrides') or {}).get('1:w-' + code[6:])
+                if old and brand and address and brand_disabled and manual_mode != 'on':
+                    continue
+                if not snapshot:
+                    return False
+                if manual_mode == 'off':
+                    continue
                 offer = snapshot.offers.get(code[6:])
                 if offer is None:
                     if not snapshot.verified_full:
@@ -316,8 +340,12 @@ def check_before_publish(conn, account, feed_path, feed_root, removal_count=None
         raise PublishError('Выгрузка дисков изменилась: фид нужно пересобрать.')
     rules = raw.get('wheel_pricing', {})
     selected = set(raw.get('wheel_accounts', {}).get(str(account['id']), []))
-    if any(not rules.get(brand_key(ad.findtext('RimBrand') or ''), {}).get('enabled') for ad in wheels):
-        raise PublishError('Публикация бренда дисков выключена или настройка изменилась.')
+    for ad in wheels:
+        code = info.get('codes', {}).get(ad.findtext('Id'), '')
+        gid = code[6:] if code.startswith('wheel:') else ''
+        mode = (raw.get('overrides') or {}).get('1:w-' + gid)
+        if mode == 'off' or (mode != 'on' and not rules.get(brand_key(ad.findtext('RimBrand') or ''), {}).get('enabled')):
+            raise PublishError('Публикация диска или его бренда выключена либо настройка изменилась.')
     rows = [a for a in connections.list_addresses(conn, account['id']) if a['address_id'] in selected]
     if len(rows) != len(selected):
         raise PublishError('Выбранный адрес дисков больше не принадлежит аккаунту.')

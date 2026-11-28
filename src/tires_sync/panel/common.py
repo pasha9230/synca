@@ -265,7 +265,7 @@ for _section, _endpoints in {
     "clients": ("clients_page", "client_page", "client_save", "client_merge", "client_split_order", "client_split_chat",
                 "clients_duplicates", "client_tag", "client_unmerge", "client_skip"),
     "catalog": ("price_changes_page", "purchase_changes_page", "price_changes", "feeds_page", "new_positions", "new_positions_seen", "mappings", "accept_confident", "confirm_brand", "export_mappings", "import_mappings",
-                "confirm_model", "save_old_model_name", "catalog", "catalog_cancel", "catalog_item_page", "catalog_market_switch", "catalog_market_token", "catalog_own_price", "catalog_own_price_bulk", "catalog_own_price_inline", "wheel_own_price", "catalog_preview", "catalog_stage", "catalog_table", "brands", "oth_page", "oth_return", "oth_to_return",
+                "confirm_model", "save_old_model_name", "catalog", "catalog_cancel", "catalog_item_page", "catalog_market_switch", "catalog_market_token", "catalog_own_price", "catalog_own_price_bulk", "catalog_own_price_inline", "wheel_own_price", "wheel_feed_stage", "wheel_columns", "catalog_preview", "catalog_stage", "catalog_table", "brands", "oth_page", "oth_return", "oth_to_return",
                 "pairs_page", "pairs_forget", "pairs_not_pair",    # «Пары поставщиков»: who sees the catalog sees it; «Забыть пару», «Это не пара» need «менять»
                 "feed_update_page", "feed_update_confirm", "feed_update_fetch",
                 "history_ads", "history_catalog", "photos_feed", "photos_frame_action", "photos_generate", "photos_priority", "photos_queue_switch", "photos_ref", "photos_review", "photos_switch"),

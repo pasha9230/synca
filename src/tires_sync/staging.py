@@ -14,7 +14,7 @@ from .overrides import override_key
 from .settings_store import StaleDraftError, cancel_draft, get_active
 
 KEY = "work_draft"
-TRACKED = ("enabled", "pricing", "overrides", "excluded_brands", "excluded_sizes", "price_overrides", "wheel_pricing", "wheel_accounts")
+TRACKED = ("enabled", "pricing", "overrides", "excluded_brands", "excluded_sizes", "price_overrides", "wheel_pricing", "wheel_accounts", "wheel_templates")
 SEASONS = ("winter", "summer", "all")
 SEASON_RU = {"winter": "зима", "summer": "лето", "all": "всесезонные"}
 
@@ -398,4 +398,13 @@ def set_wheel_account(conn, account_id: int, addresses, now: str, expect: Option
             eff["wheel_accounts"][str(account_id)] = clean
         else:
             eff["wheel_accounts"].pop(str(account_id), None)
+    _mutate(conn, fn, now, expect)
+
+
+def set_wheel_templates(conn, title: str, description: str, now: str, expect: Optional[str] = None) -> None:
+    from .wheel_templates import validate_settings
+    value = {"title": title, "description": description}
+    validate_settings(value)
+    def fn(eff):
+        eff["wheel_templates"] = value
     _mutate(conn, fn, now, expect)
