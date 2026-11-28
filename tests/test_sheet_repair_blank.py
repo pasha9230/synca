@@ -256,6 +256,28 @@ def test_a_row_written_without_some_column_is_said_and_listed_later(table):
     assert fake.rows[mark]["Артикул"] == before["Артикул"] and not written(conn, order)[mark].get("_missing")
     later = {d["key"]: d["result"] for d in sheet.repair_blank(conn, box, fake, LATER, dry_run=True)}
     assert later[mark].startswith("записана не полностью")                 # never «filled» in silence
+    assert "ПВЗ" not in written(conn, order)[mark] and "ПВЗ" not in fake.rows[mark]   # not kept as written: it goes again
+    still = {d["key"]: d["result"] for d in sheet.repair_blank(conn, box, fake, LATER)}
+    assert still[mark].startswith("записана не полностью")                 # the column is still not there
+    fake.columns.append("ПВЗ")                                             # the owner put the column back
+    after = {d["key"]: d["result"] for d in sheet.repair_blank(conn, box, fake, LATER)}
+    assert after[mark] == "дописана: ПВЗ" and fake.rows[mark] == before
+    assert sheet.PARTIAL not in written(conn, order)[mark] and written(conn, order)[mark]["ПВЗ"] == before["ПВЗ"]
+    assert mark not in {d["key"] for d in sheet.repair_blank(conn, box, fake, LATER)}   # done: no longer listed
+    assert conn.execute("SELECT COUNT(*) FROM sheet_order WHERE claim_until != ''").fetchone()[0] == 0
+
+
+def test_the_claims_are_freed_when_the_writing_fails(table, monkeypatch):
+    conn, box, fake, rows, before = table
+    real = sheet._repair_write
+
+    def broken(*a, **kw):
+        raise sheet.SheetError("сбой")
+    monkeypatch.setattr(sheet, "_repair_write", broken)
+    with pytest.raises(sheet.SheetError):
+        sheet.repair_blank(conn, box, fake, LATER)
+    assert conn.execute("SELECT COUNT(*) FROM sheet_order WHERE claim_until != ''").fetchone()[0] == 0
+    assert real
 
 
 def test_the_confirm_says_how_many_rows_without_a_mark(tmp_path, monkeypatch):

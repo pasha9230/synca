@@ -957,7 +957,15 @@ REPAIRED = "Строка Google-таблицы была стёрта вручн�
 OLD_SCRIPT = ("Скрипт таблицы не умеет искать пустые строки: нужно новое развертывание Apps Script (текст от 28.11). "
               "Ничего не записано.")
 SHOWN = ("Артикул", "Наименование", "Кол-во", "Имя", "Телефон", "№ заказа MIM", "Этап")
-PARTIAL = "_repair_partial"                                  # a row repaired without some column (the script said why): listed until then
+PARTIAL = "_repair_partial"                                  # a row repaired without some column (the script said why): the values of
+                                                             # those columns are not kept as written, so the next send (an UPDATED one)
+                                                             # and the next repair (any one, by a plain update) write them; taken off then
+
+
+def _lacking(why: str) -> List[str]:
+    """The columns of «нет колонок: A, B (остальное записано)»."""
+    m = re.match(r"нет колонок:\s*(.*?)(?:\s*\(|$)", why or "")
+    return [c.strip() for c in m.group(1).split(",") if c.strip()] if m else []
 
 
 def repair_candidates(conn) -> List[dict]:
@@ -1070,7 +1078,7 @@ def repair_blank(conn, box, http: Transport, now: str, author: str = "cli", dry_
         return []
     probed = _ask(http, s["url"], secret, [_repair_op(c, True) for c in found])
     out: List[dict] = []
-    blank, gone = [], []
+    blank, gone, finish = [], [], []
     for c in found:
         reply = probed.get(c["key"]) or {}
         status = str(reply.get("status") or "нет ответа")
@@ -1085,22 +1093,50 @@ def repair_blank(conn, box, http: Transport, now: str, author: str = "cli", dry_
             out.append(_line(c, EDITED_SAID, reply))
         elif status == "filled":
             if c["partial"]:
-                out.append(_line(c, PARTIAL_SAID % c["partial"], reply))
+                (finish.append(c) if not dry_run else out.append(_line(c, PARTIAL_SAID % c["partial"], reply)))
         else:
             out.append(_line(c, "ошибка: %s" % str(reply.get("error") or status)[:200], reply))
     if dry_run:
         return ([_line(c, "пустая — будет записано", probed.get(c["key"]), what_goes(c["op"])) for c in blank]
                 + [_line(c, GONE_SAID, None, what_goes(c["op"])) for c in gone] + out)
-    claimed = [o for o in sorted({c["order_id"] for c in blank + gone}) if _claim(conn, o, now)]
-    out += [_line(c, "занят другой отправкой") for c in blank + gone if c["order_id"] not in claimed]
+    claimed = [o for o in sorted({c["order_id"] for c in blank + gone + finish}) if _claim(conn, o, now)]
+    out += [_line(c, "занят другой отправкой") for c in blank + gone + finish if c["order_id"] not in claimed]
+    try:
+        return _repair_write(conn, http, s["url"], secret, now, author, claimed, blank, gone, finish) + out
+    finally:                                                               # whatever happened, no order stays claimed
+        for card_id in claimed:
+            conn.execute("UPDATE sheet_order SET claim_until = '' WHERE order_id = ?", (card_id,))
+        conn.commit()
+
+
+def _repair_write(conn, http: Transport, url: str, secret: str, now: str, author: str, claimed: List[int], blank: List[dict],
+                  gone: List[dict], finish: List[dict]) -> List[dict]:
+    """repair_blank past the look: the blank rows written in place, the rows without a mark made again, the rows written earlier without
+    some column finished by a plain update of those columns (checked by CHECK as written). The script is known to be of 28.11 here."""
     going, making = [c for c in blank if c["order_id"] in claimed], [c for c in gone if c["order_id"] in claimed]
-    answers = _ask(http, s["url"], secret, [_repair_op(c, False) for c in going]) if going else {}
+    ending = [c for c in finish if c["order_id"] in claimed]
+    answers = _ask(http, url, secret, [_repair_op(c, False) for c in going], repair=False) if going else {}
     if making:
-        answers.update(_ask(http, s["url"], secret, [_create_op(c) for c in making], repair=False))
+        answers.update(_ask(http, url, secret, [_create_op(c) for c in making], repair=False))
+    if ending:
+        values = lambda c: dict(c["op"]["fields"], **c["op"].get("extra", {}))
+        answers.update(_ask(http, url, secret, [{"key": c["key"], "create": False, "check": c["verify"], "fields":
+                                                {k: values(c)[k] for k in _lacking(c["partial"]) if k in values(c)}} for c in ending], repair=False))
     done: List[dict] = []
     for card_id in claimed:
         written = json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0] or "{}")
         fixed = remade = 0
+        for c in [c for c in ending if c["order_id"] == card_id]:
+            reply = answers.get(c["key"]) or {}
+            status, why = str(reply.get("status") or "нет ответа"), str(reply.get("error") or "")[:200]
+            if status == "updated":
+                written[c["key"]].update({k: v for k, v in dict(c["op"]["fields"], **c["op"].get("extra", {})).items() if k in _lacking(c["partial"])})
+                written[c["key"]].pop(PARTIAL, None)
+                done.append(_line(c, "дописана: %s" % ", ".join(_lacking(c["partial"])), reply))
+            elif status == "error" and why.startswith("нет колонок"):
+                done.append(_line(c, PARTIAL_SAID % why, reply))
+            else:
+                done.append(_line(c, "ошибка: %s" % (why or status), reply))
         for c in [c for c in going + making if c["order_id"] == card_id]:
             reply = answers.get(c["key"]) or {}
             status = str(reply.get("status") or "нет ответа")
@@ -1116,7 +1152,9 @@ def repair_blank(conn, box, http: Transport, now: str, author: str = "cli", dry_
                     written[c["key"]]["_grey"] = True
                 elif not new:
                     written[c["key"]]["_grey"] = False
-                if partial:
+                if partial:                                                 # not kept as written: the next send writes them
+                    for k in _lacking(why):
+                        written[c["key"]].pop(k, None)
                     written[c["key"]][PARTIAL] = why
                 remade, fixed = remade + new, fixed + (not new)
                 said = PARTIAL_SAID % why if partial else (REMADE_SAID if new else "записана заново")
@@ -1131,12 +1169,13 @@ def repair_blank(conn, box, http: Transport, now: str, author: str = "cli", dry_
             orders.add_event(conn, card_id, now, AUTHOR, "sheet", REMADE % remade)
         conn.execute("UPDATE sheet_order SET rows = ?, claim_until = '' WHERE order_id = ?", (json.dumps(written, ensure_ascii=False), card_id))
         conn.commit()
-    repaired = [d for d in done if d["result"] in ("записана заново", REMADE_SAID) or d["result"].startswith("записана не полностью")]
+    repaired = [d for d in done if d["result"] in ("записана заново", REMADE_SAID) or d["result"].startswith("записана не полностью")
+                and d["key"] not in {c["key"] for c in ending}]
     if repaired:
         store.write_audit(conn, now, author, "sheet_repair_blank", {"rows": len(repaired), "orders": len({d["order_id"] for d in repaired}),
                                                                     "remade": sum(d["result"] == REMADE_SAID for d in repaired)})
         conn.commit()
-    return done + out
+    return done
 
 def flush(conn, box, http: Transport, now: str, full: bool = False, limit: Optional[int] = None) -> Dict[int, str]:
     """Send the queued orders whose rows changed (order → what happened). The table off, no address or no secret: nothing goes."""
