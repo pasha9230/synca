@@ -1004,15 +1004,23 @@ def repair_candidates(conn) -> List[dict]:
     return found
 
 
+def _filled(values: dict) -> dict:
+    """The values worth writing into a row cleared by hand (the safe rules of the resync): no empty one, no «Списание» taken off."""
+    return {k: v for k, v in values.items() if v not in ("", None) and not (k == "Списание" and v is not True)}
+
+
 def _repair_op(c: dict, probe: bool) -> dict:
-    """A row asked about (`probe`) or written again in place: its fill set and taken off as the order's (`shade`, as a send does)."""
+    """A row asked about (`probe`) or written again in place (only the values that are not empty, «Списание» never taken off): its fill
+    set and taken off as the order's (`shade`, as a send does)."""
     op = c["op"]
-    out = {"key": c["key"], "create": False, "fields": {} if probe else op["fields"], "check": dict(REPAIR_CHECK), "repair": list(BLANK),
+    out = {"key": c["key"], "create": False, "fields": {} if probe else _filled(op["fields"]), "check": dict(REPAIR_CHECK), "repair": list(BLANK),
            "verify": c["verify"]}
     if probe:
         out["probe"] = True
     else:
-        out.update({k: op[k] for k in ("extra", "shade") if k in op})
+        out.update({k: op[k] for k in ("shade",) if k in op})
+        if _filled(op.get("extra") or {}):
+            out["extra"] = _filled(op["extra"])
     return out
 
 
@@ -1242,11 +1250,31 @@ def _sync_op(c: dict, probe: bool, go: Optional[dict] = None) -> dict:
 CODES = (REALIZED, FROM_STOCK, NOT_BOUGHT, CANCELLED)
 
 
+def _as_day(text: str) -> Optional[datetime]:
+    """«2026-11-02» or «02.11.2026» (a day typed as text) → the day; else None."""
+    text = str(text or "").strip()
+    for form, size in (("%Y-%m-%d", 10), ("%d.%m.%Y", 10)):
+        try:
+            return datetime.strptime(text[:size], form)
+        except ValueError:
+            continue
+    return None
+
+
 def _days_apart(a: str, b: str) -> Optional[int]:
+    one, two = _as_day(a), _as_day(b)
+    return abs((one - two).days) if one and two else None
+
+
+def _blankish(value: str) -> bool:
+    """Empty, or a zero (the owner 28.11: a filled number is never written over by 0)."""
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return True
     try:
-        return abs((datetime.fromisoformat(a[:10]) - datetime.fromisoformat(b[:10])).days)
+        return float(text.replace(",", ".")) == 0
     except ValueError:
-        return None
+        return False
 
 
 def _plan(c: dict, changed: dict) -> Tuple[dict, List[Tuple[str, list, str]]]:
@@ -1269,12 +1297,14 @@ def _plan(c: dict, changed: dict) -> Tuple[dict, List[Tuple[str, list, str]]]:
             continue
         if k == "заливка":
             go[k] = v
-        elif not now and was:
-            keep.append((k, list(v), "в панели пусто, в таблице есть значение"))
+        elif _blankish(now) and not _blankish(was) and k != "Списание":
+            keep.append((k, list(v), "в панели пусто, в таблице есть значение" if not now else "в панели 0, в таблице есть число"))
         elif k == "Списание" and was.lower() == "true" and now.lower() != "true":
             keep.append((k, list(v), "в таблице списание отмечено, в панели нет"))
         elif k == "Реализация" and was and was not in CODES:
             keep.append((k, list(v), "в таблице текст, а не код Р/Б/Н/О"))
+        elif k == "Дата счета" and was and now and _days_apart(was, now) == 0:
+            continue                                                       # the same day typed as text: nothing to write
         elif k == "Дата счета" and was and now and _days_apart(was, now) == 1:
             keep.append((k, list(v), "дата отличается на один день — проверьте"))
         else:
@@ -1329,7 +1359,7 @@ def resync(conn, box, http: Transport, now: str, author: str = "cli", dry_run: b
             summary["blank"] += bool(reply.get("blank"))
             summary["edited"] += bool(reply.get("edited"))
             go, keep = _plan(c, reply.get("changed") or {})
-            c["go"] = go
+            c["go"], c["keep"] = go, keep
             if keep:
                 summary["kept"] += 1
                 kept.append(_keep_line(c, reply, keep))
@@ -1367,6 +1397,9 @@ def _taken(c: dict, values: dict, lacking: List[str]) -> dict:
     """The row of `written` once the sheet has the panel's values: what went (never a column the sheet has not: the next send writes it),
     the fill, the note of a sale from OTH as written (never sent)."""
     row = {k: v for k, v in values.items() if k not in lacking}
+    for k, v, _ in c.get("keep") or []:                                    # «Артикул»/«Телефон» the panel has not: what the cell has
+        if k in CHECK:                                                     # stays the written one (the row is checked and followed by it)
+            row[k] = v[0]
     if c["note"] is not None:
         row["Примечание"] = c["note"]
     row["_grey"] = bool(c["op"]["shade"])

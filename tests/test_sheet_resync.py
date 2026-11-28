@@ -438,3 +438,40 @@ def test_the_command_prints_the_two_lists(table, monkeypatch, capsys, tmp_path):
     assert cli.main(["sheet-resync", "--db", db_path, "--key-file", str(key), "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert out.index("Будет исправлено:") < out.index("Не трогаем (решите вручную):") and "не трогаем (решите вручную): 1" in out
+
+
+def test_a_filled_number_is_never_made_zero(table, monkeypatch):
+    conn, box, fake, rows, orders_of, whole = table
+    mark = rows["staged"]
+    panel_says(monkeypatch, {mark: {"Кол-во": 0, "Сумма MIM": 0.0}})
+    look = sheet.resync(conn, box, fake, LATER, dry_run=True)
+    assert "Кол-во: %s → 0 (в панели 0, в таблице есть число)" % whole["staged"]["Кол-во"] in kept_of(look, mark)
+    sheet.resync(conn, box, fake, LATER)
+    assert fake.rows[mark]["Кол-во"] == whole["staged"]["Кол-во"] and fake.rows[mark]["Сумма MIM"] == whole["staged"]["Сумма MIM"]
+
+
+def test_a_code_the_panel_has_not_stays_written_and_the_row_is_followed(table, monkeypatch):
+    conn, box, fake, rows, orders_of, whole = table
+    mark, order = rows["staged"], orders_of["staged"]
+    panel_says(monkeypatch, {mark: {"Артикул": ""}})
+    look = sheet.resync(conn, box, fake, LATER, dry_run=True)
+    assert "Артикул: %s → пусто" % whole["staged"]["Артикул"] in kept_of(look, mark)
+    sheet.resync(conn, box, fake, LATER)
+    assert written(conn, order)[mark]["Артикул"] == whole["staged"]["Артикул"] == fake.rows[mark]["Артикул"]
+    monkeypatch.undo()
+    orders.move_card(conn, order, stage(conn, "at_point")["id"], LATER, "owner")
+    sheet.flush(conn, box, fake, LATER)
+    assert fake.rows[mark]["Этап"] == "На точке, ждём клиента" and not written(conn, order)[mark].get("_missing")
+
+
+def test_an_invoice_day_typed_as_text_counts_by_its_day(table, monkeypatch):
+    conn, box, fake, rows, orders_of, whole = table
+    off, same = rows["staged"], rows["edited"]
+    panel_says(monkeypatch, {off: {"Дата счета": "2026-11-01"}, same: {"Дата счета": "2026-11-01"}})
+    fake.rows[off]["Дата счета"] = "02.11.2026"
+    fake.rows[same]["Дата счета"] = "01.11.2026"
+    look = sheet.resync(conn, box, fake, LATER, dry_run=True)
+    assert "Дата счета: 02.11.2026 → 2026-11-01 (дата отличается на один день — проверьте)" in kept_of(look, off)
+    assert not any(d["key"] == same and "Дата счета" in d["values"] for d in look["rows"])
+    sheet.resync(conn, box, fake, LATER)
+    assert (fake.rows[off]["Дата счета"], fake.rows[same]["Дата счета"]) == ("02.11.2026", "01.11.2026")
