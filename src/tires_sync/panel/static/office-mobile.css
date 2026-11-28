@@ -14,7 +14,7 @@
   body.ofc .page{max-width:none;min-width:0}
   body.ofc .page>*{min-width:0}   /* a wide table scrolls in its own box, never widens the page (the design review 2026-11-12) */
   /* the menu: off the screen on the left, slides in over the page; the shade behind it closes it */
-  body.ofc .sidebar{position:fixed;top:0;bottom:0;left:0;z-index:60;width:min(300px,86vw);transform:translateX(-102%);transition:transform .2s ease;
+  body.ofc .sidebar{position:fixed;top:0;bottom:0;left:0;height:auto;z-index:60;width:min(300px,86vw);transform:translateX(-102%);transition:transform .2s ease;
     box-shadow:var(--sh-xl);overscroll-behavior:contain;padding-bottom:calc(var(--s-5) + env(safe-area-inset-bottom))}
   body.ofc .app.is-nav-open .sidebar{transform:none}
   body.ofc .app.is-collapsed .sidebar{padding-left:var(--s-3);padding-right:var(--s-3)}

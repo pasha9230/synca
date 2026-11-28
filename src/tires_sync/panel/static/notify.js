@@ -171,17 +171,11 @@
     var last = Math.max(reloaded, Number(session(LAST)) || 0);
     return Date.now() - last < EVERY;
   }
-  function mainBox() {                                    // the same box as app.js pageBox(): .main when it scrolls itself, else null (the window)
-    var main = document.querySelector(".main");
-    if (main && window.getComputedStyle && /(auto|scroll)/.test(getComputedStyle(main).overflowY) && main.scrollHeight > main.clientHeight) return main;
-    return null;
-  }
   function reload() {
     reloaded = Date.now();
     session(LAST, String(reloaded));
     var url = String(window.location.href).split("#")[0];
-    var box = mainBox();                                  // a computer (>=1024px): the panel's .main scrolls, not the window (app.js pageBox)
-    session(SCROLL, JSON.stringify({url: url, y: box ? box.scrollTop : (window.scrollY || window.pageYOffset || 0), main: !!box}));
+    session(SCROLL, JSON.stringify({url: url, y: window.scrollY || window.pageYOffset || 0}));   // one scroll (2026-11-28): the window, as app.js pageBox
     window.location.replace(url);                         // a GET of the same address (the tab, the search): never a form sent again
   }
   function tryRefresh() {
@@ -211,7 +205,7 @@
       var was = JSON.parse(session(SCROLL) || "null");
       session(SCROLL, null);
       if (was && was.url === String(window.location.href).split("#")[0] && was.y > 0) {
-        var put = function () { var box = was.main && mainBox(); if (box) box.scrollTop = was.y; else window.scrollTo(0, was.y); active = 0; };
+        var put = function () { window.scrollTo(0, was.y); active = 0; };   // a place kept by the old panel (.main) goes on the window too
         if (document.readyState === "complete") put(); else window.addEventListener("load", put);
       }
     } catch (e) { /* nothing kept */ }

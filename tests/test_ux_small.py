@@ -119,7 +119,7 @@ def test_the_table_head_sticks_to_the_page_while_wide_tables_still_scroll_sidewa
     assert ".table-wrap>.table:not(.table--plain)>thead{position:relative;z-index:3}" in CSS
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     block = js[js.index("// 15) Шапка таблицы"):]
-    assert 'main.addEventListener("scroll", headsLater, {passive: true})' in block and "requestAnimationFrame(placeHeads)" in block
+    assert 'window.addEventListener("scroll", headsLater, {passive: true})' in block and 'main.addEventListener("scroll"' not in block and "requestAnimationFrame(placeHeads)" in block   # one scroll (2026-11-28): the window
     assert 'window.addEventListener("resize"' in block and '"tires:table-loaded"' in block
     assert "if (!wraps.length) return;" in block and ":scope > .table:not(.table--plain) > thead" in block
     assert 'attributeFilter: ["hidden"]' in block                                                  # the draft bar appears without a scroll
