@@ -42,7 +42,7 @@
     if (e.target.hasAttribute('data-clear')) { end.setCustomValidity(''); start.value = ''; end.value = ''; choosingEnd = false; render(); }
   });
   form.addEventListener('change', function () { end.setCustomValidity(''); if (end.value) { month = date(end.value); month.setDate(1); } render(); });
-  form.addEventListener('submit', function (e) { var days = (date(end.value) - date(start.value)) / 86400000; if (start.value > end.value || days >= 400) { e.preventDefault(); end.setCustomValidity('Проверьте даты: период должен быть не более 400 дней'); end.reportValidity(); } else end.setCustomValidity(''); });
+  form.addEventListener('submit', function (e) { var days = (Date.parse(end.value + 'T00:00:00Z') - Date.parse(start.value + 'T00:00:00Z')) / 86400000; if (start.value > end.value || days >= 400) { e.preventDefault(); end.setCustomValidity('Проверьте даты: период должен быть не более 400 дней'); end.reportValidity(); } else end.setCustomValidity(''); });
   [start, end].forEach(function (field) { field.addEventListener('input', function () { end.setCustomValidity(''); }); });
   render();
 }());
