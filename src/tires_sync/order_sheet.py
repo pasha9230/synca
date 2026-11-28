@@ -245,9 +245,15 @@ def realization(card: dict, conn=None, came: Optional[bool] = None) -> str:
         merged = conn.execute("SELECT 1 FROM order_merge_source s JOIN order_merge m ON m.id = s.merge_id WHERE s.order_id = ? "
                               "AND m.undone_at = '' AND s.ref = 0", (int(card["id"]),)).fetchone()
         if not merged:
-            from . import point_arrival
-            return NOT_BOUGHT if came or point_arrival.got_tyres(conn, int(card["id"])) else CANCELLED
+            return NOT_BOUGHT if came or tyres_came(conn, int(card["id"])) else CANCELLED
     return ""
+
+
+def tyres_came(conn, order_id: int) -> bool:
+    """The owner 2026-11-28: «Н» and «О» go by the fact the tyres came, not by the reason: an arrival (point_arrival.got_tyres) or the
+    mark «точка не передала статус» (the tyres came, the point did not press «На точке»). One rule for the table and «Неблагонадёжный»."""
+    from . import point_arrival
+    return point_arrival.got_tyres(conn, int(order_id)) or point_arrival.marked_no_status(conn, int(order_id))
 
 
 def _invoice_day(conn, card: dict) -> str:
@@ -297,30 +303,9 @@ def _profits(conn, card: dict) -> Dict[int, Tuple[float, float]]:
     if len(rows) != len(ids):
         return {}
     counted = {r["id"]: r for r in order_report._counted(conn, [rows[i] for i in ids])}
-    rates, day = order_report.list_rates(conn), min(r["day"] for r in counted.values())
-    by_point = order_report._by_point(order_report.list_point_rates(conn))           # a point's own rates (ТЗ 95), as the report
-    issued = next((r["point_id"] for r in counted.values() if r.get("point_id") is not None), None)
-    pieces = sum(r["pieces"] for r in counted.values())
-    handed, _names = order_report.handed_points(conn)                             # «чей клиент»: the report's one rule (a handoff, «Откуда
-    key = ("id", issued) if issued is not None else ("name", "")                  # клиент», the merge, the swap on «На ОТХ»)
-    oth_sold = bool(order_report.oth_sold_orders(conn, [card["id"]]))
-    whole, taken = order_report.oth_pieces(conn, [card["id"]])
-    got = order_report.fee_parts(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]), oth_sold,
-                                 order_report.from_oth(card["id"], key, pieces, whole, taken))       # the report's formula
-    fixed = order_report.fixes(conn)                                              # the sums the office set (point_item_fix), as the report
-    item = "order:%d" % card["id"]
-    theirs = got["handoff_to"][1] if got["handoff_to"] is not None and got["handoff_to"][0] == "id" else None
-    if day < KEEPS_BEFORE and not fixed.get((issued, item)) and not fixed.get((theirs, item)):
-        # the rows of the orders sold before the bonuses moved to 2026-12-01 keep the sums they were written with (the review 2026-11-26:
-        # the deploy sends no recount of old rows); a sum the office sets for such an order counts as everywhere
-        fee = order_report.legacy_fee(rates, by_point, key, day, pieces, card["id"] in handed, handed.get(card["id"]),
-                                      bool(order_report.oth_sold_orders(conn, [card["id"]], acting=True)))     # the bonus as it was written
-    else:
-        mine = order_report._fix(dict(got), fixed.get((issued, item)), ("issue", "oth"))
-        fee = got["issue"] + got["oth"] + sum(mine.values())
-        if got["handoff_to"] is not None:
-            fee += got["handoff"] + sum(order_report._fix(dict(got), fixed.get((theirs, item)), ("handoff",)).values())
-    fee = round(fee, 2)
+    # the report's one count (the owner 2026-11-28): the fees, the bonuses, the sums the office set and the KPI the order closes; the rows
+    # of the orders sold before KEEPS_BEFORE keep the bonuses they were written with (no recount of old rows)
+    fee = order_report.order_fee(conn, int(card["id"]), list(counted.values()), keeps_before=KEEPS_BEFORE)
     total = sum(r["sale_total"] for r in counted.values())
     pairs = _pair(card["items"], [counted[i] for i in ids])
     out = {}
@@ -964,17 +949,18 @@ def flush(conn, box, http: Transport, now: str, full: bool = False, limit: Optio
         return {}
     client_baseline(conn, now)                                             # once: the names and phones changed before ТЗ №88 stay
     done: Dict[int, str] = {}
-    for card_id in _due(conn, now, full, limit):
-        if not _claim(conn, card_id, now):
-            continue
-        try:
-            done[card_id] = send_order(conn, card_id, s["url"], secret, http, now)
-        except Exception as err:                                           # one broken order never stops the others behind it
-            conn.rollback()
-            log.exception("the Google table: order %s", card_id)
-            row = conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()
-            done[card_id] = _failed(conn, card_id, row[0] if row else 0, "сбой панели (%s): сообщите разработчику." % type(err).__name__, now,
-                                    _last_event(conn, card_id))
+    with order_report.kpi_pass():                                          # the KPI of a month counted once for the pass
+        for card_id in _due(conn, now, full, limit):
+            if not _claim(conn, card_id, now):
+                continue
+            try:
+                done[card_id] = send_order(conn, card_id, s["url"], secret, http, now)
+            except Exception as err:                                       # one broken order never stops the others behind it
+                conn.rollback()
+                log.exception("the Google table: order %s", card_id)
+                row = conn.execute("SELECT failing FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()
+                done[card_id] = _failed(conn, card_id, row[0] if row else 0, "сбой панели (%s): сообщите разработчику." % type(err).__name__,
+                                        now, _last_event(conn, card_id))
     return done
 
 

@@ -375,6 +375,9 @@ def test_the_client_refused_lets_the_tires_go_to_the_next_order(env):
     assert [e for e in orders.list_events(conn, first) if "Клиент отказался" in e["text"] and e["author"] == "worker2"]
     card = orders.get_card(conn, first)
     assert (card["stage_id"], card["tags"]) == (stage_before, tags_before) and sender.sent == []   # nothing else moves, nothing goes
+    from tires_sync import clients
+    client = clients.client_of_order(conn, first)                                               # not «Н»: no «Неблагонадёжный» (2026-11-28)
+    assert client is None or clients.REFUSED_ORDER_TAG not in clients.tags_of(conn, client["id"])
     run(conn, sender, [tire()], "2026-11-07T13:00:00")
     assert len(sender.sent) == 1                                                                # the next order is told at the next pass
     assert [e for e in orders.list_events(conn, second) if e["text"].startswith(order_wait.TOLD)]
