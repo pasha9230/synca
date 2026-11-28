@@ -36,7 +36,8 @@ def test_the_record_gets_no_row_and_the_clients_row_follows_its_tyres(tmp_path):
     assert cid in order_sheet._due(conn, LATER, False)
     looked()
     assert cid not in order_sheet._due(conn, LATER, False)                              # looked at once: no longer due (review 13.11)
-    assert orders.move_card(conn, x, stage(conn, "return"), LATER, "o", changes={"return_amount": 1, "return_kind": "supplier", "return_reason": "невыкуп"})   # back
+    assert orders.move_card(conn, x, stage(conn, "return"), LATER, "o", changes={"return_amount": 1, "return_kind": "supplier", "return_reason": "невыкуп"},
+                            return_exception="тест")   # back (the owner 2026-11-28: unagreed — an office's exception)
     conn.commit()
     assert cid in order_sheet._due(conn, LATER, False)                                  # the record changed: the client's row is due
     rows = order_sheet.rows_of(conn, cid, MOVED)

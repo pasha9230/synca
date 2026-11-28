@@ -247,7 +247,7 @@ OPEN = frozenset({
 SECTION_OF = {}
 for _section, _endpoints in {
     "home": ("index", "analytics_page"),
-    "orders": ("orders_page", "order_card_page", "order_oth_back", "order_storage_back", "order_arrived_message", "order_arrived_told", "order_merge_page", "order_merge", "order_unmerge", "order_chain_link", "order_chain_unlink", "order_again", "client_new_order", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_ad_position", "order_delete", "order_item_delete", "order_item_update", "order_item_add", "order_move",
+    "orders": ("orders_page", "order_card_page", "order_oth_back", "order_storage_back", "order_arrived_message", "order_arrived_told", "order_merge_page", "order_merge", "order_unmerge", "order_chain_link", "order_chain_unlink", "order_again", "client_new_order", "order_oth_agreed", "order_oth_unagree", "order_oth_take", "order_oth_untake", "order_oth_at_point", "order_ad_position", "order_delete", "order_return_undo", "order_done_empty_note", "order_item_delete", "order_item_update", "order_item_add", "order_move",
                "order_note", "order_sale", "order_sale_reverse", "order_save", "order_autosave", "order_point_sale", "order_task_run", "order_task_skip", "order_task_send",
                "order_messages_send",
                "order_want_delete", "order_want_update", "order_want_add", "orders_export_file", "orders_inbox_page", "orders_inbox_answer",
@@ -360,7 +360,7 @@ NEEDS.update(points_payouts_settle="money", points_payouts_unsettle="money", poi
              points_payouts_bulk="money", order_arrival_back="money")
 # «Уведомления точек» and «Сводки» (routes_point_notify, the owner 2026-11-25): the point its own (POINT_PAGES); the office looks and
 # switches on «Настройки → Уведомления» (forms to /points/notify; «Заказы»: «смотреть» to look, «менять» to switch — the observer looks only)
-SECTION_OF.update(mypoint_notify="mypoint", mypoint_notify_ask="mypoint", mypoint_notify_answer="mypoint", mypoint_notices="mypoint",
+SECTION_OF.update(mypoint_notify="mypoint", mypoint_notify_tasks="mypoint", mypoint_notify_ask="mypoint", mypoint_notify_answer="mypoint", mypoint_notices="mypoint",
                   mypoint_notice_task="mypoint", points_notify="orders",
                   settings_notify_page="orders")     # «Настройки → Уведомления» holds «Уведомления точек» (2026-11-26): «Заказы» opens it; the summary needs «Настройка»
 SECTION_OF.update(feed_update_now="orders")
@@ -406,6 +406,7 @@ POINT_PAGES = frozenset({"orders_page", "order_card_page", "order_arrived_told",
                          "mypoint_income_request",                     # «Вычли с кассы и получили бонусы»: a request to the office (ТЗ 95)
                          "order_label_file",                           # «Скачать этикетки» of its own orders to another city (2026-11-02)
                          "mypoint_notify", "mypoint_notify_ask", "mypoint_notify_answer",   # its own notifications (2026-11-25)
+                         "mypoint_notify_tasks",                       # its own switch of the sound of the office's tasks (2026-11-28)
                          "mypoint_notices", "mypoint_notice_task",     # «Сводки»: its week, return, the office's tasks (2026-11-25)
                          "whatsnew_page"}                              # «Что нового»: the point's items
                         | POINT_SALE_PAGES)          # no catalog nor its suggestions: the point sells its own tyres (the owner 2026-10-31)

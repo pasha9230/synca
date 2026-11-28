@@ -1164,9 +1164,64 @@ def _sell_record(conn, card: dict, now: str, author: str, journal: bool, commit:
     return True
 
 
+UNAGREED_LINE = "Вернули поставщику без согласования (исключение офиса). Причина: %s"
+SALE_RETURN = ("По заказу записана продажа: заказ не может быть и продан, и возвращён поставщику. Сначала отмените продажу "
+               "(«Продажа и расчёты» → «Отменить продажу»), потом оформляйте возврат.")
+DONE_EMPTY = ("В заказе нет позиций: «Выполнено» без состава не ставится. Добавьте позиции; если заказ правда выполнен так, напишите "
+              "в карточке «Комментарий: почему так» — он сохранится в журнале заказа.")
+DONE_EMPTY_LINE = "Конфликт: «Выполнено» без позиций не поставлено. Комментарий: %s"
+UNAGREED_HINT = (" Шины поставщику без согласования не отдавайте. Если уже отдали — сообщите офису: он оформит возврат как исключение "
+                 "с причиной.")
+
+
+def note_done_empty(conn, card_id, now: str, author: str, comment: str) -> None:
+    """«Комментарий: почему так» of an order with no positions the office wanted «Выполнено» (the owner 2026-11-28): a conflicting action
+    of the order's journal (red) and of the audit; the order is not moved."""
+    text = " ".join(str(comment or "").split())[:500]
+    if not text:
+        raise OrderError("Напишите, почему заказ выполнен без позиций.")
+    card = get_card(conn, card_id)
+    if card["items"]:
+        raise OrderError("В заказе уже есть позиции: переведите его в «Выполнено» обычным способом.")
+    add_event(conn, card_id, now, author, "field", DONE_EMPTY_LINE % text, level="red")
+    conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, author, "order_done_empty", json.dumps(
+        {"order": int(card_id), "comment": text}, ensure_ascii=False)))
+    conn.commit()
+
+
+POINT_RETURNED = "точка уже отдала шины поставщику (её отметка «Возврат отдал»), без согласования"
+
+
+def _point_returned(conn, card: dict) -> bool:
+    """The point said «Возврат отдал» on this stay (order_manager.returned: its line, the amount left to the office)."""
+    from . import order_manager
+    return conn.execute("SELECT 1 FROM order_event WHERE order_id = ? AND kind = 'point' AND text = ? AND at >= ? LIMIT 1",
+                        (card["id"], order_manager.RETURN_LINE, card["entered_at"] or "")).fetchone() is not None
+
+
+def unagreed_return(conn, card: dict) -> Optional[str]:
+    """Why the order may not go to «Вернули поставщику» now (the owner 2026-11-28: a return is agreed with the supplier first —
+    «Согласование возврата» → «На возврат» → «Вернули поставщику»); None: it may. «На возврат» was agreed on its way in; «На ОТХ» with
+    an agreed return (the act of the point, an agreement made before the stage of 2026-11-17) too; «Выполнено» / «Отправлен в ТК» are a
+    client's return after the sale (the office sees the warning about the sale)."""
+    code = card["stage"].get("code")
+    if code in ("return", RETURN_GIVEN) or card["stage"].get("kind") == "won":
+        return None
+    if code == RETURN_AGREE:
+        return "Сначала согласуйте возврат и подтвердите передачу шин поставщику." + UNAGREED_HINT
+    if code == "oth":
+        from . import order_oth
+        if (order_oth.return_plan(conn, card["id"]) or {}).get("agreed_at"):
+            return None
+        return ("Шины на «%s»: сначала согласуйте возврат с поставщиком («%s» → «%s»)." % (
+            card["stage"].get("name") or "На ОТХ", stage_name(conn, RETURN_AGREE), stage_name(conn, RETURN_GIVEN))) + UNAGREED_HINT
+    return ("Вернуть шины поставщику можно только после согласования: «%s» → «%s» → «%s»." % (
+        stage_name(conn, RETURN_AGREE), stage_name(conn, RETURN_GIVEN), stage_name(conn, "return"))) + UNAGREED_HINT
+
+
 def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[dict] = None, chain: tuple = (), fire_rules: bool = True,
               journal: bool = True, commit: bool = True, oth_split: bool = True, oth_sold: bool = False,
-              internal_return_restore: bool = False) -> bool:
+              internal_return_restore: bool = False, return_exception: str = "") -> bool:
     """Move a card to a stage. The fields that come with the move are saved first; the move itself needs the stage's required data.
     `fire_rules=False` (the bulk move) leaves the rules of the new stage asleep: no task, no message for hundreds of cards at once.
     A refusal goes to the journal as a red record; not with `journal=False` (the bulk move) and not for a rule (`chain` is given only by the
@@ -1175,7 +1230,9 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     A client's order that goes to «На ОТХ» is cancelled and its tyres become a record of storage (oth_storage, the owner 2026-11-10);
     `oth_split=False`: the order itself goes back there (an undo, «Вернуть на ОТХ» of an order that stood there before).
     A record of storage goes to «Выполнено» by any way (the board, the card, the bulk move, a chat, a rule) only as the point's «Продать»
-    (order_oth.sell, the owner 2026-11-10: the office and the point never part); `oth_sold`: the move made by that sale itself."""
+    (order_oth.sell, the owner 2026-11-10: the office and the point never part); `oth_sold`: the move made by that sale itself.
+    «Вернули поставщику» only after the agreement with the supplier (the owner 2026-11-28): «Согласование возврата» → «На возврат» →
+    «Вернули поставщику» (unagreed_return); `return_exception`: the office's reason for an exception, written to the journal and the audit."""
     stage = get_stage(conn, stage_id)
     changed = update_card(conn, card_id, changes, now, author, commit=False, link_client=False) if changes else []   # not saved until
     card = get_card(conn, card_id)                                                                               # the move is allowed
@@ -1204,13 +1261,21 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
             raise _refuse_move(conn, card_id, now, author, "Сначала согласуйте возврат с поставщиком на этапе «%s»." % stage_name(conn, RETURN_AGREE), journal)
     if stage["code"] == RETURN_AGREE and card["stage"].get("code") not in RETURN_STAGES and not internal_return_restore:
         raise _refuse_move(conn, card_id, now, author, "Сначала переведите шины на этап «%s»." % stage_name(conn, "oth"), journal)
-    if stage["code"] == "return" and card["stage"].get("code") == RETURN_AGREE:
-        raise _refuse_move(conn, card_id, now, author, "Сначала согласуйте возврат и подтвердите передачу шин поставщику.", journal)
     gaps = missing_for(card, stage, _placed_stage(conn))
     if gaps:
         raise _refuse_move(conn, card_id, now, author, "Чтобы перейти в «%s», заполните: %s." % (stage["name"], ", ".join(gaps)), journal)
     if card["sale_ids"] and stage["kind"] not in ("won", "closed"):
         raise _refuse_move(conn, card_id, now, author, "По заказу записана продажа: сначала сторнируйте её, потом переносите заказ.", journal)
+    if stage["code"] == "return" and card["stage"].get("code") != "return" and card["sale_ids"]:
+        raise _refuse_move(conn, card_id, now, author, SALE_RETURN, journal)          # sold or returned, never both (the owner 2026-11-28)
+    if stage["code"] == "done" and not card["items"]:
+        raise _refuse_move(conn, card_id, now, author, DONE_EMPTY, journal)           # no «Выполнено» without positions (the owner 2026-11-28)
+    exception = str(return_exception or "").strip()[:300]
+    unagreed = None if internal_return_restore or stage["code"] != "return" else unagreed_return(conn, card)
+    if unagreed and not exception and _point_returned(conn, card):
+        exception = POINT_RETURNED                                          # the point gave the tyres already: the old way stays, noted
+    if unagreed and not exception:
+        raise _refuse_move(conn, card_id, now, author, unagreed, journal)
     requested_stage = stage["code"]
     reason = (changes or {}).get("cancel_reason") or card.get("cancel_reason") or ""
     from . import point_arrival
@@ -1258,7 +1323,11 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
         conn.rollback()
         return False
     add_event(conn, card_id, now, author, "stage", "Этап: «%s» → «%s»" % (card["stage"]["name"], stage["name"]))
-    if refusal and refusal[0] == "mark":
+    if unagreed:                                                            # the office's exception (the owner 2026-11-28): the reason is kept
+        add_event(conn, card_id, now, author, "field", UNAGREED_LINE % exception, level="yellow")
+        conn.execute("INSERT INTO audit (at, author, action, detail) VALUES (?,?,?,?)", (now, author, "return_unagreed", json.dumps(
+            {"order": int(card_id), "from": card["stage"].get("name") or "", "reason": exception}, ensure_ascii=False)))
+    if refusal and refusal[0] == "mark":                                    # «Неблагонадёжный»: only once the move is made (the review #102)
         clients.mark_order_refusal(conn, card_id, now, author, track=True, client=refusal[1])
     elif refusal:
         clients.unmark_order_refusal(conn, card_id, now, author)

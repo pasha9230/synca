@@ -139,7 +139,7 @@ def test_the_place_is_kept_only_on_the_same_page_after_a_press_on_it():
 def test_the_card_the_chats_the_workplace_an_anchor_and_a_field_error_keep_their_own_ways():
     keep = place()
     assert 'document.querySelector("[data-keep-place], [data-no-keep-place], .chats-list")' in keep           # 13c, «Чаты»: their own place
-    assert 'if (path === "/my-point") return;' in keep                                                        # notify.js keeps its place
+    assert '"/my-point") return' not in keep                                                                  # «Рабочее место» too (2026-11-28)
     assert '(window.location.hash && !reload) || document.querySelector("[aria-invalid=true]")' in keep       # the anchor, the field (5a)
     for line in keep.splitlines():                                                                            # no storage: the page as before
         assert "sessionStorage." not in line or ("try {" in line and "catch (e)" in line), line

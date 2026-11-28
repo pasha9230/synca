@@ -109,7 +109,7 @@ def test_the_old_view_of_the_card_and_the_setting_keep_the_codes(board):
     assert 'type="color" name="color" value="#7F56D9"' in page
 
 
-@pytest.mark.parametrize("name", ["office2-pages.css", "point2.css"])
+@pytest.mark.parametrize("name", ["office2-pages.css", "point2.css", "point-mobile.css"])
 def test_no_colour_code_outside_the_blocks_of_tokens(name):
     css = re.sub(r"/\*.*?\*/", "", (STATIC / name).read_text(encoding="utf-8"), flags=re.S)
     loose = []

@@ -66,18 +66,18 @@
 </div>
 {% endif %}
 {% if f.tab == "income" %}
-{% if v.rows %}<div style="overflow-x:auto"><table class="table" data-income-orders><thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>Статус заказа</th><th>За выдачу</th><th>Выплата</th></tr></thead><tbody>
+{% if v.rows %}<div class="pt-scroll" style="overflow-x:auto"><table class="table" data-income-orders data-m-cards><thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>Статус заказа</th><th>За выдачу</th><th>Выплата</th></tr></thead><tbody>
 {% for e in v.rows %}<tr data-order="{{ e.order }}"><td>№ {{ e.card.label }}</td><td>{{ e.day|short_dt }}</td><td>{{ e.card.client or "—" }}</td><td>{{ e.card.stage }}{% if e.arrived %} <span class="small muted" data-arrived>· шины приезжали</span>{% endif %}</td><td>{{ e.issue|money }}</td>
 <td><span class="badge {{ {'unpaid': 'badge--warn', 'paid': 'badge--ok', 'extra': 'badge--warn', 'over': 'badge--err'}[e.status] }}" data-paid="{{ e.status }}">{{ e.status_name }}{% if e.status in ("extra", "over") %} {{ e.due|money }}{% endif %}</span></td></tr>{% endfor %}
 </tbody></table></div>
 {% else %}<p class="mp-empty">За период выплат нет.</p>{% endif %}
 {% if v.waiting %}<h3 style="margin-top:var(--s-4)">⏳ К начислению: {{ v.waiting_sum|money }}</h3>
 <p class="small muted">Шины приехали, итога ещё нет (ждут клиента, лежат на ОТХ, на согласовании возврата). Сумма начислится, когда шины продадут или вернут поставщику, и в «Всего» пока не входит.</p>
-<div style="overflow-x:auto"><table class="table" data-income-waiting><thead><tr><th>Заказ</th><th>Приехали</th><th>Клиент</th><th>Где шины</th><th>Шин</th><th>Ожидается</th><th>Выплата</th></tr></thead><tbody>
+<div class="pt-scroll" style="overflow-x:auto"><table class="table" data-income-waiting data-m-cards><thead><tr><th>Заказ</th><th>Приехали</th><th>Клиент</th><th>Где шины</th><th>Шин</th><th>Ожидается</th><th>Выплата</th></tr></thead><tbody>
 {% for w in v.waiting %}<tr data-waiting="{{ w.order }}"><td>№ {{ w.card.label }}</td><td>{{ w.arrived|short_dt }}</td><td>{{ w.card.client or "—" }}</td><td>{% if w.record %}на ОТХ{% else %}{{ w.card.stage }}{% endif %}</td><td>{{ w.pieces }}</td><td>{{ w.expected|money }}</td><td><span class="badge badge--neutral" data-paid="waiting">к начислению</span></td></tr>{% endfor %}
 </tbody></table></div>{% endif %}
 {% elif f.tab == "bonus" %}
-{% if v.rows %}<div style="overflow-x:auto"><table class="table" data-bonus-orders><thead><tr><th>Клиент</th><th>Позиции</th><th>Бонус</th><th>Сделка</th><th>Расчёт</th></tr></thead><tbody>
+{% if v.rows %}<div class="pt-scroll" style="overflow-x:auto"><table class="table" data-bonus-orders data-m-cards><thead><tr><th>Клиент</th><th>Позиции</th><th>Бонус</th><th>Сделка</th><th>Расчёт</th></tr></thead><tbody>
 {% for r in v.rows %}<tr data-bonus-order="{{ r.order }}"><td><details><summary><b>{{ r.card.client or "клиент" }}</b>{% if r.card.phone %}<br>{{ r.card.phone|phone }}{% endif %}<br><span class="small muted">№ {{ r.card.label }}{% if r.day %} · {{ r.day|short_dt }}{% endif %}{% if r.kinds %} · {{ r.kinds }}{% endif %}</span></summary>
 <div class="small" data-bonus-detail><b>Состав заказа:</b> {% for i in r.card["items"] %}{{ i.name }} × {{ i.qty }}{% if not loop.last %}; {% endif %}{% else %}позиций ещё нет{% endfor %}
 {% if r.card.wants %}<br><b>Пожелания:</b> {{ r.card.wants|join("; ") }}{% endif %}<br><span class="muted">Этап: {{ r.card.stage }}. Менять заказ могут офис и оператор.</span></div></details></td>

@@ -8,6 +8,9 @@
 <label class="field"><span class="label">Кто выключает (имя)</span><input class="input" name="who" required maxlength="60" autocomplete="off" placeholder="Например: Иван"></label>
 <label class="field"><span class="label">Причина (необязательно)</span><input class="input" name="reason" maxlength="200" autocomplete="off"></label>
 <button class="btn btn--danger btn--sm" data-notify-off>Выключить</button></form>
+<form method="post" action="/my-point/notify/tasks" data-once data-task-sound><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="on" value="{{ 0 if notify.task_sound else 1 }}"><input type="hidden" name="back" value="{{ back }}">
+<p class="notify-switch-hint">Задачи от офиса (красный «!» на «Сводках»): звук {{ "включён" if notify.task_sound else "выключен" }}. Звенит в рабочее время, не чаще 3 раз в день, пока задача не выполнена.</p>
+<button class="btn btn--secondary btn--sm">{{ "Выключить звук задач" if notify.task_sound else "Включить звук задач" }}</button></form>
 {% else %}<p class="notify-switch-hint" data-notify-off-by>Выключил{% if notify.who %}: {{ notify.who }}{% endif %}{% if notify.at %}, {{ notify.at|short_dt }}{% endif %}{% if notify.reason %} · {{ notify.reason }}{% endif %}</p>
 <form method="post" action="/my-point/notify" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="on" value="1"><input type="hidden" name="back" value="{{ back }}">
 <label class="field"><span class="label">Кто включает (необязательно)</span><input class="input" name="who" maxlength="60" autocomplete="off"></label>

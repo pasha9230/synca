@@ -1,0 +1,49 @@
+/* A point on a phone (the owner 2026-11-28, «оптимизация всех панелей под смартфон»): one rule for every page of a point's cabinet,
+   the old view and «Новый вид» (point2) alike. Only @media for a narrow window and only body.pt-ui: a computer (1024+) and the office (body.ofc)
+   see nothing of this file. Fields 16 px (iOS does not zoom), a finger's 44 px for buttons and plates, tables as cards or scrolled in their own box,
+   the toasts above the bottom menu. Colours only by tokens (test_design_colors). */
+
+@media (max-width:1023px){
+  /* fields: 16 px, so iPhone does not zoom into the page */
+  body.pt-ui input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),body.pt-ui select,body.pt-ui textarea{font-size:16px}
+  body.pt-ui :is(.input,.select,select):not([type=checkbox]):not([type=radio]):not(textarea){min-height:44px}
+  /* buttons and plates under a finger */
+  body.pt-ui :is(.btn,.mp-btn,.p2-ico,.pt-chip,.icon-btn,.menu-item,summary.btn){min-height:44px}
+  body.pt-ui .icon-btn{min-width:44px}
+  body.pt-ui .p2w .p2-ask-acts .btn{height:auto}
+  /* the quiet links («Не приехал» beside «Выдал», «Отменить …»): a finger's height and room from the big button */
+  body.pt-ui :is(.mp-undo-quiet,.p2-quiet){display:inline-flex;align-items:center;min-height:44px;padding:0 12px 0 0}
+  body.pt-ui .mp-undo{margin-top:8px}
+  body.pt-ui .mp-refuse-why label{min-height:44px}
+  body.pt-ui .mp-refuse-why input[type=text]{min-height:44px}
+  body.pt-ui input:is([type=checkbox],[type=radio]){width:20px;height:20px}
+
+  /* the toasts (panel.css #toasts): above the bottom menu of the point, across the screen, the cross 44 px */
+  body.pt-ui #toasts{left:16px;right:16px;bottom:calc(72px + env(safe-area-inset-bottom));max-width:none}
+  body.pt-ui .toast-x{display:inline-grid;place-items:center;flex:none;min-width:44px;min-height:44px;margin:-10px -10px -10px 0}
+
+  /* a dropdown («Задачи» of the client's card, a menu): never wider than the screen */
+  body.pt-ui .menu-list{max-width:calc(100vw - 32px)}
+
+  /* a table left as a table: its own scroll inside the block, the page never scrolls sideways */
+  body.pt-ui .pt-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+}
+
+/* the tables marked data-m-cards (app.js gives each cell its column's name): a row is a card */
+@media (max-width:760px){
+  body.pt-ui table.m-cards,body.pt-ui table.m-cards>tbody,body.pt-ui table.m-cards>tbody>tr{display:block;width:100%}
+  body.pt-ui table.m-cards>thead{display:none}
+  body.pt-ui table.m-cards>tbody>tr{margin:0 0 8px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--r-lg);background:var(--gray-0)}
+  body.pt-ui table.m-cards>tbody>tr>td{display:flex;align-items:baseline;justify-content:space-between;gap:12px;height:auto;min-height:0;padding:5px 0;
+    border:0;background:none;text-align:right;white-space:normal;overflow-wrap:anywhere;max-width:none;width:auto}
+  body.pt-ui table.m-cards>tbody>tr>td::before{content:attr(data-mlabel);flex:0 1 45%;text-align:left;color:var(--gray-500);font-size:13px;overflow-wrap:normal}
+  body.pt-ui table.m-cards>tbody>tr>td:is([data-mlabel=""],.m-span)::before,body.pt-ui table.m-cards>tbody>tr>td:not([data-mlabel])::before{content:none}
+  body.pt-ui table.m-cards>tbody>tr>td:is([data-mlabel=""],.m-span){justify-content:flex-start;text-align:left}
+  body.pt-ui table.m-cards td.m-span{display:block}
+  body.pt-ui table.m-cards>tbody>tr>td:empty{display:none}
+  body.pt-ui table.m-cards>tbody>tr>td>*{min-width:0}
+  body.pt-ui table.m-cards .nowrap{white-space:normal}
+  body.pt-ui table.m-cards td form{display:flex;flex-wrap:wrap;gap:8px;min-width:0;max-width:100%;justify-content:flex-end}
+  body.pt-ui table.m-cards td .btn{white-space:normal;max-width:100%}
+  body.pt-ui .pt-scroll:has(>table.m-cards){overflow:visible}
+}

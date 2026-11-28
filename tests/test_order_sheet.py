@@ -182,7 +182,8 @@ def test_realization_follows_the_legend(table, code, kind, letter):
     mine = placed(conn, deal_kind=kind)
     changes = {"cancel_reason": "отказ"} if code == "cancel" else {"return_kind": "client", "return_reason": "не подошли", "return_amount": "100"} if code == "return" else None
     orders.move_card(conn, mine, stage(conn, code)["id"], NOW, "owner", changes,
-                     internal_return_restore=code in (orders.RETURN_AGREE, orders.RETURN_GIVEN))
+                     internal_return_restore=code in (orders.RETURN_AGREE, orders.RETURN_GIVEN),
+                     return_exception="тест" if code == "return" else "")          # the owner 2026-11-28: unagreed — an office's exception
     assert {r["Реализация"] for r in sheet.rows_of(conn, mine, NOW).values()} == {letter}
 
 

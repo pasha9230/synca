@@ -445,13 +445,17 @@ def _order_day(conn, card: dict) -> str:
 
 
 def _back(point_id) -> str:
-    """Back to «Рабочее место» after a press: the point chosen (the owner, the partner) and the tab the press came from (its ?tab=)."""
-    from urllib.parse import parse_qs, urlsplit
+    """Back to «Рабочее место» after a press: the point chosen (the owner, the partner), the tab the press came from (its ?tab=) and its
+    search (?q=, 2026-11-28: the page stays as it was, the list is not thrown back to all the orders of the tab)."""
+    from urllib.parse import parse_qs, urlencode, urlsplit
     came = urlsplit(request.referrer or "")
-    tab = (parse_qs(came.query).get("tab") or [""])[0] if came.path == "/my-point" and (not came.netloc or came.netloc == request.host) else ""
-    tab = str(request.form.get("tab") or request.args.get("tab") or "") or tab     # «Подтвердите выдачу», the window of the sale keep the tab
-    args = (["p=%d" % point_id] if own_point() is None else []) + (["tab=%s" % tab] if tab in TABS and tab != DEFAULT_TAB else [])
-    return "/my-point" + ("?" + "&".join(args) if args else "")
+    was = parse_qs(came.query) if came.path == "/my-point" and (not came.netloc or came.netloc == request.host) else {}
+    tab = str(request.form.get("tab") or request.args.get("tab") or "") or (was.get("tab") or [""])[0]   # «Подтвердите выдачу», the sale window
+    query = str(request.form.get("q") or request.args.get("q") or "") or (was.get("q") or [""])[0]
+    query = query.strip()[:search.QUERY_MAX]
+    args = ([("p", point_id)] if own_point() is None else []) + ([("tab", tab)] if tab in TABS and tab != DEFAULT_TAB else []) \
+        + ([("q", query)] if query else [])
+    return "/my-point" + ("?" + urlencode(args) if args else "")
 
 
 def _oth_cards(conn, point_id) -> list:
@@ -1088,6 +1092,9 @@ def register(app) -> None:
         if own_point() is not None:                                             # the bell of the manager of the point: only theirs (routes_alerts)
             items += [{"key": "alert-%s-%s" % (r["id"], r["more"]), "title": "Чат без заказа" if r.get("chat_row") else "Заказ №%d" % r["order_id"],
                        "text": (r["text"] or "")[:200], "href": href(r)} for r in with_orders(conn, grouped(conn, who))]
+        if own_point() is not None and not office:                             # the office's tasks to the point (the red «!»): at most 3
+            from .. import task_sound                                           # rings a working day (the owner 2026-11-28), its own switch
+            items += task_sound.point_items(conn, point_id, now)
         answer = {"who": who, "items": items + calls}
         if own_point() is not None:                                             # the page of the point's own person reloads on a change (point_rev)
             answer["rev"] = point_rev(conn, cards + oth_cards, point_id, now[:10])
