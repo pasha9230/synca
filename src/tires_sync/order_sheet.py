@@ -1022,12 +1022,13 @@ def _create_op(c: dict) -> dict:
     return dict(op, create=True, **({"shade": True} if c["op"]["shade"] else {}))
 
 
-def _ask(http: Transport, url: str, secret: str, ops: List[dict], echo: str = "repair") -> Dict[str, dict]:
+def _ask(http: Transport, url: str, secret: str, ops: List[dict], echo: str = "repair", size: int = 0) -> Dict[str, dict]:
     """The script's answers, by mark, chunk by chunk: a chunk that failed answers «error» for its own rows only, the others stand.
     `echo`: the word of the script of 28.11 in every answer («repair», «sync»); none — a script before it: SheetError(OLD_SCRIPT)."""
     out: Dict[str, dict] = {}
-    for i in range(0, len(ops), REPAIR_CHUNK):
-        part = ops[i:i + REPAIR_CHUNK]
+    size = size or REPAIR_CHUNK
+    for i in range(0, len(ops), size):
+        part = ops[i:i + size]
         try:
             answer = call(http, url, {"secret": secret, "sheet": SHEET, "rows": part})
         except SheetError as err:
@@ -1035,7 +1036,7 @@ def _ask(http: Transport, url: str, secret: str, ops: List[dict], echo: str = "r
             continue
         for r in answer.get("results") or []:
             if isinstance(r, dict):
-                if echo and r.get(echo) is not True:
+                if echo and r.get(echo) is not True and r.get("status") != "error":      # an error of one row is its own
                     raise SheetError(OLD_SCRIPT)
                 out[str(r.get("key"))] = r
     return out
@@ -1104,11 +1105,12 @@ def repair_blank(conn, box, http: Transport, now: str, author: str = "cli", dry_
                 + [_line(c, GONE_SAID, None, what_goes(c["op"])) for c in gone] + out)
     claimed = [o for o in sorted({c["order_id"] for c in blank + gone + finish}) if _claim(conn, o, now)]
     out += [_line(c, "занят другой отправкой") for c in blank + gone + finish if c["order_id"] not in claimed]
+    until = (datetime.fromisoformat(now) + timedelta(minutes=CLAIM_MINUTES)).isoformat(timespec="seconds")
     try:
         return _repair_write(conn, http, s["url"], secret, now, author, claimed, blank, gone, finish) + out
-    finally:                                                               # whatever happened, no order stays claimed
+    finally:                                                               # whatever happened, no order stays claimed by us
         for card_id in claimed:
-            conn.execute("UPDATE sheet_order SET claim_until = '' WHERE order_id = ?", (card_id,))
+            conn.execute("UPDATE sheet_order SET claim_until = '' WHERE order_id = ? AND claim_until = ?", (card_id, until))
         conn.commit()
 
 
@@ -1196,6 +1198,9 @@ def _repair_write(conn, http: Transport, url: str, secret: str, now: str, author
 PROFIT = ("Прибыль ₽", "Прибыль %")
 RESYNCED = "Google-таблица сверена с панелью: исправлено %d стр. (%s)."
 EDITED_RESYNC = "артикул/телефон в строке не совпадал с панелью"
+NOTE_PANEL = "_note_panel"                                     # what the panel put into «Примечание» after the owner's text (resync)
+WRITE_CHUNK = 15                                               # rows written per call: the call has 30 s and the script's lock 30 s
+UNSURE = "не подтверждено (%s) — повторите сверку: ничего не потеряно"
 
 
 def _sync_values(c: dict) -> dict:
@@ -1211,7 +1216,8 @@ def _sync_values(c: dict) -> dict:
 def _sync_op(c: dict, probe: bool) -> dict:
     values = _sync_values(c)
     out = {"key": c["key"], "create": False, "fields": {k: v for k, v in values.items() if k in SENT}, "check": dict(REPAIR_CHECK),
-           "sync": True, "repair": list(BLANK), "verify": c["verify"], "shade": c["op"]["shade"], "note": c["panel_note"]}
+           "sync": True, "repair": list(BLANK), "verify": c["verify"], "shade": c["op"]["shade"], "note": c["panel_note"],
+           "note_prev": str(c["written"].get(NOTE_PANEL) or "")}
     extra = {k: v for k, v in values.items() if k not in SENT}
     if extra:
         out["extra"] = extra
@@ -1274,14 +1280,7 @@ def resync(conn, box, http: Transport, now: str, author: str = "cli", dry_run: b
     summary["lacking"] = lacking
     if dry_run:
         return {"rows": out, "summary": summary}
-    claimed = [o for o in sorted({c["order_id"] for c in fix + make + settle}) if _claim(conn, o, now)]
-    busy = [c for c in fix + make if c["order_id"] not in claimed]
-    try:
-        rows = _resync_write(conn, http, s["url"], secret, now, claimed, fix, make, settle, summary)
-    finally:                                                               # whatever happened, no order stays claimed
-        for card_id in claimed:
-            conn.execute("UPDATE sheet_order SET claim_until = '' WHERE order_id = ?", (card_id,))
-        conn.commit()
+    rows, busy = _resync_write(conn, http, s["url"], secret, now, fix, make, settle, summary)
     rows += [_line(c, "занят другой отправкой") for c in busy] + [r for r in out if r["result"].startswith(("метки на листе нет, заказ закрыт", "ошибка"))]
     if summary["fixed"] or summary["created"]:
         store.write_audit(conn, now, author, "sheet_resync", {"orders": summary["orders"], "rows": summary["rows"], "fixed": summary["fixed"],
@@ -1297,53 +1296,95 @@ def _taken(c: dict, values: dict, lacking: List[str]) -> dict:
     if c["note"] is not None:
         row["Примечание"] = c["note"]
     row["_grey"] = bool(c["op"]["shade"])
+    if c["panel_note"] and "Примечание" not in lacking:                   # the panel's part of «Примечание» (put after the owner's text)
+        row[NOTE_PANEL] = c["panel_note"]
     if lacking:
         row[PARTIAL] = "нет колонок: %s" % ", ".join(lacking)
     return row
 
 
-def _resync_write(conn, http: Transport, url: str, secret: str, now: str, claimed: List[int], fix: List[dict], make: List[dict],
-                  settle: List[dict], summary: dict) -> List[dict]:
-    fixing = [c for c in fix if c["order_id"] in claimed]
-    making = [c for c in make if c["order_id"] in claimed]
-    answers = _ask(http, url, secret, [_sync_op(c, False) for c in fixing], echo="") if fixing else {}
-    if making:
-        answers.update(_ask(http, url, secret, [_create_op(c) for c in making], echo=""))
+def _packs(groups: Dict[int, List[dict]], size: int) -> List[List[int]]:
+    """The orders in packs of at most `size` rows to write (an order is never split; a bigger one is a pack of its own)."""
+    packs: List[List[int]] = []
+    n = 0
+    for card_id, rows in groups.items():
+        if packs and n + len(rows) <= size:
+            packs[-1].append(card_id)
+            n += len(rows)
+        else:
+            packs.append([card_id])
+            n = len(rows)
+    return packs
+
+
+def _resync_write(conn, http: Transport, url: str, secret: str, now: str, fix: List[dict], make: List[dict], settle: List[dict],
+                  summary: dict) -> Tuple[List[dict], List[dict]]:
+    """The writing, pack by pack (WRITE_CHUNK rows): each pack's orders are claimed just for it and only our own claim is taken off
+    after it (a sender that took one since keeps it). A pack Google did not answer: its rows are not taken (said «не подтверждено»,
+    the next look finds them again). Returns the lines and the rows of orders another sender holds."""
+    groups: Dict[int, List[dict]] = {}
+    for c in fix + make + settle:
+        groups.setdefault(c["order_id"], []).append(c)
+    writing = {o: [c for c in rows if c in fix or c in make] for o, rows in groups.items()}
     done: List[dict] = []
-    for card_id in claimed:
-        written = json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0] or "{}")
-        fixed, made, columns = 0, 0, []
-        for c in [c for c in settle if c["order_id"] == card_id]:          # the sheet has it already: followed again as it is
+    busy: List[dict] = []
+    for pack in _packs(writing, WRITE_CHUNK):
+        until = (datetime.fromisoformat(now) + timedelta(minutes=CLAIM_MINUTES)).isoformat(timespec="seconds")
+        mine = [o for o in pack if _claim(conn, o, now)]
+        busy += [c for o in pack if o not in mine for c in writing[o]]
+        try:
+            fixing = [c for o in mine for c in writing[o] if c in fix]
+            making = [c for o in mine for c in writing[o] if c in make]
+            answers = _ask(http, url, secret, [_sync_op(c, False) for c in fixing], echo="", size=WRITE_CHUNK) if fixing else {}
+            if making:
+                answers.update(_ask(http, url, secret, [_create_op(c) for c in making], echo="", size=WRITE_CHUNK))
+            for card_id in mine:
+                done += _resync_take(conn, now, card_id, groups[card_id], fix, make, answers, summary)
+        finally:                                                           # only our own claim: a later sender's stays
+            for card_id in mine:
+                conn.execute("UPDATE sheet_order SET claim_until = '' WHERE order_id = ? AND claim_until = ?", (card_id, until))
+            conn.commit()
+    return done, busy
+
+
+def _resync_take(conn, now: str, card_id: int, rows: List[dict], fix: List[dict], make: List[dict], answers: Dict[str, dict],
+                 summary: dict) -> List[dict]:
+    """One order's answers into `written` and its journal."""
+    written = json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0] or "{}")
+    fixed, made, columns, done = 0, 0, [], []
+    for c in rows:
+        if c not in fix and c not in make:                                 # the sheet has it already: followed again as it is
             written[c["key"]] = _taken(c, _sync_values(c), [])
-        for c in [c for c in fixing + making if c["order_id"] == card_id]:
-            reply = answers.get(c["key"]) or {}
-            status = str(reply.get("status") or "нет ответа")
-            new = c in making
-            why = str(reply.get("error") or "")[:200]
-            partial = new and status == "error" and why.startswith("нет колонок")
-            if status in ("synced", "same") and not new:
-                lack = [str(k) for k in reply.get("lacking") or []]
-                written[c["key"]] = _taken(c, _sync_values(c), lack)
-                fixed += 1
-                columns += [k for k in (reply.get("changed") or {}) if k not in columns]
-                done.append(_line(c, "исправлена" + (" (%s)" % EDITED_RESYNC if reply.get("edited") else ""), reply,
-                                  _changes_line(reply.get("changed") or {})))
-            elif new and (status in ("created", "updated") or partial):
-                op = _create_op(c)
-                written[c["key"]] = _taken(c, dict(op["fields"], **op.get("extra", {})), _lacking(why) if partial else [])
-                made += 1
-                done.append(_line(c, REMADE_SAID, reply, what_goes(op)))
-            else:
-                summary["errors"] += 1
-                done.append(_line(c, "ошибка: %s" % (why or status), reply))
-        if fixed:
-            orders.add_event(conn, card_id, now, AUTHOR, "sheet", RESYNCED % (fixed, ", ".join(columns) or "заливка"))
-        if made:
-            orders.add_event(conn, card_id, now, AUTHOR, "sheet", REMADE % made)
-        summary["fixed"] += fixed
-        summary["created"] += made
-        conn.execute("UPDATE sheet_order SET rows = ?, claim_until = '' WHERE order_id = ?", (json.dumps(written, ensure_ascii=False), card_id))
-        conn.commit()
+            continue
+        reply = answers.get(c["key"]) or {}
+        status = str(reply.get("status") or "нет ответа")
+        new = c in make
+        why = str(reply.get("error") or "")[:200]
+        partial = new and status == "error" and why.startswith("нет колонок")
+        if status in ("synced", "same") and not new:
+            lack = [str(k) for k in reply.get("lacking") or []]
+            written[c["key"]] = _taken(c, _sync_values(c), lack)
+            fixed += 1
+            columns += [k for k in (reply.get("changed") or {}) if k not in columns]
+            done.append(_line(c, "исправлена" + (" (%s)" % EDITED_RESYNC if reply.get("edited") else ""), reply,
+                              _changes_line(reply.get("changed") or {})))
+        elif new and (status in ("created", "updated") or partial):
+            op = _create_op(c)
+            written[c["key"]] = _taken(c, dict(op["fields"], **op.get("extra", {})), _lacking(why) if partial else [])
+            made += 1
+            done.append(_line(c, REMADE_SAID, reply, what_goes(op)))
+        else:
+            summary["errors"] += 1
+            unsure = status == "error" and why.startswith(("Google не ответил", "Google ответил", "Ответ не от скрипта"))
+            done.append(_line(c, UNSURE % why if unsure else "ошибка: %s" % (why or status), reply))
+    if fixed:
+        orders.add_event(conn, card_id, now, AUTHOR, "sheet", RESYNCED % (fixed, ", ".join(columns) or "заливка"))
+    if made:
+        orders.add_event(conn, card_id, now, AUTHOR, "sheet", REMADE % made)
+    summary["fixed"] += fixed
+    summary["created"] += made
+    conn.execute("UPDATE sheet_order SET rows = ? WHERE order_id = ?", (json.dumps(written, ensure_ascii=False), card_id))
+    conn.commit()
     return done
 
 

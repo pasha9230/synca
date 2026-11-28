@@ -31,10 +31,17 @@ def filled(cells):
 class SyncScript(RepairScript):
     """The script of 28.11 with «sync» (knowledge/…/sheet-script-2026-11-28.gs, syncRow): the cells that differ are written."""
 
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.broken = set()
+
     def run(self, p):
         if p.get("secret") == self.secret and not p.get("ping") and any(r.get("sync") for r in p.get("rows") or []):
             out, order = [], sorted(self.rows)
             for row in p["rows"]:
+                if row["key"] in self.broken:                              # an exception of the script on this row
+                    out.append({"key": row["key"], "status": "error", "error": "сбой строки", "sync": True})
+                    continue
                 cells = self.rows.get(row["key"])
                 if cells is None:
                     out.append({"key": row["key"], "status": "gone", "sync": True})
@@ -52,8 +59,14 @@ class SyncScript(RepairScript):
                     if str(cells.get(name, "")).strip() != str(value).strip():
                         changed[name] = [str(cells.get(name, "")), str(value)]
                 note, had = (row.get("note") or "").strip(), str(cells.get("Примечание", "") or "")
-                if note and note not in had:
-                    changed["Примечание"] = [had, (had.rstrip() + " · " + note) if had else note]
+                prev, nxt = (row.get("note_prev") or "").strip(), had
+                if prev and prev != note and prev in had:
+                    head, _, tail = had.rpartition(prev)
+                    nxt = head + note + tail if note else (head.rstrip().rstrip("·").rstrip() + tail).strip()
+                elif note and note not in had:
+                    nxt = (had.rstrip() + " · " + note) if had else note
+                if nxt != had:
+                    changed["Примечание"] = [had, nxt]
                 grey = row["key"] in self.grey
                 fill = (not grey) if row.get("shade") is True else (row.get("shade") is False and grey)
                 if fill:
@@ -201,6 +214,7 @@ def test_the_old_script_writes_nothing(table):
 def test_a_failed_chunk_is_an_error_of_its_own_rows_only(table, monkeypatch):
     conn, box, fake, rows, orders_of, whole = table
     monkeypatch.setattr(sheet, "REPAIR_CHUNK", 1)
+    monkeypatch.setattr(sheet, "WRITE_CHUNK", 1)
     probes = len(sheet.repair_candidates(conn))
     fake.fail = [None] * probes + ["500"]                                  # the first row written fails, the others go
     done = sheet.resync(conn, box, fake, LATER)
@@ -278,3 +292,68 @@ def test_a_lost_answer_of_a_new_code_is_checked_again_by_it(table):
     sheet.flush(conn, box, fake, LATER)
     assert fake.rows[mark]["Артикул"] == "8888" and not written(conn, order)[mark].get("_missing")
     assert written(conn, order)[mark]["Артикул"] == "8888"
+
+
+def test_a_changed_comment_replaces_only_the_panels_part_of_the_note(table):
+    conn, box, fake, rows, orders_of, whole = table
+    mark, order = rows["staged"], orders_of["staged"]
+    fake.rows[mark]["Примечание"] = "текст владельца"
+    conn.execute("UPDATE order_card SET comment = 'старый' WHERE id = ?", (order,))
+    conn.commit()
+    sheet.resync(conn, box, fake, LATER)
+    assert fake.rows[mark]["Примечание"] == "текст владельца · старый" and written(conn, order)[mark][sheet.NOTE_PANEL] == "старый"
+    conn.execute("UPDATE order_card SET comment = 'новый' WHERE id = ?", (order,))
+    conn.commit()
+    sheet.resync(conn, box, fake, LATER)
+    assert fake.rows[mark]["Примечание"] == "текст владельца · новый"     # never «… · старый · новый»
+    conn.execute("UPDATE order_card SET comment = '' WHERE id = ?", (order,))
+    conn.commit()
+    sheet.resync(conn, box, fake, LATER)
+    assert fake.rows[mark]["Примечание"] == "текст владельца"             # the owner's text stays
+    assert sheet.resync(conn, box, fake, LATER, dry_run=True)["summary"]["differs"] == 0
+
+
+def test_writing_goes_by_packs_of_15_and_an_unanswered_one_loses_nothing(table, monkeypatch):
+    conn, box, fake, rows, orders_of, whole = table
+    for n in range(8):                                                     # 16 more rows to write: more than one pack
+        more = placed(conn, client_name="Клиент %d" % n)
+        sheet.flush(conn, box, fake, NOW)
+        for m in [m for m in fake.rows if m.startswith("tires:%d:" % more)]:
+            fake.rows[m]["Этап"] = "старое"
+    posts = len(fake.data_posts())
+    probes = -(-len(sheet.repair_candidates(conn)) // sheet.REPAIR_CHUNK)
+    fake.fail = [None] * probes + ["timeout"]                              # the first pack written: no answer
+    done = sheet.resync(conn, box, fake, LATER)
+    wrote = [p for p in fake.data_posts()[posts + probes:] if any(r.get("sync") for r in p["rows"])]
+    assert wrote and all(len(p["rows"]) <= sheet.WRITE_CHUNK for p in wrote)
+    unsure = [d for d in done["rows"] if d["result"].startswith("не подтверждено")]
+    assert unsure and all("повторите сверку" in d["result"] for d in unsure)
+    again = sheet.resync(conn, box, fake, LATER, dry_run=True)["summary"]
+    assert again["differs"] == len(unsure)                                 # found again: nothing lost
+    sheet.resync(conn, box, fake, LATER)
+    assert sheet.resync(conn, box, fake, LATER, dry_run=True)["summary"]["differs"] == 0
+
+
+def test_only_our_own_claim_is_taken_off(table, monkeypatch):
+    conn, box, fake, rows, orders_of, whole = table
+    other = orders_of["staged"]
+    real = sheet._ask
+
+    def meanwhile(*a, **kw):                                               # another sender takes the order after our claim ran out
+        out = real(*a, **kw)
+        if not any(op.get("probe") for op in a[3]):
+            conn.execute("UPDATE sheet_order SET claim_until = '2099-01-01T00:00:00' WHERE order_id = ?", (other,))
+            conn.commit()
+        return out
+    monkeypatch.setattr(sheet, "_ask", meanwhile)
+    sheet.resync(conn, box, fake, LATER)
+    assert conn.execute("SELECT claim_until FROM sheet_order WHERE order_id = ?", (other,)).fetchone()[0] == "2099-01-01T00:00:00"
+    assert conn.execute("SELECT COUNT(*) FROM sheet_order WHERE claim_until != '' AND order_id != ?", (other,)).fetchone()[0] == 0
+
+
+def test_an_error_of_one_row_is_not_taken_for_an_old_script(table):
+    conn, box, fake, rows, orders_of, whole = table
+    fake.broken.add(rows["wiped"])
+    done = sheet.resync(conn, box, fake, LATER)
+    assert done["summary"]["errors"] == 1 and any(d["key"] == rows["wiped"] and d["result"] == "ошибка: сбой строки" for d in done["rows"])
+    assert filled(fake.rows[rows["staged"]]) == filled(whole["staged"])
