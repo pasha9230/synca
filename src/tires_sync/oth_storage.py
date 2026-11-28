@@ -152,14 +152,19 @@ def why_not_undo_return(conn, card: dict) -> Optional[str]:
         return "Шины этой записи уже взял другой заказ или вернули клиенту: отменить возврат нельзя."
     if card["sale_ids"]:
         return "По записи есть продажа: отменить возврат нельзя."
+    if mark.get("order") is not None and record_of(conn, mark["order"]) != int(card["id"]):
+        return ("Шины этой записи уже снова у заказа №%s: на ОТХ они не возвращаются второй раз." % mark["order"])
     return None
 
 
 def undo_return(conn, card_id, now: str, author: str, reason: str = "") -> bool:
     """«Отменить возврат поставщику»: the record is back on «На ОТХ» (a new stay: its seven days count anew), its tyres on sale again; the
-    agreement and the act of the return are dropped, the fields of the refund cleared (a later return fills them again). The fee of the
-    point is not touched (point_arrival: one payment of the chain; its day stays the day of the wrong return, a later return moves it).
-    The journal of the order and the audit keep it (oth_storage_unreturn)."""
+    agreement of the return (with its signature) is dropped, the fields of the refund cleared (a later return fills them again). The file
+    of the act МХ-3 is the point's and the date's, shared by other orders: it stays. The check of the same tyres twice on «На ОТХ»
+    (why_not_move) runs as for any move, the record marked REOPEN for it (as untake). The chain of the point's fee is open again (the owner:
+    the fee is paid by the end of the chain): the day written by the wrong return is cleared, a later end writes it once. The journal of
+    the order and the audit keep it (oth_storage_unreturn)."""
+    from . import point_arrival
     card = orders.get_card(conn, card_id)
     why = why_not_undo_return(conn, card)
     if why:
@@ -168,16 +173,21 @@ def undo_return(conn, card_id, now: str, author: str, reason: str = "") -> bool:
     if oth is None:
         raise orders.OrderError("Нет этапа «На ОТХ».")
     text = " ".join(str(reason or "").split())[:300]
+    mark = record(conn, card_id)
     if conn.in_transaction:
         conn.commit()
+    _put(conn, MARK % int(card_id), dict(mark, state=REOPEN))            # why_not_move: the one way back of a record closed by mistake
     conn.execute("DELETE FROM oth_return_plan WHERE order_id = ?", (int(card_id),))
     conn.execute("UPDATE order_card SET return_kind = '', return_reason = '', return_amount = 0 WHERE id = ?", (int(card_id),))
-    moved = orders.move_card(conn, card_id, oth["id"], now, author, fire_rules=False, commit=False, undo_return=True)
+    moved = orders.move_card(conn, card_id, oth["id"], now, author, fire_rules=False, commit=False)   # refused: all rolled back
     if not moved:
         conn.rollback()
         return False
+    _put(conn, MARK % int(card_id), dict(mark, state=HELD))
+    for up in [int(card_id)] + point_arrival._upstream(conn, int(card_id)):
+        conn.execute("UPDATE order_arrival SET left_at = NULL WHERE order_id = ? AND undone_at IS NULL", (up,))
     orders.add_event(conn, int(card_id), now, author, "field", UNRETURN_LINE % (oth["name"], ". Причина: " + text if text else ""), level="yellow")
-    _audit(conn, now, author, "oth_storage_unreturn", {"record": int(card_id), "order": record(conn, card_id).get("order"), "reason": text})
+    _audit(conn, now, author, "oth_storage_unreturn", {"record": int(card_id), "order": mark.get("order"), "reason": text})
     conn.commit()
     return True
 

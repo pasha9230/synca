@@ -1154,7 +1154,8 @@ SALE_RETURN = ("По заказу записана продажа: заказ н
 DONE_EMPTY = ("В заказе нет позиций: «Выполнено» без состава не ставится. Добавьте позиции; если заказ правда выполнен так, напишите "
               "в карточке «Комментарий: почему так» — он сохранится в журнале заказа.")
 DONE_EMPTY_LINE = "Конфликт: «Выполнено» без позиций не поставлено. Комментарий: %s"
-UNAGREED_HINT = " Исключение — только офис: «Оформить возврат» с причиной исключения."
+UNAGREED_HINT = (" Шины поставщику без согласования не отдавайте. Если уже отдали — сообщите офису: он оформит возврат как исключение "
+                 "с причиной.")
 
 
 def note_done_empty(conn, card_id, now: str, author: str, comment: str) -> None:
@@ -1204,7 +1205,7 @@ def unagreed_return(conn, card: dict) -> Optional[str]:
 
 def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[dict] = None, chain: tuple = (), fire_rules: bool = True,
               journal: bool = True, commit: bool = True, oth_split: bool = True, oth_sold: bool = False,
-              internal_return_restore: bool = False, return_exception: str = "", undo_return: bool = False) -> bool:
+              internal_return_restore: bool = False, return_exception: str = "") -> bool:
     """Move a card to a stage. The fields that come with the move are saved first; the move itself needs the stage's required data.
     `fire_rules=False` (the bulk move) leaves the rules of the new stage asleep: no task, no message for hundreds of cards at once.
     A refusal goes to the journal as a red record; not with `journal=False` (the bulk move) and not for a rule (`chain` is given only by the
@@ -1215,8 +1216,7 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
     A record of storage goes to «Выполнено» by any way (the board, the card, the bulk move, a chat, a rule) only as the point's «Продать»
     (order_oth.sell, the owner 2026-11-10: the office and the point never part); `oth_sold`: the move made by that sale itself.
     «Вернули поставщику» only after the agreement with the supplier (the owner 2026-11-28): «Согласование возврата» → «На возврат» →
-    «Вернули поставщику» (unagreed_return); `return_exception`: the office's reason for an exception, written to the journal and the audit.
-    `undo_return`: «Отменить возврат поставщику» of a record of storage (oth_storage.undo_return): back on «На ОТХ»."""
+    «Вернули поставщику» (unagreed_return); `return_exception`: the office's reason for an exception, written to the journal and the audit."""
     stage = get_stage(conn, stage_id)
     changed = update_card(conn, card_id, changes, now, author, commit=False, link_client=False) if changes else []   # not saved until
     card = get_card(conn, card_id)                                                                               # the move is allowed
@@ -1236,7 +1236,7 @@ def move_card(conn, card_id, stage_id, now: str, author: str, changes: Optional[
                                "Сначала отмените согласование возврата с поставщиком и снимите отметку с шин.", journal)
     if stage["code"] == "done" and not oth_sold and oth_storage.is_record(conn, card_id):
         return _sell_record(conn, card, now, author, journal, commit)
-    twice = None if undo_return else oth_storage.why_not_move(conn, card, stage)    # the same tyres never on «На ОТХ» twice (the review 2026-11-10)
+    twice = oth_storage.why_not_move(conn, card, stage)                     # the same tyres never on «На ОТХ» twice (the review 2026-11-10)
     if twice:
         raise _refuse_move(conn, card_id, now, author, twice, journal)
     if stage["code"] == RETURN_GIVEN and card["stage"].get("code") != RETURN_GIVEN and not internal_return_restore:

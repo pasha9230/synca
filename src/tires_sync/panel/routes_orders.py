@@ -2482,6 +2482,8 @@ def register(app) -> None:
         as a conflicting action; the order itself is not moved."""
         conn = get_conn()
         card_or_404(conn, card_id)
+        if own_point() is not None:                                       # the office's note: a point never writes it
+            abort(403)
         try:
             orders.note_done_empty(conn, card_id, local_iso(), author(), request.form.get("comment", ""))
         except orders.OrderError as err:

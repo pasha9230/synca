@@ -30,9 +30,9 @@ def audit(conn, action):
     return [json.loads(d) for (d,) in conn.execute("SELECT detail FROM audit WHERE action = ?", (action,))]
 
 
-def on_oth(conn):
-    cid = card_at(conn, "at_point", WHEN)
-    assert orders.move_card(conn, cid, stage(conn, "oth"), LATER, "o", changes={"cancel_reason": "Клиент не пришёл"})
+def on_oth(conn, came=WHEN, left=LATER):
+    cid = card_at(conn, "at_point", came)
+    assert orders.move_card(conn, cid, stage(conn, "oth"), left, "o", changes={"cancel_reason": "Клиент не пришёл"})
     return oth_storage.record_of(conn, cid)
 
 
@@ -156,3 +156,65 @@ def test_the_card_offers_the_exception_the_undo_and_the_warning(tmp_path):
     cid = card_at(conn, "at_point", WHEN)
     assert "Шины уже приезжали на точку" in owner.get("/orders/%d" % cid).get_data(as_text=True)
     assert "Шины приезжали" in owner.get("/deleted?k=arrived").get_data(as_text=True)
+
+
+def test_the_points_return_of_a_record_on_oth_with_no_agreement_goes_as_an_exception(tmp_path):
+    from tires_sync import order_manager as mgr
+    conn = db(tmp_path)
+    x = on_oth(conn)
+    mgr.returned(conn, orders.get_card(conn, x), "менеджер Бета", LATER)
+    assert code(conn, x) == "return"
+    assert any(t.endswith("Причина: " + mgr.POINT_UNAGREED) for t in texts(conn, x))
+    assert audit(conn, "return_unagreed")[0]["reason"] == mgr.POINT_UNAGREED
+
+
+def test_the_refusal_tells_the_point_not_to_give_the_tyres(tmp_path):
+    conn = db(tmp_path)
+    cid = card_at(conn, "at_point", WHEN)
+    with pytest.raises(orders.OrderError, match="без согласования не отдавайте"):
+        orders.move_card(conn, cid, stage(conn, "return"), LATER, "o", changes=RETURN)
+
+
+def test_the_undo_opens_the_chain_again_and_the_fee_is_paid_once(tmp_path):
+    from tires_sync import point_arrival
+    conn = db(tmp_path)
+    x = on_oth(conn, "2026-11-27T10:00:00", "2026-11-27T12:00:00")
+    source = oth_storage.source_of(conn, x)
+
+    def left():
+        return conn.execute("SELECT left_at FROM order_arrival WHERE order_id = ?", (source,)).fetchone()[0]
+
+    def fees():
+        return [(c[0], c[2]) for c in point_arrival._chains(conn) if c[0] == source]
+
+    assert orders.move_card(conn, x, stage(conn, "return"), "2026-11-27T13:00:00", "o", changes=RETURN, return_exception="ошибка")
+    assert left() == "2026-11-27T13:00:00" and fees() == [(source, True)]
+    assert oth_storage.undo_return(conn, x, "2026-11-27T14:00:00", "o")
+    assert left() is None and fees() == [(source, False)]                  # «К начислению» again: the chain waits
+    assert orders.move_card(conn, x, stage(conn, "return"), "2026-11-28T10:00:00", "o", changes=RETURN, return_exception="поставщик забрал")
+    assert left() == "2026-11-28T10:00:00" and fees() == [(source, True)]  # one fee, on the day of the real end
+
+
+def test_the_undo_refuses_the_same_tyres_twice(tmp_path):
+    conn = db(tmp_path)
+    x = on_oth(conn)
+    source = oth_storage.source_of(conn, x)
+    assert orders.move_card(conn, x, stage(conn, "return"), LATER, "o", changes=RETURN, return_exception="ошибка")
+    conn.execute("DELETE FROM app_state WHERE key = ?", (oth_storage.OF % source,))          # the tyres are the order's again
+    conn.commit()
+    with pytest.raises(orders.OrderError, match="уже снова у заказа"):
+        oth_storage.undo_return(conn, x, "2026-10-22T10:00:00", "o")
+    assert code(conn, x) == "return"
+
+
+def test_a_point_never_writes_the_note_of_an_empty_done(tmp_path):
+    from test_mypoint import manager
+    app, owner, tok, conn = panel(tmp_path)
+    pid = conn.execute("SELECT id FROM point ORDER BY id LIMIT 1").fetchone()
+    pid = pid[0] if pid else __import__("tires_sync.order_points", fromlist=["x"]).save_point(conn, dict(name="Бета", channel="vk", vk_peer_id="1"))
+    cid = orders.create_card(conn, dict(client_name="Иван", client_phone="+7 900 000 00 03", point_id=pid), WHEN, "o")
+    point = manager(app, conn, pid)
+    assert post(point, "/orders/%d/done-empty-note" % cid, "tok", comment="так вышло").status_code in (403, 404)
+    assert audit(conn, "order_done_empty") == []
+    assert post(owner, "/orders/%d/done-empty-note" % cid, tok, comment="так вышло").status_code in (200, 302)
+    assert audit(conn, "order_done_empty")

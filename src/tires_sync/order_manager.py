@@ -775,7 +775,7 @@ def returned(conn, card: dict, who: str, now: str) -> Tuple[str, str]:
     conn.execute("UPDATE oth_return_plan SET signed_at = ?, signed_by = ? WHERE order_id = ? AND signed_at IS NULL", (now, who, card["id"]))
     try:
         moved = orders.move_card(conn, card["id"], stage["id"], now, who, changes=order_oth.apply_refund(conn, card["id"], changes, now, who),
-                                 return_exception="" if ours else POINT_UNAGREED)     # the point gave the tyres already (the owner 2026-11-28)
+                                 return_exception=POINT_UNAGREED)      # the point gave the tyres already: noted only when unagreed (2026-11-28)
     except OrderError as err:
         return "не выполнено: %s" % err, "Не получилось: %s" % err
     if not moved:
