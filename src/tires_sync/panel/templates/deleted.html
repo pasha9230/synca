@@ -3,12 +3,13 @@
 {% block title %}Удалённые · Tires Sync{% endblock %}
 {% block content %}
 <header class="page-head"><div><h1>Удалённые</h1><p class="sub">Заказы и чаты, удалённые в панели. Удаление только из нашей базы: в Авито и WebMIM ничего не менялось. Удалённый чат больше не загружается из Авито, пока его не восстановят.</p></div>
-<div class="actions">{% if can_post("orders_cleanup_run") %}<a class="btn btn--secondary" href="/orders/cleanup">Убрать пустые карточки из «Нового заказа»</a>{% endif %}<div class="seg" role="group" aria-label="Что показать"><a href="/deleted"{% if not kind %} class="is-active" aria-current="true"{% endif %}>Всё</a><a href="/deleted?k=order"{% if kind == "order" %} class="is-active" aria-current="true"{% endif %}>Заказы</a><a href="/deleted?k=chat"{% if kind == "chat" %} class="is-active" aria-current="true"{% endif %}>Чаты</a></div></div></header>
+<div class="actions">{% if can_post("orders_cleanup_run") %}<a class="btn btn--secondary" href="/orders/cleanup">Убрать пустые карточки из «Нового заказа»</a>{% endif %}<div class="seg" role="group" aria-label="Что показать"><a href="/deleted"{% if not kind %} class="is-active" aria-current="true"{% endif %}>Всё</a><a href="/deleted?k=order"{% if kind == "order" %} class="is-active" aria-current="true"{% endif %}>Заказы</a><a href="/deleted?k=chat"{% if kind == "chat" %} class="is-active" aria-current="true"{% endif %}>Чаты</a><a href="/deleted?k={{ arrived_kind }}"{% if kind == arrived_kind %} class="is-active" aria-current="true"{% endif %}>Шины приезжали</a></div></div></header>
+{% if kind == arrived_kind %}<p class="small muted">Важная история: заказы, удалённые после приезда шин на точку. Начисление точке по ним больше не считается. Запись остаётся здесь и после восстановления.</p>{% endif %}
 <section class="card">
 {% if rows %}<div class="table-wrap"><table class="table">
 <thead><tr><th>Что</th><th>Удалено</th><th>Кто удалил</th><th></th></tr></thead><tbody>
-{% for r in rows %}<tr><td>{{ r.title }}</td><td>{{ r.deleted_at|dt }}</td><td>{{ r.deleted_by }}</td>
-<td>{% if can_post("deleted_restore") %}<form method="post" action="/deleted/{{ r.id }}/restore" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="k" value="{{ kind }}"><button class="btn btn--secondary btn--xs">Восстановить</button></form>{% endif %}</td></tr>{% endfor %}
+{% for r in rows %}<tr><td>{{ r.title }}{% if r.arrived %}<br><span class="small" data-arrived>Шины приезжали на точку{% if r.arrived.point %} «{{ r.arrived.point }}»{% endif %}{% if r.arrived.pieces %}, {{ r.arrived.pieces }} шт.{% endif %} — начисление точке не считается</span>{% endif %}</td><td>{{ r.deleted_at|dt }}</td><td>{{ r.deleted_by }}</td>
+<td>{% if r.restored_at %}<span class="small muted">восстановлен {{ r.restored_at|dt }}</span>{% elif can_post("deleted_restore") %}<form method="post" action="/deleted/{{ r.id }}/restore" data-once><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="k" value="{{ kind }}"><button class="btn btn--secondary btn--xs">Восстановить</button></form>{% endif %}</td></tr>{% endfor %}
 </tbody></table></div>
 {% else %}{{ empty("inbox", "Удалённых нет", "Удалённые заказы и чаты попадают сюда, отсюда их можно вернуть.") }}{% endif %}
 </section>

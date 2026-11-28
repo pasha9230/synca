@@ -136,6 +136,52 @@ def reopen(conn, card: dict, now: str, author: str) -> None:
     _audit(conn, now, author, "oth_storage_reopen", {"record": int(card["id"]), "order": (record(conn, card["id"]) or {}).get("order")})
 
 
+UNRETURN_LINE = "Возврат поставщику отменён (был ошибкой): запись хранения снова на «%s», шины в остатке%s"
+
+
+def why_not_undo_return(conn, card: dict) -> Optional[str]:
+    """Why «Отменить возврат поставщику» (the owner 2026-11-28: a record put on «Вернули поставщику» by mistake was a dead end) cannot
+    take this order back on «На ОТХ»; None: it can. A record of storage only, standing on «Вернули поставщику», still holding its tyres
+    (not taken by an order, not given back to its client), with no sale."""
+    mark = record(conn, card["id"])
+    if mark is None:
+        return "Отменить возврат можно только у записи хранения ОТХ."
+    if card["stage"].get("code") != "return":
+        return "Запись хранения не на этапе «%s»." % orders.stage_name(conn, "return")
+    if mark.get("state") != HELD or mark.get("to"):
+        return "Шины этой записи уже взял другой заказ или вернули клиенту: отменить возврат нельзя."
+    if card["sale_ids"]:
+        return "По записи есть продажа: отменить возврат нельзя."
+    return None
+
+
+def undo_return(conn, card_id, now: str, author: str, reason: str = "") -> bool:
+    """«Отменить возврат поставщику»: the record is back on «На ОТХ» (a new stay: its seven days count anew), its tyres on sale again; the
+    agreement and the act of the return are dropped, the fields of the refund cleared (a later return fills them again). The fee of the
+    point is not touched (point_arrival: one payment of the chain; its day stays the day of the wrong return, a later return moves it).
+    The journal of the order and the audit keep it (oth_storage_unreturn)."""
+    card = orders.get_card(conn, card_id)
+    why = why_not_undo_return(conn, card)
+    if why:
+        raise orders.OrderError(why)
+    oth = next((s for s in orders.list_stages(conn) if s["code"] == "oth"), None)
+    if oth is None:
+        raise orders.OrderError("Нет этапа «На ОТХ».")
+    text = " ".join(str(reason or "").split())[:300]
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("DELETE FROM oth_return_plan WHERE order_id = ?", (int(card_id),))
+    conn.execute("UPDATE order_card SET return_kind = '', return_reason = '', return_amount = 0 WHERE id = ?", (int(card_id),))
+    moved = orders.move_card(conn, card_id, oth["id"], now, author, fire_rules=False, commit=False, undo_return=True)
+    if not moved:
+        conn.rollback()
+        return False
+    orders.add_event(conn, int(card_id), now, author, "field", UNRETURN_LINE % (oth["name"], ". Причина: " + text if text else ""), level="yellow")
+    _audit(conn, now, author, "oth_storage_unreturn", {"record": int(card_id), "order": record(conn, card_id).get("order"), "reason": text})
+    conn.commit()
+    return True
+
+
 def splits(conn, card: dict) -> bool:
     """A move of this order to «На ОТХ» makes a record of storage: a client's order (a name, a phone, a chat or a linked client). Not a record itself, nor an
     order nobody ordered (split off by a return: order_oth._split_off). A merged order and an order with pieces added

@@ -94,6 +94,14 @@ def error_kind(conn, fields: dict) -> str:
     return "error"
 
 
+def _delete_arrived(conn, card_id) -> str:
+    """The warning of «Удалить заказ…» for an order whose tyres came to a point (the owner 2026-11-28); "" otherwise."""
+    text = trash.arrived_text(trash.arrived_info(conn, card_id))
+    if text and (current_user().get("role") or "") not in trash.ADMINS:
+        text += " " + trash.ARRIVED_ONLY_ADMIN
+    return text
+
+
 def _int(value):
     text = str(value or "").strip()
     return int(text) if text.isascii() and text.isdigit() else None
@@ -1149,7 +1157,8 @@ def register(app) -> None:
             points.check_point_move(conn, own_point(), card_id, orders.get_stage(conn, stage_id))     # its own sale: between the four only
             check_responsible(app, conn, changes.get("responsible"), card["responsible"])
             stamp = local_iso()
-            moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes)
+            exception = request.form.get("return_exception", "") if own_point() is None else ""     # the office's reason (the owner 2026-11-28)
+            moved = orders.move_card(conn, card_id, stage_id, stamp, author(), changes, return_exception=exception)
             message, ok = ("Заказ перенесён." if moved else "Заказ уже на этом этапе."), True
             if moved and no_arrival:
                 if point_arrival.mark_none(conn, card_id, stamp, author()):
@@ -1504,6 +1513,9 @@ def register(app) -> None:
             office_page("order_card.html"), messages=messages, open_messages=open_messages, mim_window=mim_window,
             **({"layout": card_layout(conn, session.get("user"))} if office_new() else {}),
             own_sale=own_point() is not None and card_id in points.own_sales(conn, own_point()),     # «Заказы» of the point: no «Возврат»
+            delete_arrived=_delete_arrived(conn, card_id) if own_point() is None else "",          # the owner 2026-11-28: always warned
+            return_unagreed=orders.unagreed_return(conn, card) if own_point() is None else None,   # «Оформить возврат»: only with a reason
+            return_undo=oth_storage.why_not_undo_return(conn, card) is None if own_point() is None and card["stage"]["code"] == "return" else False,
             c=card, entity=point_entity(orders.card_view(card, conn), card) if own_point() else orders.card_view(card, conn), v=values, oth_plan=order_oth.return_plan(conn, card["id"]),
             oth_dates=order_oth.reserve_dates(conn).get(card_id), oth_item_marks=_oth_item_marks(conn, card), storage=_storage(conn, card),
             to_return_stage=_to_return_stage(conn, card), oth_next_day=order_oth.return_date(local_now().date()), oth_today=local_now().date().isoformat(),
@@ -2447,6 +2459,37 @@ def register(app) -> None:
         flash("Продажа сторнирована." if count else "Записанной продажи нет.")
         return back(card_id, "money")
 
+    @app.route("/orders/<int:card_id>/return-undo", methods=["POST"])
+    @login_required
+    def order_return_undo(card_id):
+        """«Отменить возврат поставщику» of a record of storage put there by mistake (the owner 2026-11-28): back on «На ОТХ»."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        if own_point() is not None:
+            abort(403)
+        try:
+            oth_storage.undo_return(conn, card_id, local_iso(), author(), request.form.get("reason", ""))
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return back(card_id)
+        flash("Возврат поставщику отменён: запись снова на «На ОТХ», шины в остатке.")
+        return back(card_id)
+
+    @app.route("/orders/<int:card_id>/done-empty-note", methods=["POST"])
+    @login_required
+    def order_done_empty_note(card_id):
+        """«Комментарий: почему так» of an order without positions that should be «Выполнено» (the owner 2026-11-28): the journal keeps it
+        as a conflicting action; the order itself is not moved."""
+        conn = get_conn()
+        card_or_404(conn, card_id)
+        try:
+            orders.note_done_empty(conn, card_id, local_iso(), author(), request.form.get("comment", ""))
+        except orders.OrderError as err:
+            flash(str(err), "error")
+            return back(card_id)
+        flash("Комментарий записан в журнал заказа. Этап не изменён: добавьте позиции, чтобы перевести заказ в «Выполнено».")
+        return back(card_id)
+
     @app.route("/orders/<int:card_id>/delete", methods=["POST"])
     @login_required
     def order_delete(card_id):
@@ -2454,7 +2497,7 @@ def register(app) -> None:
         card = card_or_404(conn, card_id)
         try:
             trash.delete_order(conn, card_id, local_iso(), author(),          # the tyres taken from «На ОТХ» are not lost with the order
-                               only_if=lambda c, _card: oth_sale.why_not_delete(c, card_id))
+                               only_if=lambda c, _card: oth_sale.why_not_delete(c, card_id), role=current_user().get("role") or "")
         except orders.OrderError as err:
             flash(str(err))
             return back(card_id)
@@ -2464,8 +2507,8 @@ def register(app) -> None:
     @app.route("/deleted")
     @login_required
     def deleted_page():
-        kind = request.args.get("k", "") if request.args.get("k", "") in trash.KINDS else ""
-        return render_template("deleted.html", rows=trash.list_deleted(get_conn(), kind or None), kind=kind)
+        kind = request.args.get("k", "") if request.args.get("k", "") in trash.KINDS or request.args.get("k", "") == trash.ARRIVED_KIND else ""
+        return render_template("deleted.html", rows=trash.list_deleted(get_conn(), kind or None), kind=kind, arrived_kind=trash.ARRIVED_KIND)
 
     @app.route("/deleted/<int:record_id>/restore", methods=["POST"])
     @login_required

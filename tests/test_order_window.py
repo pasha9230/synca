@@ -206,7 +206,8 @@ def test_the_cancel_and_return_fields_are_in_the_window_on_those_stages(tmp_path
     app, client, tok, conn = setup(tmp_path, monkeypatch)
     s = {x["code"]: x["id"] for x in orders.list_stages(conn)}
     cid = created(post(client, "/orders/new", tok, client_name="Иван"))
-    post(client, "/orders/%d/move" % cid, tok, stage_id=str(s["return"]), return_kind="client", return_reason="не подошли", return_amount="9600")
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(s["return"]), return_kind="client", return_reason="не подошли", return_amount="9600",
+         return_exception="тест")
     page = client.get("/orders/%d" % cid).get_data(as_text=True)
     main = page[page.index('<form id="ow-main"'):page.index("</form>", page.index('<form id="ow-main"'))]
     assert 'value="не подошли"' in main and 'name="return_amount" value="9600"' in main and 'name="cancel_reason"' not in main   # «9600», not «9600.0» (2026-10-26)

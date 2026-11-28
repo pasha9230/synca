@@ -133,7 +133,8 @@ def test_the_window_of_a_return_fills_by_the_kind_and_a_return_made_with_it_keep
     assert 'value="' not in tag and "data-auto" in tag and 'autocomplete="off"' in tag and 'data-return-amount' in tag and "hint" not in tag
     assert 'data-suggest-supplier="%s"' % COST in tag and 'data-suggest-client="%s"' % SALE in tag
     s = {s["code"]: s["id"] for s in orders.list_stages(conn)}
-    post(client, "/orders/%d/move" % cid, tok, stage_id=str(s["return"]), return_kind="client", return_reason="не подошли", return_amount=SALE)
+    post(client, "/orders/%d/move" % cid, tok, stage_id=str(s["return"]), return_kind="client", return_reason="не подошли", return_amount=SALE,
+         return_exception="тест")
     c = orders.get_card(conn, cid)
     assert c["stage"]["code"] == "return" and c["return_amount"] == float(SALE)
 

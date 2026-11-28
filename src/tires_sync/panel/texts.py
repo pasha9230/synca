@@ -522,6 +522,13 @@ _MORE_TEXTS = {
     "chat_restore": lambda d: "Чат Ч-%s восстановлен" % _q(d.get("chat")),
     "order_delete": lambda d: "Заказ №%s удалён (в «Удалённых»)" % _q(d.get("order")),
     "order_restore": lambda d: "Заказ №%s восстановлен" % _q(d.get("order")),
+    "order_delete_arrived": lambda d: "Важно: заказ №%s удалён после приезда шин на точку%s%s — начисление точке по нему не считается" % (
+        _q(d.get("order")), " «%s»" % d["point"] if d.get("point") else "", ", %s шт." % _q(d["pieces"]) if d.get("pieces") else ""),
+    "order_done_empty": lambda d: "Конфликт: заказ №%s без позиций не переведён в «Выполнено». Комментарий: %s" % (_q(d.get("order")), _q(d.get("comment"))),
+    "return_unagreed": lambda d: "Заказ №%s: «Вернули поставщику» без согласования (исключение, с этапа «%s»). Причина: %s" % (
+        _q(d.get("order")), _q(d.get("from")), _q(d.get("reason"))),
+    "oth_storage_unreturn": lambda d: "ОТХ: возврат поставщику записи хранения №%s отменён, запись снова на ОТХ%s" % (
+        _q(d.get("record")), ". Причина: %s" % _q(d["reason"]) if d.get("reason") else ""),
     "order_chat_link": lambda d: "Чат Ч-%s привязан к заказу №%s" % (_q(d.get("chat")), _q(d.get("order"))),
     "order_chat_unlink": lambda d: "Чат Ч-%s отвязан от заказа №%s" % (_q(d.get("chat")), _q(d.get("order"))),
     "order_item_purchase": lambda d: "Заказ №%s: закупочная цена позиции %s → %s" % (_q(d.get("order")), _rub(d.get("from")), _rub(d.get("to"))),

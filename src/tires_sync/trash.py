@@ -59,9 +59,38 @@ def chat_title(chat: dict) -> str:
     return "Чат Ч-%d · %s%s" % (chat["id"], chat["peer_name"] or "без имени", " · " + chat["item_title"] if chat["item_title"] else "")
 
 
-def delete_order(conn, card_id, now: str, author: str, only_if=None) -> int:
+ADMINS = ("owner", "partner")            # «админ» (the owner 2026-11-28): the full rights of the orders; the operator (chats) never deletes such
+ARRIVED_KIND = "arrived"                 # «Удалённые → Шины приезжали»: the important history of the admin panel
+ARRIVED_WARNING = ("Шины уже приезжали на точку{point}{pieces}. Если удалить заказ, он пропадёт из «Дохода» точки и из «Пунктов выдачи»: "
+                   "начисление точке за этот заказ перестанет считаться. Удаление запишется в «Удалённые → Шины приезжали» и в журнал.")
+ARRIVED_ONLY_ADMIN = "Шины уже приезжали на точку: такой заказ удаляет только администратор (владелец или партнёр)."
+ARRIVED_LINE = "Заказ удалён после приезда шин на точку{point}{pieces}: начисление точке по нему больше не считается"
+
+
+def arrived_info(conn, card_id) -> Optional[dict]:
+    """The tyres of the order came to a point (point_arrival.got_tyres): {"point", "pieces"} for the warning; None: they did not."""
+    from . import point_arrival
+    if not point_arrival.got_tyres(conn, card_id):
+        return None
+    row = conn.execute("SELECT a.pieces, COALESCE(p.name, q.name, '') FROM order_card c LEFT JOIN order_arrival a ON a.order_id = c.id "
+                       "LEFT JOIN point p ON p.id = a.point_id LEFT JOIN point q ON q.id = c.point_id WHERE c.id = ?", (int(card_id),)).fetchone()
+    pieces = int(row[0] or 0) if row else 0
+    return {"point": (row[1] if row else "") or "", "pieces": pieces or point_arrival.own_pieces(conn, card_id)}
+
+
+def arrived_text(info: Optional[dict], template: str = ARRIVED_WARNING) -> str:
+    if not info:
+        return ""
+    return template.format(point=" «%s»" % info["point"] if info.get("point") else "",
+                           pieces=", %d шт." % info["pieces"] if info.get("pieces") else "")
+
+
+def delete_order(conn, card_id, now: str, author: str, only_if=None, role: Optional[str] = None) -> int:
     """The order with its positions, history, tasks and wait list goes to «Удалённые». Its chats stay and lose the link
     (they are not linked again on their own). An order with a recorded sale is not deleted: «Продажи» must keep matching the orders.
+    An order whose tyres came to a point (the owner 2026-11-28): only an admin (`role` in ADMINS; None — the system, its own checks) deletes
+    it; the deletion is kept as the important history («Удалённые → Шины приезжали», the audit order_delete_arrived) and the order's journal
+    says the point's fee of it is no longer counted (point_arrival._chains reads living orders only).
     `only_if(conn, card)` is asked inside the transaction, so nobody changes the card between the check and the delete; a reason it gives stops it."""
     _begin(conn)
     try:
@@ -77,9 +106,16 @@ def delete_order(conn, card_id, now: str, author: str, only_if=None) -> int:
                   or (only_if(conn, card) if only_if else None))                                          # nor a merge «Разъединить» undoes
         if reason:
             raise OrderError(reason)
+        came = arrived_info(conn, card_id)
+        if came and role is not None and role not in ADMINS:
+            raise OrderError(ARRIVED_ONLY_ADMIN)
+        if came:                                                              # saved with the order: back in its journal when restored
+            orders.add_event(conn, int(card_id), now, author, "field", arrived_text(came, ARRIVED_LINE), level="red")
         data = {"card": card, "chats": _rows(conn, "SELECT id, order_id, unlinked FROM avito_chat WHERE order_id = ?", (card_id,))}
         for table, column in ORDER_TABLES:
             data[table] = _rows(conn, "SELECT * FROM %s WHERE %s = ? ORDER BY rowid" % (table, column), (card_id,))
+        if came:
+            data["arrived"] = came
         title = order_title(card)
         cur = conn.execute("INSERT INTO deleted_record (kind, record_id, title, data, deleted_at, deleted_by) VALUES ('order',?,?,?,?,?)",
                            (card_id, title, json.dumps(data, ensure_ascii=False), now, author))
@@ -88,6 +124,9 @@ def delete_order(conn, card_id, now: str, author: str, only_if=None) -> int:
         conn.execute("DELETE FROM order_card WHERE id = ?", (card_id,))
         conn.execute("UPDATE avito_chat SET order_id = NULL, unlinked = 1 WHERE order_id = ?", (card_id,))
         _audit(conn, now, author, "order_delete", {"order": card_id, "record": cur.lastrowid, "chats": [c["id"] for c in data["chats"]]})
+        if came:
+            _audit(conn, now, author, "order_delete_arrived", {"order": card_id, "record": cur.lastrowid, "point": came["point"],
+                                                               "pieces": came["pieces"]})
         conn.commit()
         return cur.lastrowid
     except BaseException:
@@ -212,7 +251,22 @@ def restore_chat(conn, record_id, now: str, author: str) -> int:
 
 
 def list_deleted(conn, kind: Optional[str] = None) -> List[dict]:
-    sql, args = "SELECT id, kind, record_id, title, deleted_at, deleted_by FROM deleted_record WHERE restored_at IS NULL", ()
-    if kind:
-        sql, args = sql + " AND kind = ?", (kind,)
-    return _rows(conn, sql + " ORDER BY id DESC", args)
+    """The deleted records not restored; `kind` ARRIVED_KIND: the orders deleted after their tyres came (kept even once restored: the
+    important history). Each row says `arrived` ({"point", "pieces"} or None)."""
+    sql, args = "SELECT id, kind, record_id, title, deleted_at, deleted_by, restored_at, data FROM deleted_record WHERE ", ()
+    if kind == ARRIVED_KIND:
+        sql += "kind = 'order'"
+    elif kind:
+        sql, args = sql + "restored_at IS NULL AND kind = ?", (kind,)
+    else:
+        sql += "restored_at IS NULL"
+    out = []
+    for row in _rows(conn, sql + " ORDER BY id DESC", args):
+        try:
+            found = json.loads(row.pop("data") or "{}").get("arrived")
+        except (ValueError, AttributeError):
+            found = None
+        if kind == ARRIVED_KIND and not found:
+            continue
+        out.append(dict(row, arrived=found if isinstance(found, dict) else None))
+    return out
