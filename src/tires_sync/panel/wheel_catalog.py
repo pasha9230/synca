@@ -1,5 +1,6 @@
 """Filtering for the wheel catalog; no effects on feed publication."""
 from decimal import Decimal, InvalidOperation
+import re
 
 PARAMETERS = {
     'width': ('width', 'Ширина'),
@@ -9,6 +10,40 @@ PARAMETERS = {
     'offset': ('offset', 'Вылет ET'),
     'bore': ('center_bore', 'Диаметр ступицы'),
 }
+
+
+def display_name(wheel):
+    name, brand = wheel.name.strip(), wheel.brand.strip()
+    if brand:
+        stripped = re.sub(r'^' + re.escape(brand) + r'(?=$|[\s,;:–—-])\s*', '', name, count=1, flags=re.IGNORECASE)
+        return stripped.lstrip(' ,;:–—-') or name
+    return name
+
+
+def status(row, min_stock):
+    """One honest status for the catalog; a rule is not proof of publication."""
+    wheel = row['wheel']
+    if row['unverified']:
+        code, reason = 'wheel_unverified', 'наличие не проверено'
+    elif row['gone']:
+        code, reason = 'gone', 'нет у поставщика'
+    elif row['manual'] == 'off':
+        code, reason = 'manual_off', 'снято вами'
+    elif wheel.stock < min_stock:
+        code, reason = 'low_stock', 'остаток ниже порога'
+    elif row['price'] is None:
+        code, reason = 'wheel_no_price', 'нет цены'
+    elif row['manual'] != 'on' and not row['brand_enabled']:
+        code, reason = 'wheel_brand_off', 'бренд не включён'
+    elif row['published'] is None:
+        code, reason = 'wheel_unknown', 'фид не проверен'
+    elif row['published'] and row['manual'] == 'on':
+        code, reason = 'manual_on', 'добавлено вручную'
+    elif row['published']:
+        code, reason = 'feed', 'в фиде'
+    else:
+        code, reason = 'wheel_waiting', 'не в фиде'
+    return {'scode': code, 'reason': reason, 'pending': row['manual_pending'], 'wheel': True}
 
 
 def number(value):

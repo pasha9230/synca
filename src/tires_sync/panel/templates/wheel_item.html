@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% import "_entity.html" as entity_ui %}
+{% block title %}{{ wheel.name }} · Tires Sync{% endblock %}
+{% block body_class %}o2 o2-item-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='office2-pages.css') }}">{% endblock %}
+{% block content %}
+<div class="entity-page o2-item">
+<header>{{ entity_ui.crumbs([{'label': 'Каталог', 'href': '/catalog?category=wheels'}, {'label': wheel.name}]) }}
+{{ entity_ui.head({'kind': 'Диск', 'ref': wheel.code or wheel.goods_id, 'title': wheel.name}) }}</header>
+<div class="o2-item-cols"><div class="o2-item-main"><section class="card card-body"><div class="entity-media">
+{% if image %}<img src="{{ image }}" alt="{{ wheel.name }}" width="160" loading="lazy">{% else %}<div class="photo">нет фото</div>{% endif %}
+{{ entity_ui.fields([{'label': 'Бренд', 'value': wheel.brand}, {'label': 'Модель', 'value': wheel.model}, {'label': 'Код', 'value': wheel.code or wheel.goods_id}, {'label': 'Тип', 'value': wheel.wheel_type}, {'label': 'Диаметр', 'value': wheel.diameter}, {'label': 'Ширина', 'value': wheel.width}, {'label': 'Разболтовка', 'value': wheel.holes ~ ' × ' ~ wheel.pcd}, {'label': 'Вылет ET', 'value': wheel.offset}, {'label': 'Ступица DIA', 'value': wheel.center_bore}, {'label': 'Цвет', 'value': wheel.color}, {'label': 'Наша цена', 'value': price, 'fmt': 'money'}]) }}
+</div></section></div></div></div>
+{% endblock %}

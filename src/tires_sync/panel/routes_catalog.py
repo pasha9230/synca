@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import io
 import json
 import re
 import sqlite3
@@ -8,10 +9,11 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
-from flask import abort, current_app, flash, jsonify, redirect, render_template, request
+from flask import abort, current_app, flash, jsonify, redirect, render_template, request, send_file
+from werkzeug.exceptions import NotFound
 from werkzeug.datastructures import MultiDict
 
-from .. import catalog_archive, connections, market, own_bulk, order_oth, order_points, order_wait, orders, staging, store, tochki_feed, user_prefs, wheel_archive, wheel_manifest
+from .. import catalog_archive, connections, market, own_bulk, order_oth, order_points, order_wait, orders, share_photos, staging, store, tochki_feed, user_prefs, wheel_archive, wheel_manifest
 from ..config import own_price_value, settings_from_dict
 from ..fetcher import wheel_snapshot_path
 from ..webmim_wheels import parse_unload as parse_wheels
@@ -659,6 +661,14 @@ def register(app) -> None:
                 row['brand_enabled'] = rules.get(brand_key(wheel.brand), {}).get('enabled', False)
                 row['manual'] = effective.get('overrides', {}).get(key)
                 row['manual_pending'] = raw.get('overrides', {}).get(key) != row['manual']
+                row['status'] = wheel_catalog.status(row, settings.min_stock)
+                active_row = dict(row, manual=raw.get('overrides', {}).get(key), manual_pending=False,
+                                  brand_enabled=raw.get('wheel_pricing', {}).get(brand_key(wheel.brand), {}).get('enabled', False),
+                                  price=wheel_price(wheel, raw.get('wheel_pricing', {}), current_overrides))
+                if wheel_catalog.status(active_row, settings.min_stock)['scode'] != row['status']['scode']:
+                    row['status']['pending'] = True
+                row['display_name'] = wheel_catalog.display_name(wheel)
+                row['image'] = '/catalog/wheels/%s/photo' % wheel.goods_id if wheel.image and account else None
 
             options = {key: wheel_catalog.choices(wheels, attr) for key, (attr, _) in wheel_catalog.PARAMETERS.items()}
             options['type'] = wheel_catalog.choices(wheels, 'wheel_type')
@@ -688,6 +698,57 @@ def register(app) -> None:
         client_catalog.remember_sizes(get_conn(), current_user()["login"], client_catalog.searched_sizes(
             _nums(args, "w"), _nums(args, "h"), _nums(args, "d"), _view_filters(args)["sizes"]), now_iso())
         return catalog_page(args)
+
+    def _wheel_item(conn, gid):
+        if not re.fullmatch(r'[0-9]{1,40}', gid):
+            abort(404)
+        settings = active_settings(conn)
+        territory = connections.supplier_territory(conn, 1, settings)
+        try:
+            snapshot = parse_wheels(wheel_snapshot_path(Path(app.config['UNLOAD_PATH'])).read_bytes(), territory)
+        except (OSError, ET.ParseError):
+            snapshot = None
+        wheel = wheel_archive.merged(conn, snapshot, territory).get(gid)
+        if not wheel:
+            abort(404)
+        return wheel
+
+    @app.route('/catalog/wheels/<gid>/photo')
+    @login_required
+    def wheel_catalog_photo(gid):
+        conn = get_conn()
+        if not re.fullmatch(r'[0-9]{1,40}', gid):
+            abort(404)
+        account = connections.get_account(conn, connections.PRIMARY_ACCOUNT)
+        if not account or not account.get('feed_token'):
+            abort(404)
+        try:
+            return app.view_functions['account_photo'](account['feed_token'], 'w-' + gid + '.jpg')
+        except NotFound:
+            # An archived wheel can have a last known image even when it was
+            # never published. Use the same restricted supplier fetcher.
+            wheel = _wheel_item(conn, gid)
+            if not wheel.image:
+                abort(404)
+            try:
+                data, kind = (app.config.get('PHOTO_FETCH') or share_photos.fetch)(wheel.image)
+            except share_photos.PhotoError:
+                abort(404)
+            from .routes_img import KINDS
+            if kind not in KINDS:
+                abort(404)
+            return send_file(io.BytesIO(data), mimetype=KINDS[kind], max_age=86400)
+
+    @app.route('/catalog/wheels/<gid>')
+    @login_required
+    def wheel_item_page(gid):
+        conn = get_conn()
+        wheel = _wheel_item(conn, gid)
+        effective = staging.effective_raw(conn)
+        price = wheel_price(wheel, effective.get('wheel_pricing', {}), effective.get('price_overrides', {}))
+        account = connections.get_account(conn, connections.PRIMARY_ACCOUNT)
+        return render_template('wheel_item.html', wheel=wheel, price=price,
+                               image='/catalog/wheels/%s/photo' % gid if wheel.image and account else None)
 
     @app.route('/catalog/wheels/columns', methods=['POST'])
     @login_required

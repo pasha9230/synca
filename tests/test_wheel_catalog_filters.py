@@ -87,3 +87,76 @@ def test_vehicle_dataset_is_available_and_untrusted_selection_is_safe():
     assert len(vehicle_fitment.dataset()) > 10000
     assert vehicle_fitment.selection({'car_make': 'BMW', 'car_year': '2020', 'car_model': 'missing', 'car_variant': '0'})['variant'] is None
     assert vehicle_fitment.bolt_pattern(('A', 'invalid', '', '')) is None
+
+
+def test_wheel_name_does_not_repeat_brand():
+    from types import SimpleNamespace
+    from tires_sync.panel.wheel_catalog import display_name
+    assert display_name(SimpleNamespace(name='BRAND Model 16', brand='Brand')) == 'Model 16'
+    assert display_name(SimpleNamespace(name='Brandstone Model', brand='Brand')) == 'Brandstone Model'
+    assert display_name(SimpleNamespace(name='Brand', brand='Brand')) == 'Brand'
+
+
+def test_wheel_status_uses_shared_catalog_component_and_truthful_state(tmp_path):
+    from datetime import datetime
+    import json
+    from tires_sync import staging
+    from tires_sync.fetcher import wheel_snapshot_path
+    app, client, conn = world(tmp_path)
+    connections.create_account(conn, 'Основной', '2026-11-28T10:00:00', 'owner')
+    path = wheel_snapshot_path(app.config['UNLOAD_PATH'])
+    path.with_name(path.name + '.meta.json').write_text(json.dumps({'fetched_at': datetime.utcnow().isoformat()}))
+    page = client.get('/catalog?category=wheels').get_data(as_text=True)
+    assert 'st-ico--neutral' in page and 'data-tip-title="Бренд не включён"' in page
+    assert '/catalog/wheels/41/photo' in page and 'href="/catalog/wheels/41"' in page
+    assert client.get('/catalog/wheels/41').status_code == 200
+    card = client.get('/catalog/wheels/41').get_data(as_text=True)
+    assert 'Silver rim' in card and 'Разболтовка' in card and '/catalog/wheels/41/photo' in card
+    assert client.get('/catalog/wheels/99999').status_code == 404
+    staging.set_override(conn, 'w-41', 'on', '2026-11-28T10:01:00')
+    page = client.get('/catalog?category=wheels').get_data(as_text=True)
+    assert 'st-ico--pend' in page and 'Станет:' in page
+
+
+def test_wheel_status_does_not_claim_unpublished_manual_item_is_in_feed():
+    from types import SimpleNamespace
+    from tires_sync.panel.wheel_catalog import status
+    row = {'wheel': SimpleNamespace(stock=4), 'unverified': False, 'gone': False,
+           'manual': 'on', 'manual_pending': False, 'price': 1000, 'brand_enabled': False, 'published': False}
+    assert status(row, 1)['reason'] == 'не в фиде'
+    row['published'] = True
+    assert status(row, 1)['reason'] == 'добавлено вручную'
+    row['wheel'].stock = 0
+    assert status(row, 1)['reason'] == 'остаток ниже порога'
+
+
+def test_catalog_wheel_photo_uses_supplier_proxy_and_requires_catalog_access(tmp_path):
+    from test_account_photo import JPEG
+    app, owner, conn = world(tmp_path)
+    connections.create_account(conn, 'Основной', '2026-11-28T10:00:00', 'owner')
+    app.config['PHOTO_FETCH'] = lambda url: (JPEG, 'jpg')
+    response = owner.get('/catalog/wheels/41/photo')
+    assert response.status_code == 200 and response.data == JPEG
+    assert response.mimetype == 'image/jpeg'
+    assert owner.get('/catalog/wheels/invalid/photo').status_code == 404
+
+
+def test_wheel_status_marks_brand_draft_and_keeps_last_feed_fact():
+    from types import SimpleNamespace
+    from tires_sync.panel.wheel_catalog import status
+    row = {'wheel': SimpleNamespace(stock=4), 'unverified': False, 'gone': False,
+           'manual': 'off', 'manual_pending': False, 'price': 1000, 'brand_enabled': True, 'published': True}
+    assert status(row, 1)['scode'] == 'manual_off'
+
+
+def test_wheel_brand_draft_is_shown_as_pending(tmp_path):
+    from datetime import datetime
+    import json
+    from tires_sync import staging
+    app, client, conn = world(tmp_path)
+    connections.create_account(conn, 'Основной', '2026-11-28T10:00:00', 'owner')
+    path = wheel_snapshot_path(app.config['UNLOAD_PATH'])
+    path.with_name(path.name + '.meta.json').write_text(json.dumps({'fetched_at': datetime.utcnow().isoformat()}))
+    staging.set_wheel_pricing(conn, 'BRAND', 10, 10, '2026-11-28T10:01:00', enabled=True)
+    page = client.get('/catalog?category=wheels').get_data(as_text=True)
+    assert 'st-ico--pend' in page and 'Станет:' in page
