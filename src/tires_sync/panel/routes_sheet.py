@@ -153,10 +153,12 @@ def register(app) -> None:
         def work():
             db = store.connect(app.config["DB_PATH"])
             try:
-                summary, rows, error = None, [], ""
+                summary, rows, kept, error = None, [], [], ""
                 try:
                     done = order_sheet.resync(db, box, http, moscow, author=who, dry_run=dry, closed_too=closed)
                     summary, rows = done["summary"], done["rows"]
+                    kept = [r for r in rows if r.get("section") == "keep"]
+                    rows = [r for r in rows if r.get("section") != "keep"]
                 except order_sheet.SheetError as err:
                     error = str(err)
                 except Exception as err:                                  # noqa: BLE001: the page shows it, never a silent stop
@@ -164,6 +166,7 @@ def register(app) -> None:
                     error = "сбой панели (%s): сообщите разработчику." % type(err).__name__
                 store.set_state(db, RESYNC_KEY, json.dumps({
                     "at": moscow, "dry": dry, "closed": closed, "error": error, "count": len(rows), "rows": rows[:RESYNC_SHOWN],
+                    "kept_count": len(kept), "kept": kept[:RESYNC_SHOWN],
                     "summary": summary, "said": order_sheet.summary_line(summary, dry) if summary else ""}, ensure_ascii=False))
                 store.set_state(db, RESYNC_KEY + ":run", "")
                 db.commit()

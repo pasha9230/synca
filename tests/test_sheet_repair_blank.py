@@ -49,6 +49,11 @@ class RepairScript(NewScript):
         return super().run(p)
 
 
+def filled(cells):
+    """The cells with something in them: the repair writes no empty value and never a «Списание» taken off (the owner 28.11)."""
+    return {k: v for k, v in (cells or {}).items() if v not in ("", None, False)}
+
+
 def wipe(fake, mark):
     """Every cell of the row cleared by hand: only the hidden mark is left."""
     fake.rows[mark] = {}
@@ -94,7 +99,7 @@ def test_a_wiped_row_gets_the_panel_data_back_and_is_followed_again(table):
     by_key = {d["key"]: d["result"] for d in done}
     order, mark = rows["wiped"]
     assert by_key[mark] == "записана заново"
-    assert fake.rows[mark] == before and "Примечание" not in fake.rows[mark]
+    assert filled(fake.rows[mark]) == filled(before) and "Примечание" not in fake.rows[mark]
     assert not written(conn, order)[mark].get("_missing")
     assert any(e == sheet.REPAIRED % 1 for e in events(conn, order))
     assert by_key[rows["edited"][1]].startswith("правлена вручную")
@@ -135,7 +140,7 @@ def test_the_command_dry_run_and_run(table, monkeypatch, capsys, tmp_path):
     assert fake.rows[rows["wiped"][1]] == {}
     assert cli.main(["sheet-repair-blank", "--db", db_path, "--key-file", str(key)]) == 0
     out = capsys.readouterr().out
-    assert "№%d · %s · строка листа " % rows["wiped"] in out and "записана заново" in out and fake.rows[rows["wiped"][1]] == before
+    assert "№%d · %s · строка листа " % rows["wiped"] in out and "записана заново" in out and filled(fake.rows[rows["wiped"][1]]) == filled(before)
     assert cli.main(["sheet-repair-blank", "--db", db_path]) == 1          # no key: nothing sent
     assert "Секрет Google-таблицы не задан" in capsys.readouterr().err
 
@@ -231,7 +236,7 @@ def test_a_row_written_without_some_column_is_said_and_listed_later(table):
     assert still[mark].startswith("записана не полностью")                 # the column is still not there
     fake.columns.append("ПВЗ")                                             # the owner put the column back
     after = {d["key"]: d["result"] for d in sheet.repair_blank(conn, box, fake, LATER)}
-    assert after[mark] == "дописана: ПВЗ" and fake.rows[mark] == before
+    assert after[mark] == "дописана: ПВЗ" and filled(fake.rows[mark]) == filled(before)
     assert sheet.PARTIAL not in written(conn, order)[mark] and written(conn, order)[mark]["ПВЗ"] == before["ПВЗ"]
     assert mark not in {d["key"] for d in sheet.repair_blank(conn, box, fake, LATER)}   # done: no longer listed
     assert conn.execute("SELECT COUNT(*) FROM sheet_order WHERE claim_until != ''").fetchone()[0] == 0
@@ -248,3 +253,14 @@ def test_the_claims_are_freed_when_the_writing_fails(table, monkeypatch):
         sheet.repair_blank(conn, box, fake, LATER)
     assert conn.execute("SELECT COUNT(*) FROM sheet_order WHERE claim_until != ''").fetchone()[0] == 0
     assert real
+
+
+def test_the_repair_writes_only_filled_values_and_never_takes_the_write_off(table):
+    conn, box, fake, rows, before = table
+    order, mark = rows["wiped"]
+    fake.rows[mark]["Списание"] = True                                     # the tick stayed when the row was cleared
+    sheet.repair_blank(conn, box, fake, LATER)
+    sent = [r for p in fake.data_posts() for r in p["rows"] if r["key"] == mark and r.get("repair") and not r.get("probe")]
+    assert sent and all(v not in ("", None) for r in sent for v in r["fields"].values())
+    assert all("Списание" not in r["fields"] or r["fields"]["Списание"] is True for r in sent)
+    assert fake.rows[mark]["Списание"] is True and fake.rows[mark]["Артикул"] == before["Артикул"]
