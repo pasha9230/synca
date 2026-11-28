@@ -939,6 +939,150 @@ def _restore_order(conn, card_id: int, marks: List[str], url: str, secret: str, 
     return out
 
 
+# ---- rows wiped by hand (the owner 28.11) --------------------------------------------------------------------------------------------
+# A row of the sheet cleared by hand keeps only its hidden mark «tires_id»: the script answers «edited» (its «Артикул» and «Телефон» are not
+# what the panel wrote) and the panel stops following it (`_missing`). `python -m tires_sync sheet-repair-blank` (and the owner's button in
+# «Подключения → Google-таблица») asks the script of 28.11 about every row written of the orders followed («Вести заказы, оформленные с»):
+# a row whose BLANK cells are all empty is written again with the panel's data, as a new position (every column; «Примечание» only where
+# the panel writes it into a new row too). A row with something else in it (corrected by hand) is never written over: it is only listed.
+# A script before 28.11 knows nothing of «repair»: each row goes with a check on a column no sheet has (REPAIR_CHECK), so the old script
+# answers «edited» or «gone» and writes nothing; the panel sees no «repair» in its answers and says a new deployment is needed.
+
+BLANK = ("Артикул", "Телефон", "Наименование", "Кол-во")
+REPAIR_CHECK = {"tires_repair": "28.11"}                     # no sheet has this column: an old script never writes such a row
+REPAIR_CHUNK = 50                                            # rows per call: one call holds the script's lock for one pass over the sheet
+REPAIRED = "Строка Google-таблицы была стёрта вручную — данные заказа записаны заново: %d стр."
+OLD_SCRIPT = ("Скрипт таблицы не умеет искать пустые строки: нужно новое развертывание Apps Script (текст от 28.11). "
+              "Ничего не записано.")
+SHOWN = ("Артикул", "Наименование", "Кол-во", "Имя", "Телефон", "№ заказа MIM", "Этап")
+
+
+def repair_candidates(conn) -> List[dict]:
+    """The rows written of every order followed (any stage, «Вести заказы, оформленные с»; never a record of storage — its client's row
+    is the one), the position still in the order: {"order_id", "key", "op", "verify"}. `op`: what a new row would get (changes), `verify`:
+    the cells of CHECK as the panel wrote them. Never a row the panel removed (`_removed`) nor a position taken out (`_gone`)."""
+    kept, day = _kept(conn)
+    found = []
+    for card_id, placed_at, rows in conn.execute("SELECT s.order_id, s.placed_at, s.rows FROM sheet_order s JOIN order_card c ON c.id = s.order_id"
+                                                 " WHERE s.order_id NOT IN (SELECT CAST(substr(key, 13) AS INTEGER) FROM app_state WHERE key LIKE"
+                                                 " 'oth_storage:%')" + kept + " ORDER BY s.order_id", day).fetchall():
+        written = json.loads(rows or "{}")
+        marks = [m for m, row in written.items() if not row.get("_removed") and not row.get("_gone")]
+        if not marks:
+            continue
+        try:
+            current = rows_of(conn, card_id, placed_at)
+            grey = not listed(conn, card_id)
+        except Exception:                                                  # one broken order never stops the others (as flush)
+            log.exception("the Google table: the rows of order %s", card_id)
+            continue
+        for m in marks:
+            if m in current:
+                op = changes({m: current[m]}, {}, grey=grey)[0]
+                found.append({"order_id": card_id, "key": m, "op": op, "verify": {c: written[m].get(c, "") for c in CHECK}})
+    return found
+
+
+def _repair_op(c: dict, probe: bool) -> dict:
+    op = c["op"]
+    out = {"key": c["key"], "create": False, "fields": {} if probe else op["fields"], "check": dict(REPAIR_CHECK), "repair": list(BLANK),
+           "verify": c["verify"]}
+    if probe:
+        out["probe"] = True
+    else:
+        out.update({k: op[k] for k in ("extra", "shade") if k in op})
+    return out
+
+
+def _ask(http: Transport, url: str, secret: str, ops: List[dict]) -> Dict[str, dict]:
+    """The script's answers, by mark, chunk by chunk. A script before 28.11 (no «repair» in an answer): SheetError(OLD_SCRIPT)."""
+    out: Dict[str, dict] = {}
+    for i in range(0, len(ops), REPAIR_CHUNK):
+        answer = call(http, url, {"secret": secret, "sheet": SHEET, "rows": ops[i:i + REPAIR_CHUNK]})
+        for r in answer.get("results") or []:
+            if isinstance(r, dict):
+                if r.get("repair") is not True:
+                    raise SheetError(OLD_SCRIPT)
+                out[str(r.get("key"))] = r
+    return out
+
+
+def what_goes(op: dict) -> str:
+    """The values to be written, in a line: the columns a person knows the row by, then how many more."""
+    values = dict(op["fields"], **op.get("extra", {}))
+    shown = ["%s: %s" % (c, values[c]) for c in SHOWN if values.get(c) not in ("", None)]
+    rest = sum(1 for c, v in values.items() if c not in SHOWN and v not in ("", None, False))
+    return "; ".join(shown) + (" (+%d кол.)" % rest if rest else "")
+
+
+def repair_blank(conn, box, http: Transport, now: str, author: str = "cli", dry_run: bool = False) -> List[dict]:
+    """The rows wiped by hand (see above), order by order: {"order_id", "key", "result", "values"}; a row the script finds as written is
+    not listed. `dry_run`: the script is asked (nothing written there) and nothing is written in the base. `now`: Moscow time (the order's
+    journal). result: «пустая — будет записано», «записана заново», «правлена вручную — не трогаем», «метки на листе нет», «занят другой
+    отправкой», «ошибка: …». A script before 28.11: SheetError(OLD_SCRIPT), nothing written."""
+    s = settings(conn)
+    if not (s["enabled"] and s["url"]):
+        raise SheetError("Google-таблица выключена или адрес не задан: включите её в «Подключения → Google-таблица».")
+    secret = _secret(conn, box, s) if box is not None else None
+    if not secret:
+        raise SheetError("Секрет Google-таблицы не задан (или ключ не передан): ничего не отправлено.")
+    found = repair_candidates(conn)
+    if not found:
+        return []
+    probed = _ask(http, s["url"], secret, [_repair_op(c, True) for c in found])
+    out: List[dict] = []
+    blank = []
+    for c in found:
+        status = str((probed.get(c["key"]) or {}).get("status") or "нет ответа")
+        if status == "blank":
+            blank.append(c)
+        elif status == EDITED:
+            out.append({"order_id": c["order_id"], "key": c["key"], "result": "правлена вручную (другой артикул/телефон) — не трогаем", "values": ""})
+        elif status == GONE:
+            out.append({"order_id": c["order_id"], "key": c["key"], "result": "метки на листе нет — не трогаем", "values": ""})
+        elif status != "filled":
+            why = str((probed.get(c["key"]) or {}).get("error") or status)[:200]
+            out.append({"order_id": c["order_id"], "key": c["key"], "result": "ошибка: %s" % why, "values": ""})
+    if dry_run:
+        return [{"order_id": c["order_id"], "key": c["key"], "result": "пустая — будет записано", "values": what_goes(c["op"])} for c in blank] + out
+    orders_of = sorted({c["order_id"] for c in blank})
+    claimed = [o for o in orders_of if _claim(conn, o, now)]
+    out += [{"order_id": c["order_id"], "key": c["key"], "result": "занят другой отправкой", "values": ""} for c in blank if c["order_id"] not in claimed]
+    going = [c for c in blank if c["order_id"] in claimed]
+    try:
+        answers = _ask(http, s["url"], secret, [_repair_op(c, False) for c in going]) if going else {}
+    except SheetError as err:
+        answers = {c["key"]: {"status": "error", "error": str(err)} for c in going}
+    done: List[dict] = []
+    for card_id in claimed:
+        mine = [c for c in going if c["order_id"] == card_id]
+        written = json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0] or "{}")
+        fixed = 0
+        for c in mine:
+            reply = answers.get(c["key"]) or {}
+            status = str(reply.get("status") or "нет ответа")
+            if status == "repaired":
+                op = c["op"]
+                written[c["key"]] = dict(op["fields"], **op.get("extra", {}))
+                if "shade" in op:
+                    written[c["key"]]["_grey"] = op["shade"]
+                fixed += 1
+                done.append({"order_id": card_id, "key": c["key"], "result": "записана заново", "values": what_goes(op)})
+            elif status in (EDITED, "filled"):                             # typed into between the two calls: left alone
+                done.append({"order_id": card_id, "key": c["key"], "result": "правлена вручную (другой артикул/телефон) — не трогаем", "values": ""})
+            else:
+                done.append({"order_id": card_id, "key": c["key"], "result": "ошибка: %s" % str(reply.get("error") or status)[:200], "values": ""})
+        if fixed:
+            orders.add_event(conn, card_id, now, AUTHOR, "sheet", REPAIRED % fixed)
+        conn.execute("UPDATE sheet_order SET rows = ?, claim_until = '' WHERE order_id = ?", (json.dumps(written, ensure_ascii=False), card_id))
+        conn.commit()
+    repaired = [d for d in done if d["result"] == "записана заново"]
+    if repaired:
+        store.write_audit(conn, now, author, "sheet_repair_blank", {"rows": len(repaired), "orders": len({d["order_id"] for d in repaired})})
+        conn.commit()
+    return done + out
+
+
 def flush(conn, box, http: Transport, now: str, full: bool = False, limit: Optional[int] = None) -> Dict[int, str]:
     """Send the queued orders whose rows changed (order → what happened). The table off, no address or no secret: nothing goes."""
     s = settings(conn)
