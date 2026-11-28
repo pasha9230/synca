@@ -47,20 +47,28 @@ tr.ads-group>td{font-weight:500}tr.ads-group.d0>td{background:var(--gray-50)}tr.
 .ads-pop{position:absolute;z-index:30;top:100%;left:0;margin-top:4px;background:var(--gray-0,#fff);border:1px solid var(--gray-200);border-radius:var(--r-lg,8px);box-shadow:var(--sh-lg);padding:var(--s-3);min-width:240px;max-width:calc(100vw - 32px)}
 .ads-pop label{display:flex;gap:6px;align-items:center;padding:2px 0}
 .ads-levels{display:grid;grid-template-columns:auto 1fr;gap:6px 8px;align-items:center}
+.ads-range{position:relative}.ads-range-pop{position:absolute;z-index:35;top:100%;left:0;width:350px;max-width:calc(100vw - 32px);background:white;border:1px solid #ddd;border-radius:8px;box-shadow:0 5px 15px #0002;padding:12px}.ads-range-nav,.ads-range-actions,.ads-presets{display:flex;justify-content:space-between;align-items:center;gap:4px}.ads-range-nav button,.ads-presets button,.ads-calendar button,.ads-range-actions>button:first-child{border:0;background:transparent;cursor:pointer}.ads-calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;margin:8px 0}.ads-calendar button{height:34px;border-radius:4px}.ads-calendar button.in-range{background:#e3f5fc}.ads-calendar button.selected{background:#56b9e7;color:white}.ads-calendar button:disabled{color:#bbb;cursor:default}.ads-calendar .weekend{color:#ed381e}.ads-date-inputs{display:flex;gap:8px}.ads-date-inputs label{min-width:0;flex:1}.ads-date-inputs input{width:100%}.ads-range-actions{margin-top:10px}
 </style>{% endblock %}
 {% block content %}
 <header class="page-head"><div><h1>Аналитика рекламы<span class="help-q" tabindex="0" data-tip="Сколько Авито взяло за объявления каждого аккаунта (размещение и продвижение вместе) и сколько они принесли. Таблица — дерево: аккаунт, бренд, модель, размер, объявление; уровни выбираются в «Группировке». Сортировка — по клику на заголовок колонки. Продажа — заказ на этапе «Выполнено» или «Отправлен в ТК», привязанный к объявлению через чат заказа. Только просмотр: здесь ничего не меняется на Авито.">?</span></h1>
-<p class="small muted">С {{ data.since }} по {{ data.until }} (сегодняшний день ещё не закрыт Авито). Сравнение — с {{ data.prev_since }} по {{ data.prev_until }}. Расходы собираются раз в сутки.</p></div></header>
+<p class="small muted">С {{ data.since }} по {{ data.until }}. Сегодняшний день ещё не закрыт Авито. Сравнение — с {{ data.prev_since }} по {{ data.prev_until }}. Расходы собираются раз в сутки.</p></div></header>
 <section class="card">
 {% if not data.accounts %}
 <div class="empty"><div class="empty-icon">{{ icon("chart") }}</div><h3>Нет аккаунтов с фидом</h3></div>
 {% else %}
 <div class="card-head" style="flex-wrap:wrap">
-<div class="seg" role="group" aria-label="Период">{% for n, label in periods.items() %}<a href="{{ url(p=n) }}"{% if n == data.days %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+<details class="ads-range" data-ads-range><summary class="btn btn--secondary btn--sm">{{ data.since[8:10] }}.{{ data.since[5:7] }}.{{ data.since[:4] }} – {{ data.until[8:10] }}.{{ data.until[5:7] }}.{{ data.until[:4] }} &nbsp;▦</summary>
+<form method="get" action="/economics/ads" class="ads-range-pop" data-range-form>
+<input type="hidden" name="g" value="{{ data.levels|join(',') }}"><input type="hidden" name="s" value="{{ data.sort }}">{% if not data.desc %}<input type="hidden" name="d" value="asc">{% endif %}{% if data.only %}<input type="hidden" name="f" value="{{ data.only }}">{% endif %}
+<div class="ads-range-nav"><button type="button" data-month="-1" aria-label="Предыдущий месяц">‹</button><b data-month-label></b><button type="button" data-month="1" aria-label="Следующий месяц">›</button></div>
+<div class="ads-presets">{% for n in [7,30,90,180,365] %}<button type="button" data-preset="{{ n }}">{{ n }} дней</button>{% endfor %}</div>
+<div class="ads-calendar" data-calendar aria-label="Календарь выбора периода"></div>
+<div class="ads-date-inputs"><label>С <input type="date" name="start" value="{{ data.since }}" max="{{ today }}" required></label><label>По <input type="date" name="end" value="{{ data.until }}" max="{{ today }}" required></label></div>
+<div class="ads-range-actions"><button type="button" data-clear>Очистить</button><button class="btn btn--primary btn--sm">Выбрать</button></div></form></details>
 <div class="seg" role="group" aria-label="Фильтр">{% for key, label in filters.items() %}<a href="{{ url(f=key) }}"{% if key == data.only %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
 <div class="ads-tools">
 <details><summary class="btn btn--secondary btn--sm">Группировка: {% for l in data.levels %}{{ levels[l] }}{% if not loop.last %} → {% endif %}{% endfor %}</summary>
-<form method="get" action="/economics/ads" class="ads-pop"><input type="hidden" name="p" value="{{ data.days }}"><input type="hidden" name="s" value="{{ data.sort }}">{% if not data.desc %}<input type="hidden" name="d" value="asc">{% endif %}{% if data.only %}<input type="hidden" name="f" value="{{ data.only }}">{% endif %}
+<form method="get" action="/economics/ads" class="ads-pop"><input type="hidden" name="start" value="{{ data.since }}"><input type="hidden" name="end" value="{{ data.until }}"><input type="hidden" name="s" value="{{ data.sort }}">{% if not data.desc %}<input type="hidden" name="d" value="asc">{% endif %}{% if data.only %}<input type="hidden" name="f" value="{{ data.only }}">{% endif %}
 <div class="ads-levels">{% for n in range(levels|length) %}<label for="ads-l{{ n }}" class="small">Уровень {{ n + 1 }}</label><select id="ads-l{{ n }}" name="l" class="input input--sm"><option value="">—</option>{% for key, label in levels.items() %}<option value="{{ key }}"{% if data.levels[n] == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>{% endfor %}</div>
 <p class="xs muted">Уровни идут сверху вниз, «—» выключает уровень, повтор не учитывается. «Объявление» — последний уровень: ниже него ничего нет. Выбор запоминается.</p>
 <button class="btn btn--primary btn--sm">Показать</button> <a class="btn btn--ghost btn--sm" href="{{ url(g=['account', 'brand', 'ad']) }}">По умолчанию</a></form></details>
@@ -71,6 +79,7 @@ tr.ads-group>td{font-weight:500}tr.ads-group.d0>td{background:var(--gray-50)}tr.
 </div>
 </div>
 <div class="card-head"><div>
+{% if data.comparison_incomplete %}<p class="small muted">Данные за выбранный или предыдущий период неполные; сравнение может быть неточным.</p>{% endif %}
 {% for acc in data.accounts %}<p class="small muted"><b>{{ acc.name }}</b>. Расходы загружены за {{ acc.covered }} из {{ data.days }} дн{% if acc.covered < data.days %}. — период неполный, суммы меньше настоящих{% endif %}.{% if acc.error %} Последний сбор не удался: {{ acc.error }}{% endif %}{% if acc.bids_of %} Цена просмотра прочитана у {{ acc.bids_read }} из {{ acc.bids_of }} объявлений{% if acc.bids_read < acc.bids_of %}, остальные дочитываются{% endif %}.{% endif %}</p>{% endfor %}
 </div></div>
 {% if data.rows %}
@@ -105,4 +114,5 @@ tr.ads-group>td{font-weight:500}tr.ads-group.d0>td{background:var(--gray-50)}tr.
 <div class="card-foot"><p class="small muted">Как читать: строка группы складывает свои объявления, формулы считаются от сумм группы. «Без данных» — у объявления нет нашего Id или его позиции нет в каталоге. Сортировка — по клику на заголовок: первый клик — по убыванию, второй — по возрастанию; сортируются строки внутри каждой группы, прочерки внизу. Стрелка под суммой — изменение против прошлого периода той же длины: зелёная — к лучшему, красная — к худшему. Прочерк — делить не на что. Подробности формулы — в «?» у заголовка. «Цена просмотра на Авито» читается не чаще раза в сутки у объявлений, за которые Авито брал деньги в последние 30 дней, по очереди; подробности — по «подробнее»; если цены ещё нет, причина — в подсказке.</p></div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='ads_tree.js') }}"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='ads_tree.js') }}"></script><script src="{{ url_for('static', filename='ads_date_range.js') }}" defer></script>
+{% endblock %}

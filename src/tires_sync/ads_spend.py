@@ -807,19 +807,19 @@ def _summary(accounts: List[dict]) -> dict:
     return {"rows": lines, "total": total}
 
 
-def report(conn, today: date, days: int, sort: str = "spend", account: Optional[int] = None, only: str = "") -> dict:
+def report(conn, today: date, days: int, sort: str = "spend", account: Optional[int] = None, only: str = "", *, custom: bool = False, reference_today: Optional[date] = None) -> dict:
     """The page: the summary per feed account and the total; per account its ads (those with spending, views or sales in the period, `only`
     those with sales / with spending), their totals (whatever the filter), how many days of the period are read, how many prices of a view
     are read; `account` the one shown (the first by default); the sales without an ad apart, with why. Read only."""
-    if days not in PERIODS:
-        raise ValueError("period must be one of %s" % (PERIODS,))
+    if days not in PERIODS and not (custom and 1 <= days <= KEEP_DAYS):
+        raise ValueError("invalid period")
     sort = sort if sort in SORTS else "spend"
     only = only if only in FILTERS else ""
     since, until = bounds(today, days)
     feed = connections.list_feed_accounts(conn)
     sold, by_call, none = sales_by_ad(conn, since, until, [a["id"] for a in feed])
     calls = calls_by_ad(conn, since, until)
-    accounts = [_account(conn, a, today, since, until, sold, sort, only, calls, by_call.get(a["id"])) for a in feed]
+    accounts = [_account(conn, a, reference_today or today, since, until, sold, sort, only, calls, by_call.get(a["id"])) for a in feed]
     chosen = next((a for a in accounts if a["id"] == account), accounts[0] if accounts else None)
     none = dict(none, revenue=round(none["revenue"], 2), margin=round(none["margin"], 2))
     return {"days": days, "since": since, "until": until, "sort": sort, "only": only, "accounts": accounts, "account": chosen,
