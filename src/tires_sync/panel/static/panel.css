@@ -403,7 +403,7 @@ body.hide-sp .col-sp{display:none}
 .bulkbar{flex-wrap:wrap}                                       /* five actions do not fit 1280 in one row: they wrap inside the bar, the page never scrolls sideways */
 
 /* ============ МОДАЛЬНОЕ ОКНО ============ */
-.modal-backdrop{position:fixed;inset:0;z-index:50;background:var(--overlay);backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;padding:6vh var(--s-6);overflow:auto}
+.modal-backdrop{position:fixed;inset:0;z-index:50;background:var(--overlay);backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;padding:6vh var(--s-6);overflow:auto;overscroll-behavior:contain}
 .modal-backdrop:target,.modal-backdrop.is-open{display:flex}
 .modal{background:var(--gray-0);border-radius:var(--r-xl);box-shadow:var(--sh-xl);width:100%;max-width:760px;display:flex;flex-direction:column}
 .modal-head{display:flex;align-items:flex-start;gap:var(--s-3);padding:var(--s-5) var(--s-6) var(--s-4);border-bottom:1px solid var(--gray-200)}
