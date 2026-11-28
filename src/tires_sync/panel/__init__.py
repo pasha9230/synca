@@ -33,7 +33,7 @@ MOSCOW_AUDIT = frozenset({
     "reserve_words", "oth_new_client", "oth_numbers", "oth_reattach", "oth_return_agreed", "oth_return_amount", "oth_return_unagreed", "oth_split", "oth_storage_back",
     "oth_point_sale", "oth_storage_reopen", "oth_storage_split", "oth_storage_take", "oth_take",
     "oth_untake", "point_action", "price_guard_accept", "price_guard_keep", "return_flow_migrated", "shop_order_cancel", "staff_note",
-    "sheet_repair_blank", "stage_names_templates", "stage_off_board", "stage_renamed", "unsent_by_hand"
+    "sheet_repair_blank", "sheet_resync", "stage_names_templates", "stage_off_board", "stage_renamed", "unsent_by_hand"
 })
 
 

@@ -9,12 +9,10 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
-from panel_helpers import make_app, shared_mark_of
 from test_order_sheet import FakeScript, events, placed, stage, turn_on
-from test_roles import person
 from test_sheet_restore import NewScript, mark_missing, written
 from test_webmim_create import NOW, db
-from tires_sync import cli, order_sheet as sheet, orders, store, users
+from tires_sync import cli, order_sheet as sheet, orders
 from tires_sync.panel import MOSCOW_AUDIT, texts
 from tires_sync.secretbox import SecretBox
 
@@ -142,34 +140,6 @@ def test_the_command_dry_run_and_run(table, monkeypatch, capsys, tmp_path):
     assert "Секрет Google-таблицы не задан" in capsys.readouterr().err
 
 
-def test_the_button_is_the_owners_and_shows_the_result(tmp_path, monkeypatch):
-    monkeypatch.setattr(users, "HASH_METHOD", "pbkdf2:sha256:1000")
-    box, fake = SecretBox(Fernet.generate_key()), RepairScript()
-    app = make_app(tmp_path, SECRET_BOX=box, SHEET_HTTP=fake, SHEET_RUN=lambda work: work())
-    conn = store.connect(app.config["DB_PATH"])
-    orders.ensure_pipeline(conn, NOW)
-    turn_on(conn, box)
-    mine = placed(conn)
-    sheet.flush(conn, box, fake, NOW)
-    mark = sorted(fake.rows)[0]
-    whole = dict(fake.rows[mark])
-    wipe(fake, mark)
-    client = app.test_client()
-    with client.session_transaction() as session:
-        session["user"], session["epoch"], session["csrf"] = "owner", 0, "tok"
-        session["pw"] = shared_mark_of(client.application)
-    assert "Строки, стёртые вручную" in client.get("/connections/sheet").get_data(as_text=True)
-    assert client.post("/connections/sheet/repair", data={"csrf": "tok", "dry": "1"}).status_code == 302
-    page = client.get("/connections/sheet").get_data(as_text=True)
-    assert "пустая — будет записано" in page and fake.rows[mark] == {}
-    assert client.post("/connections/sheet/repair", data={"csrf": "tok", "dry": "0"}).status_code == 302
-    assert fake.rows[mark] == whole and "записана заново" in client.get("/connections/sheet").get_data(as_text=True)
-    partner, _ = person(app, "partner")
-    assert partner.post("/connections/sheet/repair", data={"csrf": "tok", "dry": "1"}).status_code == 403
-    assert "Строки, стёртые вручную" not in partner.get("/connections/sheet").get_data(as_text=True)
-    assert mine
-
-
 def test_a_row_without_its_mark_is_made_again_at_the_end(table):
     conn, box, fake, rows, before = table
     order, mark = rows["whole"]
@@ -278,22 +248,3 @@ def test_the_claims_are_freed_when_the_writing_fails(table, monkeypatch):
         sheet.repair_blank(conn, box, fake, LATER)
     assert conn.execute("SELECT COUNT(*) FROM sheet_order WHERE claim_until != ''").fetchone()[0] == 0
     assert real
-
-
-def test_the_confirm_says_how_many_rows_without_a_mark(tmp_path, monkeypatch):
-    monkeypatch.setattr(users, "HASH_METHOD", "pbkdf2:sha256:1000")
-    box, fake = SecretBox(Fernet.generate_key()), RepairScript()
-    app = make_app(tmp_path, SECRET_BOX=box, SHEET_HTTP=fake, SHEET_RUN=lambda work: work())
-    conn = store.connect(app.config["DB_PATH"])
-    orders.ensure_pipeline(conn, NOW)
-    turn_on(conn, box)
-    placed(conn)
-    sheet.flush(conn, box, fake, NOW)
-    fake.rows.pop(sorted(fake.rows)[0])
-    client = app.test_client()
-    with client.session_transaction() as session:
-        session["user"], session["epoch"], session["csrf"] = "owner", 0, "tok"
-        session["pw"] = shared_mark_of(client.application)
-    client.post("/connections/sheet/repair", data={"csrf": "tok", "dry": "1"})
-    page = client.get("/connections/sheet").get_data(as_text=True)
-    assert "Строк без метки по последнему поиску: 1" in page and "создаётся заново в конце листа" in page

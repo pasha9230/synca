@@ -174,6 +174,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sr.add_argument("--db", required=True)
     sr.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     sr.add_argument("--dry-run", action="store_true", help="только показать список, ничего не отправлять и не менять")
+    sy = sub.add_parser("sheet-resync", help="сверить Google-таблицу с панелью: каждая строка заказов (любой этап) получает данные панели, отличающиеся ячейки перезаписываются (кроме «Примечания»); строки без метки у открытых заказов создаются заново (нужен скрипт таблицы от 28.11; сделайте копию базы до этого)")
+    sy.add_argument("--db", required=True)
+    sy.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    sy.add_argument("--dry-run", action="store_true", help="только сравнить и показать расхождения: заказ, строка листа, «было → станет»; ничего не писать")
+    sy.add_argument("--closed-too", action="store_true", help="строки без метки у закрытых заказов тоже создать заново")
     sb = sub.add_parser("sheet-repair-blank", help="строки Google-таблицы, стёртые вручную (осталась только метка tires_id): записать заново данными панели; правленные руками только перечислить (нужен скрипт таблицы от 28.11; сделайте копию базы до этого)")
     sb.add_argument("--db", required=True)
     sb.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
@@ -1445,6 +1450,24 @@ def _cmd_sheet_restore_missing(args) -> int:
     for d in done:
         print("№%d · %s · %s" % (d["order_id"], d["key"], d["result"]))
     print("строк: %d%s" % (len(done), " (проверка: ничего не отправлено и не записано)" if args.dry_run else ""))
+    return 0
+
+
+def _cmd_sheet_resync(args) -> int:
+    """sheet-resync: every row of the orders followed is set as the panel writes it (order_sheet.resync); --dry-run compares only."""
+    from . import order_sheet
+    conn = store.connect(args.db)
+    try:
+        box = load_box(args.key_file) if args.key_file else None
+        done = order_sheet.resync(conn, box, _http(), moscow_now().isoformat(timespec="seconds"), author="cli", dry_run=args.dry_run,
+                                  closed_too=args.closed_too)
+    except order_sheet.SheetError as err:
+        print("ошибка: %s" % err, file=sys.stderr)
+        return 1
+    for d in done["rows"]:
+        where = " · строка листа %d" % d["sheet_row"] if d.get("sheet_row") else ""
+        print("№%d · %s%s · %s%s" % (d["order_id"], d["key"], where, d["result"], (": " + d["values"]) if d["values"] else ""))
+    print(order_sheet.summary_line(done["summary"], args.dry_run) + (" (проверка: в таблицу и в базу ничего не записано)" if args.dry_run else ""))
     return 0
 
 
@@ -3462,6 +3485,8 @@ def main(argv=None) -> int:
             return _cmd_sheet_cancel_remove(args)
         if args.command == "sheet-restore-missing":
             return _cmd_sheet_restore_missing(args)
+        if args.command == "sheet-resync":
+            return _cmd_sheet_resync(args)
         if args.command == "sheet-repair-blank":
             return _cmd_sheet_repair_blank(args)
         if args.command == "inbox-dismiss":
