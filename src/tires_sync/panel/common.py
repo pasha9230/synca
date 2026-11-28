@@ -287,7 +287,7 @@ for _section, _endpoints in {
               "connections_webmim_orders", "connections_webmim_orders_check", "description_page", "description_save", "addresses_page",
               "addresses_save", "point_rules", "connections_points_page", "connections_points_code", "connections_points_delete",
               "connections_points_save", "connections_vk_page", "connections_vk", "connections_openai_page", "connections_openai",
-              "connections_openai_clear", "connections_sheet_page", "connections_sheet", "connections_sheet_check",
+              "connections_openai_clear", "connections_sheet_page", "connections_sheet", "connections_sheet_check", "connections_sheet_repair",
               "photos_agent_token", "orders_settings_page", "orders_duty", "orders_return_task", "orders_reserve_words",
               "orders_command_delete", "orders_command_add", "orders_default_responsible", "orders_rule_delete", "orders_rule_toggle",
               "orders_rule_add", "orders_stage_delete", "orders_stage_shift", "orders_stage_update", "orders_stage_add",

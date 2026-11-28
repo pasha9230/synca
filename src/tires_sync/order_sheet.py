@@ -939,6 +939,244 @@ def _restore_order(conn, card_id: int, marks: List[str], url: str, secret: str, 
     return out
 
 
+# ---- rows wiped by hand (the owner 28.11) --------------------------------------------------------------------------------------------
+# A row of the sheet cleared by hand keeps only its hidden mark «tires_id»: the script answers «edited» (its «Артикул» and «Телефон» are not
+# what the panel wrote) and the panel stops following it (`_missing`). `python -m tires_sync sheet-repair-blank` (and the owner's button in
+# «Подключения → Google-таблица») asks the script of 28.11 about every row written of the orders followed («Вести заказы, оформленные с»):
+# a row whose BLANK cells are all empty is written again with the panel's data, as a new position (every column but «Примечание»: never
+# written by the repair, the owner's), its fill as the order's (grey before «Заказ оформлен», none after). A row with something else in it
+# (corrected by hand) is never written over: it is only listed. A row whose mark is nowhere (its hidden cell cleared too, or deleted) of an
+# open order (OPEN_STAGES) is made again at the end of the sheet, as «gone» in send_order; of a closed one it is only listed.
+# A script before 28.11 knows nothing of «repair»: each row goes with a check on a column no sheet has (REPAIR_CHECK), so the old script
+# answers «edited» or «gone» and writes nothing; the panel sees no «repair» in its answers and says a new deployment is needed.
+
+BLANK = ("Артикул", "Телефон", "Наименование", "Кол-во")
+REPAIR_CHECK = {"tires_repair": "28.11"}                     # no sheet has this column: an old script never writes such a row
+REPAIR_CHUNK = 50                                            # rows per call: one call holds the script's lock for one pass over the sheet
+REPAIRED = "Строка Google-таблицы была стёрта вручную — данные заказа записаны заново: %d стр."
+OLD_SCRIPT = ("Скрипт таблицы не умеет искать пустые строки: нужно новое развертывание Apps Script (текст от 28.11). "
+              "Ничего не записано.")
+SHOWN = ("Артикул", "Наименование", "Кол-во", "Имя", "Телефон", "№ заказа MIM", "Этап")
+PARTIAL = "_repair_partial"                                  # a row repaired without some column (the script said why): the values of
+                                                             # those columns are not kept as written, so the next send (an UPDATED one)
+                                                             # and the next repair (any one, by a plain update) write them; taken off then
+
+
+def _lacking(why: str) -> List[str]:
+    """The columns of «нет колонок: A, B (остальное записано)»."""
+    m = re.match(r"нет колонок:\s*(.*?)(?:\s*\(|$)", why or "")
+    return [c.strip() for c in m.group(1).split(",") if c.strip()] if m else []
+
+
+def repair_candidates(conn) -> List[dict]:
+    """The rows written of every order followed (any stage, «Вести заказы, оформленные с»; never a record of storage — its client's row
+    is the one), the position still in the order: {"order_id", "key", "op", "verify", "open", "partial", "note"}. `op`: what a new row
+    would get (changes) without «Примечание», `shade` the order's fill; `verify`: the cells of CHECK as the panel wrote them; `open`: the
+    order is on OPEN_STAGES; `partial`: why an earlier repair wrote it without some column; `note`: the panel's «Примечание» of a sale
+    from OTH (NOTE_FLAG), never written by the repair. Never a row the panel removed (`_removed`) nor a position taken out (`_gone`)."""
+    kept, day = _kept(conn)
+    found = []
+    for card_id, placed_at, rows, code in conn.execute(
+            "SELECT s.order_id, s.placed_at, s.rows, st.code FROM sheet_order s JOIN order_card c ON c.id = s.order_id"
+            " JOIN order_stage st ON st.id = c.stage_id WHERE s.order_id NOT IN (SELECT CAST(substr(key, 13) AS INTEGER) FROM app_state"
+            " WHERE key LIKE 'oth_storage:%')" + kept + " ORDER BY s.order_id", day).fetchall():
+        written = json.loads(rows or "{}")
+        marks = [m for m, row in written.items() if not row.get("_removed") and not row.get("_gone")]
+        if not marks:
+            continue
+        try:
+            current = rows_of(conn, card_id, placed_at)
+            grey = not listed(conn, card_id)
+        except Exception:                                                  # one broken order never stops the others (as flush)
+            log.exception("the Google table: the rows of order %s", card_id)
+            continue
+        for m in marks:
+            if m in current:
+                op = changes({m: current[m]}, {}, grey=grey)[0]
+                extra = {c: v for c, v in (op.get("extra") or {}).items() if c != "Примечание"}
+                op = dict({k: v for k, v in op.items() if k not in ("extra", "shade")}, shade=grey, **({"extra": extra} if extra else {}))
+                found.append({"order_id": card_id, "key": m, "op": op, "verify": {c: written[m].get(c, "") for c in CHECK},
+                              "open": code in OPEN_STAGES, "partial": str(written[m].get(PARTIAL) or ""),
+                              "note": current[m].get("Примечание") if current[m].get(NOTE_FLAG) else None})
+    return found
+
+
+def _repair_op(c: dict, probe: bool) -> dict:
+    """A row asked about (`probe`) or written again in place: its fill set and taken off as the order's (`shade`, as a send does)."""
+    op = c["op"]
+    out = {"key": c["key"], "create": False, "fields": {} if probe else op["fields"], "check": dict(REPAIR_CHECK), "repair": list(BLANK),
+           "verify": c["verify"]}
+    if probe:
+        out["probe"] = True
+    else:
+        out.update({k: op[k] for k in ("extra", "shade") if k in op})
+    return out
+
+
+def _create_op(c: dict) -> dict:
+    """A row with no mark: a new row (changes), «Примечание» never written; grey only for an order before «Заказ оформлен»."""
+    op = {k: v for k, v in c["op"].items() if k != "shade"}
+    return dict(op, create=True, **({"shade": True} if c["op"]["shade"] else {}))
+
+
+def _ask(http: Transport, url: str, secret: str, ops: List[dict], repair: bool = True) -> Dict[str, dict]:
+    """The script's answers, by mark, chunk by chunk: a chunk that failed answers «error» for its own rows only, the others stand.
+    `repair`: a script before 28.11 (no «repair» in an answer) raises SheetError(OLD_SCRIPT)."""
+    out: Dict[str, dict] = {}
+    for i in range(0, len(ops), REPAIR_CHUNK):
+        part = ops[i:i + REPAIR_CHUNK]
+        try:
+            answer = call(http, url, {"secret": secret, "sheet": SHEET, "rows": part})
+        except SheetError as err:
+            out.update({op["key"]: {"status": "error", "error": str(err)[:200]} for op in part})
+            continue
+        for r in answer.get("results") or []:
+            if isinstance(r, dict):
+                if repair and r.get("repair") is not True:
+                    raise SheetError(OLD_SCRIPT)
+                out[str(r.get("key"))] = r
+    return out
+
+
+def what_goes(op: dict) -> str:
+    """The values to be written, in a line: the columns a person knows the row by, then how many more."""
+    values = dict(op["fields"], **op.get("extra", {}))
+    shown = ["%s: %s" % (c, values[c]) for c in SHOWN if values.get(c) not in ("", None)]
+    rest = sum(1 for c, v in values.items() if c not in SHOWN and v not in ("", None, False))
+    return "; ".join(shown) + (" (+%d кол.)" % rest if rest else "")
+
+
+def _line(c: dict, result: str, reply: Optional[dict] = None, values: str = "") -> dict:
+    row = (reply or {}).get("row")
+    return {"order_id": c["order_id"], "key": c["key"], "result": result, "values": values,
+            "sheet_row": row if isinstance(row, int) and not isinstance(row, bool) else None}
+
+
+EDITED_SAID = "правлена вручную (другой артикул/телефон) — не трогаем"
+GONE_SAID = "метки на листе нет — будет создана заново в конце листа (пустую строку без метки удалите вручную)"
+GONE_CLOSED = "метки на листе нет, заказ закрыт — не создаём"
+REMADE_SAID = "метки на листе не было — создана заново в конце листа"
+PARTIAL_SAID = "записана не полностью (%s): добавьте колонку на лист, затем проверьте строку"
+
+
+def repair_blank(conn, box, http: Transport, now: str, author: str = "cli", dry_run: bool = False) -> List[dict]:
+    """The rows wiped by hand (see above), order by order: {"order_id", "key", "result", "values", "sheet_row"} (`sheet_row`: the row of
+    the sheet, as the script finds it now; None when the mark is nowhere). A row the script finds as written is not listed (unless an
+    earlier repair wrote it without some column). A row with no mark at all (wiped with its hidden cell too, or deleted) cannot be found
+    by it: of an open order it is made again at the end of the sheet as send_order does with «gone» (the owner 2026-11-11), and the blank
+    row left without a mark is the owner's to delete; of a closed order it is only listed. `dry_run`: the script is only asked (nothing
+    written there) and nothing is written in the base. `now`: Moscow time (the order's journal). A script before 28.11:
+    SheetError(OLD_SCRIPT), nothing written."""
+    s = settings(conn)
+    if not (s["enabled"] and s["url"]):
+        raise SheetError("Google-таблица выключена или адрес не задан: включите её в «Подключения → Google-таблица».")
+    secret = _secret(conn, box, s) if box is not None else None
+    if not secret:
+        raise SheetError("Секрет Google-таблицы не задан (или ключ не передан): ничего не отправлено.")
+    found = repair_candidates(conn)
+    if not found:
+        return []
+    probed = _ask(http, s["url"], secret, [_repair_op(c, True) for c in found])
+    out: List[dict] = []
+    blank, gone, finish = [], [], []
+    for c in found:
+        reply = probed.get(c["key"]) or {}
+        status = str(reply.get("status") or "нет ответа")
+        if status == "blank":
+            blank.append(c)
+        elif status == GONE:
+            if c["open"]:
+                gone.append(c)
+            else:
+                out.append(_line(c, GONE_CLOSED))
+        elif status == EDITED:
+            out.append(_line(c, EDITED_SAID, reply))
+        elif status == "filled":
+            if c["partial"]:
+                (finish.append(c) if not dry_run else out.append(_line(c, PARTIAL_SAID % c["partial"], reply)))
+        else:
+            out.append(_line(c, "ошибка: %s" % str(reply.get("error") or status)[:200], reply))
+    if dry_run:
+        return ([_line(c, "пустая — будет записано", probed.get(c["key"]), what_goes(c["op"])) for c in blank]
+                + [_line(c, GONE_SAID, None, what_goes(c["op"])) for c in gone] + out)
+    claimed = [o for o in sorted({c["order_id"] for c in blank + gone + finish}) if _claim(conn, o, now)]
+    out += [_line(c, "занят другой отправкой") for c in blank + gone + finish if c["order_id"] not in claimed]
+    try:
+        return _repair_write(conn, http, s["url"], secret, now, author, claimed, blank, gone, finish) + out
+    finally:                                                               # whatever happened, no order stays claimed
+        for card_id in claimed:
+            conn.execute("UPDATE sheet_order SET claim_until = '' WHERE order_id = ?", (card_id,))
+        conn.commit()
+
+
+def _repair_write(conn, http: Transport, url: str, secret: str, now: str, author: str, claimed: List[int], blank: List[dict],
+                  gone: List[dict], finish: List[dict]) -> List[dict]:
+    """repair_blank past the look: the blank rows written in place, the rows without a mark made again, the rows written earlier without
+    some column finished by a plain update of those columns (checked by CHECK as written). The script is known to be of 28.11 here."""
+    going, making = [c for c in blank if c["order_id"] in claimed], [c for c in gone if c["order_id"] in claimed]
+    ending = [c for c in finish if c["order_id"] in claimed]
+    answers = _ask(http, url, secret, [_repair_op(c, False) for c in going], repair=False) if going else {}
+    if making:
+        answers.update(_ask(http, url, secret, [_create_op(c) for c in making], repair=False))
+    if ending:
+        values = lambda c: dict(c["op"]["fields"], **c["op"].get("extra", {}))
+        answers.update(_ask(http, url, secret, [{"key": c["key"], "create": False, "check": c["verify"], "fields":
+                                                {k: values(c)[k] for k in _lacking(c["partial"]) if k in values(c)}} for c in ending], repair=False))
+    done: List[dict] = []
+    for card_id in claimed:
+        written = json.loads(conn.execute("SELECT rows FROM sheet_order WHERE order_id = ?", (card_id,)).fetchone()[0] or "{}")
+        fixed = remade = 0
+        for c in [c for c in ending if c["order_id"] == card_id]:
+            reply = answers.get(c["key"]) or {}
+            status, why = str(reply.get("status") or "нет ответа"), str(reply.get("error") or "")[:200]
+            if status == "updated":
+                written[c["key"]].update({k: v for k, v in dict(c["op"]["fields"], **c["op"].get("extra", {})).items() if k in _lacking(c["partial"])})
+                written[c["key"]].pop(PARTIAL, None)
+                done.append(_line(c, "дописана: %s" % ", ".join(_lacking(c["partial"])), reply))
+            elif status == "error" and why.startswith("нет колонок"):
+                done.append(_line(c, PARTIAL_SAID % why, reply))
+            else:
+                done.append(_line(c, "ошибка: %s" % (why or status), reply))
+        for c in [c for c in going + making if c["order_id"] == card_id]:
+            reply = answers.get(c["key"]) or {}
+            status = str(reply.get("status") or "нет ответа")
+            new = c in making
+            why = str(reply.get("error") or "")[:200]
+            partial = status == "error" and why.startswith("нет колонок")      # the rest is written (the script of 23.11): taken, listed
+            if status in (("created", "updated") if new else ("repaired",)) or partial:
+                op = _create_op(c) if new else c["op"]
+                written[c["key"]] = dict(op["fields"], **op.get("extra", {}))
+                if c["note"] is not None:                                   # the panel's note of a sale from OTH: never written, and
+                    written[c["key"]]["Примечание"] = c["note"]             # the next send does not take it for a change either
+                if op.get("shade"):
+                    written[c["key"]]["_grey"] = True
+                elif not new:
+                    written[c["key"]]["_grey"] = False
+                if partial:                                                 # not kept as written: the next send writes them
+                    for k in _lacking(why):
+                        written[c["key"]].pop(k, None)
+                    written[c["key"]][PARTIAL] = why
+                remade, fixed = remade + new, fixed + (not new)
+                said = PARTIAL_SAID % why if partial else (REMADE_SAID if new else "записана заново")
+                done.append(_line(c, said, reply, what_goes(op)))
+            elif status in (EDITED, "filled"):                             # typed into between the two calls: left alone
+                done.append(_line(c, EDITED_SAID, reply))
+            else:
+                done.append(_line(c, "ошибка: %s" % (why or status), reply))
+        if fixed:
+            orders.add_event(conn, card_id, now, AUTHOR, "sheet", REPAIRED % fixed)
+        if remade:
+            orders.add_event(conn, card_id, now, AUTHOR, "sheet", REMADE % remade)
+        conn.execute("UPDATE sheet_order SET rows = ?, claim_until = '' WHERE order_id = ?", (json.dumps(written, ensure_ascii=False), card_id))
+        conn.commit()
+    repaired = [d for d in done if d["result"] in ("записана заново", REMADE_SAID) or d["result"].startswith("записана не полностью")
+                and d["key"] not in {c["key"] for c in ending}]
+    if repaired:
+        store.write_audit(conn, now, author, "sheet_repair_blank", {"rows": len(repaired), "orders": len({d["order_id"] for d in repaired}),
+                                                                    "remade": sum(d["result"] == REMADE_SAID for d in repaired)})
+        conn.commit()
+    return done
+
 def flush(conn, box, http: Transport, now: str, full: bool = False, limit: Optional[int] = None) -> Dict[int, str]:
     """Send the queued orders whose rows changed (order → what happened). The table off, no address or no secret: nothing goes."""
     s = settings(conn)

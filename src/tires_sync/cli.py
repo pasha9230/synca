@@ -174,6 +174,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sr.add_argument("--db", required=True)
     sr.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
     sr.add_argument("--dry-run", action="store_true", help="только показать список, ничего не отправлять и не менять")
+    sb = sub.add_parser("sheet-repair-blank", help="строки Google-таблицы, стёртые вручную (осталась только метка tires_id): записать заново данными панели; правленные руками только перечислить (нужен скрипт таблицы от 28.11; сделайте копию базы до этого)")
+    sb.add_argument("--db", required=True)
+    sb.add_argument("--key-file", default=os.environ.get("TIRES_SECRET_KEY_FILE", ""))
+    sb.add_argument("--dry-run", action="store_true", help="только спросить таблицу и показать список: заказ, метка, что будет записано; ничего не писать")
     idm = sub.add_parser("inbox-dismiss", help="закрыть строки «Входящих» без ответа (статус ignored): точке и клиенту ничего не отправляется; только перечисленные")
     idm.add_argument("--db", required=True)
     idm.add_argument("--id", type=int, action="append", required=True, help="номер строки «Входящих» (manager_message.id); можно несколько раз")
@@ -1441,6 +1445,24 @@ def _cmd_sheet_restore_missing(args) -> int:
     for d in done:
         print("№%d · %s · %s" % (d["order_id"], d["key"], d["result"]))
     print("строк: %d%s" % (len(done), " (проверка: ничего не отправлено и не записано)" if args.dry_run else ""))
+    return 0
+
+
+def _cmd_sheet_repair_blank(args) -> int:
+    """sheet-repair-blank: the rows of the sheet wiped by hand (only the mark left) get the panel's data again; a row corrected by hand is
+    only listed. --dry-run asks the sheet and lists, nothing is written. Needs the script of 28.11 (an older one: an error, nothing written)."""
+    from . import order_sheet
+    conn = store.connect(args.db)
+    try:
+        box = load_box(args.key_file) if args.key_file else None
+        done = order_sheet.repair_blank(conn, box, _http(), moscow_now().isoformat(timespec="seconds"), author="cli", dry_run=args.dry_run)
+    except order_sheet.SheetError as err:
+        print("ошибка: %s" % err, file=sys.stderr)
+        return 1
+    for d in done:
+        where = " · строка листа %d" % d["sheet_row"] if d.get("sheet_row") else ""
+        print("№%d · %s%s · %s%s" % (d["order_id"], d["key"], where, d["result"], (": " + d["values"]) if d["values"] else ""))
+    print("строк: %d%s" % (len(done), " (проверка: в таблицу и в базу ничего не записано)" if args.dry_run else ""))
     return 0
 
 
@@ -3440,6 +3462,8 @@ def main(argv=None) -> int:
             return _cmd_sheet_cancel_remove(args)
         if args.command == "sheet-restore-missing":
             return _cmd_sheet_restore_missing(args)
+        if args.command == "sheet-repair-blank":
+            return _cmd_sheet_repair_blank(args)
         if args.command == "inbox-dismiss":
             return _cmd_inbox_dismiss(args)
         if args.command == "reserve-wait-list":
